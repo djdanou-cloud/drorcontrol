@@ -25,7 +25,7 @@ def parse_ts(s): return dt.datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tz
 def slug(s): return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:48] or "x"
 
 def read(p):
-    t = p.read_text()
+    t = p.read_text(encoding="utf-8")
     meta, body = {}, t
     if t.startswith("---\n"):
         head, _, body = t[4:].partition("\n---\n")
@@ -36,7 +36,8 @@ def read(p):
 
 def write(p, meta, body=""):
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text("---\n" + "".join(f"{k}: {v}\n" for k, v in meta.items()) + "---\n" + body.rstrip() + "\n")
+    p.write_text("---\n" + "".join(f"{k}: {v}\n" for k, v in meta.items()) + "---\n" + body.rstrip() + "\n",
+                 encoding="utf-8", newline="\n")
     print("wrote", p.relative_to(ROOT.parent.parent))
 
 def files(sub): return sorted(p for p in (ROOT / sub).glob("*.md") if not p.name.startswith("_"))
@@ -125,7 +126,7 @@ def cmd_board(a):
     out += ["", "## Recent messages (latest 15)", "", "| When | From → To | Type | Subject |", "|---|---|---|---|"]
     for p in files("log")[-15:][::-1]:
         m, _ = read(p); out.append(f"| {m['created']} | {m['from']} → {m['to']} | {m['type']} | [{m['subject']}](log/{p.name}) |")
-    (ROOT / "BOARD.md").write_text("\n".join(out) + "\n"); print("wrote docs/coordination/BOARD.md")
+    (ROOT / "BOARD.md").write_text("\n".join(out) + "\n", encoding="utf-8", newline="\n"); print("wrote docs/coordination/BOARD.md")
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)

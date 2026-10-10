@@ -15,7 +15,7 @@ NOTE = ("<!-- GENERATED from .claude/skills/drorcontrol-ui/SKILL.md by scripts/s
         "- do not edit; edit the source and re-run the script. -->")
 
 def body():
-    t = SRC.read_text()
+    t = SRC.read_text(encoding="utf-8")
     assert t.startswith("---\n")
     return t.split("\n---\n", 1)[1].lstrip("\n")
 
@@ -82,9 +82,9 @@ def main():
     for p, text in outs:
         if not text.endswith("\n"): text += "\n"
         if "--check" in sys.argv:
-            if not p.exists() or p.read_text() != text: stale.append(p)
+            if not p.exists() or p.read_text(encoding="utf-8") != text: stale.append(p)
         else:
-            p.parent.mkdir(parents=True, exist_ok=True); p.write_text(text); print("wrote", p.relative_to(ROOT))
+            p.parent.mkdir(parents=True, exist_ok=True); p.write_text(text, encoding="utf-8", newline="\n"); print("wrote", p.relative_to(ROOT))
     if stale:
         print("STALE (run scripts/sync_skill.py):", *[str(s.relative_to(ROOT)) for s in stale], sep="\n  "); sys.exit(1)
     if "--check" in sys.argv: print("generated skill files up to date")
