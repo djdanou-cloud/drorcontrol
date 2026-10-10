@@ -4,7 +4,7 @@ Cadence: **2-week sprints**, quarterly planning, a **phase gate** at the end of 
 
 ```mermaid
 gantt
-  title DrorAero GCS — phase plan (illustrative start 2026-11-02)
+  title DrorControl — phase plan (illustrative start 2026-11-02)
   dateFormat  YYYY-MM-DD
   axisFormat  %b %y
   section Phases
@@ -41,7 +41,7 @@ gantt
 Deliverables
 * D0-1 Repo, monorepo layout, `just`/`xtask`, CI on macOS arm64/x86_64, Windows, Linux; hermetic toolchains.
 * D0-2 `mavlink-codec` (generated dialect, v1/v2, signing), `mav-router`, serial/UDP/TCP links, tlog recorder; fuzz targets.
-* D0-3 Core daemon + gRPC + `core-ffi`; `dmp-cli` (connect, list params, dump telemetry).
+* D0-3 Core daemon + gRPC + `core-ffi`; `dc-cli` (connect, list params, dump telemetry).
 * D0-4 **macOS validation matrix**: IOKit enumeration/hotplug, baud tests, CDC/FTDI/CP210x/CH340 across macOS 13–26 and arm64/Intel ([03](03-macos-platform.md)); decide on CP210x fallback driver need.
 * D0-5 Spikes S0-1…S0-6 ([01 §9](01-architecture.md)) with written results → ADRs.
 * D0-6 Notarized universal "hello GCS" build; Apple multicast entitlement request filed; Developer ID + ASC key provisioned.

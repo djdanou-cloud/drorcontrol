@@ -78,10 +78,10 @@ flowchart LR
     NET[UDP / TCP / Ethernet]
     BLE[Bluetooth LE / SPP]
   end
-  subgraph Host["DrorAero GCS (host machine)"]
-    CORE[[dmp-core<br/>headless Rust daemon/library]]
+  subgraph Host["DrorControl (host machine)"]
+    CORE[[dc-core<br/>headless Rust daemon/library]]
     UI[Qt 6 / QML shell]
-    CLI[dmp-cli / test pilots / CI]
+    CLI[dc-cli / test pilots / CI]
     PLUG[Plugins & scripts<br/>Python, Lua over gRPC]
   end
   EXT[NTRIP caster · ADS-B receiver · Antenna tracker · Joystick · 3rd-party GCS]
@@ -252,7 +252,7 @@ flowchart LR
 Legacy MP embeds IronPython. We instead expose the full **gRPC API** (P1–P4) with generated clients (Python, Lua via `mlua` CLI host, TypeScript). Scripts/plugins run out-of-process under a supervisor (resource limits, permission manifest: *read telemetry*, *send commands*, *UI panels*). UI extensions are declarative QML panels loaded from signed bundles. Command-sending permission requires user opt-in per plugin and routes through the same safety interlocks ([08](08-safety-vv.md)).
 
 ## 8. Persistence & configuration
-SQLite (WAL) for settings, vehicle profiles, parameter snapshots, mission library, audit log; JSON/YAML export for sharing; OS keychain for secrets (NTRIP creds, MAVLink signing keys, tile API keys). Settings are versioned with forward migrations; all user data in OS-standard paths (`~/Library/Application Support/DrorAero GCS`, `%APPDATA%`, XDG).
+SQLite (WAL) for settings, vehicle profiles, parameter snapshots, mission library, audit log; JSON/YAML export for sharing; OS keychain for secrets (NTRIP creds, MAVLink signing keys, tile API keys). Settings are versioned with forward migrations; all user data in OS-standard paths (`~/Library/Application Support/DrorControl`, `%APPDATA%`, XDG).
 
 ## 9. Phase 0 de-risking spikes (exit criteria)
 

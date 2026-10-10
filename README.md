@@ -1,4 +1,4 @@
-# DrorAero Mission Planner (DrorAero GCS)
+# DrorControl
 
 Next-generation, cross-platform ArduPilot ground control station — native macOS and Windows, glass-cockpit UX, headless Rust core.
 

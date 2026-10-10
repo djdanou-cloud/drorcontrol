@@ -24,7 +24,7 @@ flowchart LR
   subgraph CI["CI runner (Linux/macOS)"]
     SITL["ArduPilot SITL binary<br/>(pinned tag, cached build)"]
     CHAOS["link-chaos proxy<br/>drop/delay/dup/reorder/corrupt"]
-    CORE["dmp-core headless"]
+    CORE["dc-core headless"]
     PILOT["Scenario runner (Rust/Python)<br/>asserts on state/events"]
     REC["tlog + dataflash artefacts"]
   end

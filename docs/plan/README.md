@@ -1,6 +1,6 @@
-# DrorAero GCS — Master Development Plan
+# DrorControl — Master Development Plan
 
-> Working name: **DrorAero GCS** (codename *Kestrel*). "Mission Planner" below always means the legacy ArduPilot Windows application; naming of the new product is an open item (see §5).
+> Product name: **DrorControl** (codename *Kestrel*; company brand: DrorAero). "Mission Planner" below always means the legacy ArduPilot Windows application.
 >
 > Status: **Plan v1.0 — for engineering/product review.** Owner: Principal Systems Architecture. Date: 2026-10-10.
 
@@ -57,7 +57,7 @@ A cross-platform ground control station (GCS) for ArduPilot vehicles that:
 ## 5. Open decisions (need owner sign-off before Phase 0 ends)
 
 1. **Licence & IP posture.** Mission Planner is GPLv3. The plan assumes a *clean-room* implementation from public specs and behavioural observation (reading GPL source to learn protocol behaviour is fine; copying code is not). Qt (LGPL, dynamic link), GStreamer (LGPL) permit a proprietary build; ArduPilot-derived assets (parameter metadata, SITL) are GPLv3 but consumed as *data/separate processes*. **Legal must confirm** before any MP source is imported. If DrorAero prefers GPLv3 for the GCS itself, code reuse from MP becomes possible and schedule drops ~8 %.
-2. **Product name / trademark** ("Mission Planner" is an ArduPilot community name).
+2. **Trademark clearance** for "DrorControl" (name confirmed; search/registration pending). Avoid "Mission Planner" in product marketing — it is an ArduPilot community name.
 3. **Urbane font licence** for redistribution inside the app bundle (fallback: Inter).
 4. **Apple multicast networking entitlement** requested early (lead time weeks).
 5. **Hebrew/RTL** is specified here as P1 (DrorAero is Israel-based) — confirm.

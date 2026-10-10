@@ -74,7 +74,7 @@ trait SerialBackend { fn list() -> Vec<PortInfo>; fn open(&PortInfo, &Config) ->
 ### 4.1 Decision (ADR-0005)
 Distribute **outside the Mac App Store** with **Developer ID + Hardened Runtime + notarization**. App Sandbox is **off** in v1 because: SITL supervisor spawns/downloads executables, plugins/scripts run as child processes, users pick arbitrary log/mission/DEM paths, and bundled GStreamer plugins are loaded dynamically. A **sandboxed MAS variant** is a separate later target (feasible subset: serial, network, user-selected file access via security-scoped bookmarks; SITL and plugin features reduced).
 
-### 4.2 Hardened Runtime entitlements (`DrorAeroGCS.entitlements`)
+### 4.2 Hardened Runtime entitlements (`DrorControl.entitlements`)
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -112,9 +112,9 @@ Distribute **outside the Mac App Store** with **Developer ID + Hardened Runtime 
 
 ### 5.1 Steps
 1. Build arm64 + x86_64 → lipo → assemble `.app` (`macdeployqt` then our post-processor).
-2. **Inside-out signing**: every `.dylib`, `.so`, framework, XPC, helper tool (`dmp-core-daemon`, `gst-plugin-scanner`) individually: `codesign --force --timestamp --options runtime --sign "$IDENT" --entitlements …` — then the main bundle last. Never `--deep` for final signing.
+2. **Inside-out signing**: every `.dylib`, `.so`, framework, XPC, helper tool (`dc-core-daemon`, `gst-plugin-scanner`) individually: `codesign --force --timestamp --options runtime --sign "$IDENT" --entitlements …` — then the main bundle last. Never `--deep` for final signing.
 3. Create `.dmg` (create-dmg), sign it.
-4. `xcrun notarytool submit DrorAeroGCS.dmg --key AuthKey.p8 --key-id … --issuer … --wait` ; on failure fetch `notarytool log` and attach to the job.
+4. `xcrun notarytool submit DrorControl.dmg --key AuthKey.p8 --key-id … --issuer … --wait` ; on failure fetch `notarytool log` and attach to the job.
 5. `xcrun stapler staple` and validate: `spctl --assess --type open --context context:primary-signature -v`, `codesign --verify --deep --strict --verbose=2`.
 6. Sparkle: generate EdDSA-signed appcast; publish to release bucket.
 
@@ -144,9 +144,9 @@ jobs:
         run: ./packaging/macos/import-cert.sh   # decodes secrets.MACOS_CERT_P12 into a temp keychain, deleted in 'always()' step
         env: { P12: ${{ secrets.MACOS_CERT_P12 }}, P12_PASS: ${{ secrets.MACOS_CERT_PASS }} }
       - run: cargo xtask package-macos --universal --sign "$IDENT"
-      - run: cargo xtask notarize --dmg dist/DrorAeroGCS.dmg
+      - run: cargo xtask notarize --dmg dist/DrorControl.dmg
         env: { ASC_KEY: ${{ secrets.ASC_API_KEY_P8 }}, ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}, ASC_ISSUER: ${{ secrets.ASC_ISSUER }} }
-      - run: ./packaging/macos/verify.sh dist/DrorAeroGCS.dmg   # spctl, stapler validate, lipo -archs
+      - run: ./packaging/macos/verify.sh dist/DrorControl.dmg   # spctl, stapler validate, lipo -archs
       - uses: actions/upload-artifact@v4
         with: { name: dmg, path: dist/*.dmg }
 ```

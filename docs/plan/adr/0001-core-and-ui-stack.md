@@ -19,7 +19,7 @@ macOS fidelity (20 %), GPU pipeline (15 %), throughput/latency determinism (15 %
 | **D Rust core + Qt 6/QML** | **4.15** |
 
 ## Decision
-We will implement protocol, state, logs, geo and video-pipeline management in Rust (`dmp-core`), and the presentation layer in Qt 6/QML (C++20 glue), connected through our own stable `core-ffi` boundary (C ABI + schema'd payloads), with `cxx-qt` used as an implementation detail of the bridge, not as the architecture.
+We will implement protocol, state, logs, geo and video-pipeline management in Rust (`dc-core`), and the presentation layer in Qt 6/QML (C++20 glue), connected through our own stable `core-ffi` boundary (C ABI + schema'd payloads), with `cxx-qt` used as an implementation detail of the bridge, not as the architecture.
 
 ## Consequences
 * + Memory-safe parsers/state machines; Qt RHI Metal rendering, native menus/gestures; core reusable headless in CI.

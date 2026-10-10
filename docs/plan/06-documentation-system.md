@@ -21,7 +21,7 @@ docs/
     ui-api/                generated: Doxygen (C++/QML), qmldoc
     mavlink/               generated from XML: messages, enums, commands + ArduPilot behaviour notes
     parameters/            generated from ArduPilot metadata per firmware version
-    errors/                DMP-Exxxx / DMP-Wxxxx catalogue (source of truth for in-app errors)
+    errors/                DC-Exxxx / DC-Wxxxx catalogue (source of truth for in-app errors)
     cli/                   generated from clap definitions
   dev/                     onboarding, build, test, debug, release, style guides
   protocol/                routing flowcharts, dialect guide, link setup, pinouts, modem manuals
@@ -39,7 +39,7 @@ mkdocs.yml  doxygen/  buf.yaml  vale/  lychee.toml
 | C++/QML API | Doxygen (XML) → `mkdoxy`/Breathe-style include; qmldoc | Matches Qt conventions |
 | TypeScript (remote viewer/web tools, docs plugins) | TypeDoc | Typed API pages |
 | gRPC/Protobuf | `buf` (lint + breaking-change detection) + `protoc-gen-doc` | Schema compatibility is a CI gate |
-| MAVLink | In-house generator reading pinned XML (`all`, `ardupilotmega`) → Markdown pages with field tables and "routing & handling in DMP" annotations | Single source of truth |
+| MAVLink | In-house generator reading pinned XML (`all`, `ardupilotmega`) → Markdown pages with field tables and "routing & handling in DrorControl" annotations | Single source of truth |
 | Diagrams | Mermaid + Structurizr/C4-PlantUML for C4; diagrams in-repo as text | Diffable |
 | Prose quality | **Vale** (style guide: DrorAero tone — concise, rigorous, direct), markdownlint, codespell | Consistent voice per brand guide |
 | Links | **lychee** | No dead links |
@@ -60,8 +60,8 @@ The ADD is reviewed each phase gate; diagrams are generated from code where poss
 
 ### 4.3 API references (headless core & IPC)
 * **Rust core**: rustdoc per crate, with a "stability" tag (`stable`, `unstable`, `internal`); examples are doctests; `cargo public-api`/`cargo-semver-checks` guard semver.
-* **gRPC**: `proto/dmp/v1/*.proto` fully commented; generated reference with RPC lifecycle diagrams (unary, streaming, cancellation semantics); `buf breaking` against last release; client SDK samples in Python/Rust/TypeScript compiled in CI.
-* **FFI / C ABI**: header `dmp_core.h` documented with ownership/threading/lifetime rules for every function; ABI version constant checked at load.
+* **gRPC**: `proto/dc/v1/*.proto` fully commented; generated reference with RPC lifecycle diagrams (unary, streaming, cancellation semantics); `buf breaking` against last release; client SDK samples in Python/Rust/TypeScript compiled in CI.
+* **FFI / C ABI**: header `dc_core.h` documented with ownership/threading/lifetime rules for every function; ABI version constant checked at load.
 * **State & events schema**: JSON-Schema/FlatBuffers definitions for `TelemetrySnapshot`, `Event`, with field semantics, units, validity rules and update rates.
 * **QML API**: every public component documented with `\qmltype` blocks and a live example in the component gallery.
 
@@ -118,7 +118,7 @@ flowchart TD
 ```
 
 2. **Dialect extension guide**: add custom messages/commands (ID ranges: MAVLink "user" ranges), XML authoring, generator invocation, versioning rules, handling `incompat_flags`, extension fields, test fixtures, doc-page generation, how to expose in the UI.
-3. **Message catalogue pages** (per message): fields, units, rate defaults, who sends/consumes, DMP handling, known firmware quirks (e.g. `STATUSTEXT` chunking, `PARAM_VALUE` ordering, `MISSION_ITEM_INT` frame semantics).
+3. **Message catalogue pages** (per message): fields, units, rate defaults, who sends/consumes, DrorControl handling, known firmware quirks (e.g. `STATUSTEXT` chunking, `PARAM_VALUE` ordering, `MISSION_ITEM_INT` frame semantics).
 4. **Hardware connection manuals**
    * **Autopilot ports:** `SERIALn_PROTOCOL/BAUD` tables, pinouts for common FCs (Cube/Pixhawk 6X/Matek/Kakute), JST-GH wiring, power budgets, voltage levels.
    * **Telemetry radios:** RFD900x/RFD900ux (SiK AT config, `NETID`, air-rate, TX power legal limits per region), Holybro/3DR SiK 433/915 MHz, wiring to FC TELEM ports, ground-side USB, range/antenna guidance.
@@ -146,7 +146,7 @@ Standards: each procedure has *Purpose · Preconditions · Steps (numbered, one 
 
 ## 7. In-app contextual help system
 * **Offline help engine:** `help.bundle` (SQLite FTS5) containing handbook pages, parameter docs for the connected firmware version, error catalogue, and protocol notes. Search-as-you-type (<30 ms), typo-tolerant, filters by vehicle/phase.
-* **Deep links** by stable IDs: `param:ATC_RAT_RLL_P`, `err:DMP-E1042`, `msg:STATUSTEXT/PreArm: Compass not calibrated`, `ui:setup/compass`, `cmd:NAV_WAYPOINT`. 
+* **Deep links** by stable IDs: `param:ATC_RAT_RLL_P`, `err:DC-E1042`, `msg:STATUSTEXT/PreArm: Compass not calibrated`, `ui:setup/compass`, `cmd:NAV_WAYPOINT`. 
 * **Contextual surfaces:** `?` button on every panel (opens side drawer at the right section); hover/long-press tooltips from metadata; STATUSTEXT console rows with “Explain” → matched via regex patterns table (`prearm_messages.yaml`: pattern → cause → fix → link); error dialogs always include a code and "What now?" action.
 * **Guided procedures:** step-by-step overlays (coach marks) for setup wizards, driven by the same procedure definitions as the handbook (single source → no divergence).
 * **Update path:** help bundle versioned by app + firmware metadata; delta updates over the app updater; works with zero connectivity.

@@ -16,7 +16,7 @@ flowchart LR
   S -->|parallel rayon workers| I1[Index chunk 1]
   S --> I2[Index chunk N]
   I1 & I2 --> MERGE[Merge: FMT table, per-type offset lists,<br/>time ranges, mode/event timeline]
-  MERGE --> IDX[(Sidecar index .dmpidx<br/>mmap-able, versioned, content-hash keyed)]
+  MERGE --> IDX[(Sidecar index .dcidx<br/>mmap-able, versioned, content-hash keyed)]
   IDX --> COL[Lazy columnar materialiser<br/>per msg-type × field → f64/i64 column]
   COL --> PYR[Multi-resolution min/max/mean pyramid<br/>levels ×4]
   PYR --> Q[Query: range + pixel width → decimated series]
