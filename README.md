@@ -12,6 +12,17 @@ cargo xtask ci               # what CI runs: fmt-check, clippy -D warnings, test
 cargo xtask help             # all developer tasks (`just` recipes wrap the same commands)
 ```
 
+Talk to a simulated vehicle (ArduPilot SITL, built from source; ~5 min the first time):
+
+```bash
+scripts/build_sitl.sh                    # -> .sitl/ardupilot-Copter-4.7.1/build/sitl/bin/arducopter
+(cd /tmp && <that binary> --model + --defaults <ardupilot>/Tools/autotest/default_params/copter.parm -I0 &)
+cargo run -p dc-cli -- params --connect tcp:127.0.0.1:5760 --out copter.param
+cargo run -p dc-cli -- telemetry --connect tcp:127.0.0.1:5760 --seconds 10
+cargo run -p dc-cli -- daemon --connect tcp:127.0.0.1:5760      # gRPC API (proto/dc/v1/core.proto)
+cargo run -p dc-cli -- remote vehicles                           # gRPC client
+```
+
 CI runs `cargo xtask ci` on Linux x86_64, Windows x86_64, macOS arm64 and macOS x86_64 (`.github/workflows/ci.yml`).
 
 ## Repository layout

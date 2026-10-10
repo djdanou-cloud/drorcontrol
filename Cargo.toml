@@ -15,7 +15,7 @@ repository = "https://github.com/djdanou-cloud/drorcontrol"
 [workspace.dependencies]
 link-core = { path = "crates/link-core" }
 mavlink-codec = { path = "crates/mavlink-codec" }
-tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util"] }
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util", "signal"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"     # crates that need FFI (core-ffi, platform-*) opt out with a crate-level allow + ADR note

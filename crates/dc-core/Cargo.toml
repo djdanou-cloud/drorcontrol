@@ -1,0 +1,22 @@
+[package]
+name = "dc-core"
+description = "DrorControl headless core: links, routing, vehicle state, protocols, recording."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+arc-swap = "1.9"
+link-core.workspace = true
+link-net = { path = "../link-net" }
+link-serial = { path = "../link-serial" }
+mav-router = { path = "../mav-router" }
+mavlink-codec.workspace = true
+protocols = { path = "../protocols" }
+recorder = { path = "../recorder" }
+tokio.workspace = true
+vehicle = { path = "../vehicle" }
+
+[lints]
+workspace = true

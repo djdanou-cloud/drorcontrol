@@ -1,0 +1,26 @@
+[package]
+name = "api"
+description = "DrorControl gRPC API v1: generated types, server over dc-core, and a client."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+dc-core = { path = "../dc-core" }
+mavlink-codec.workspace = true
+prost = "0.14"
+tokio.workspace = true
+tokio-stream = "0.1"
+tonic = "0.14"
+tonic-prost = "0.14"
+
+[build-dependencies]
+protox = "0.10"
+tonic-prost-build = "0.14"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+protocols = { path = "../protocols" }

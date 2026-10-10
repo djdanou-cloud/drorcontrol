@@ -1,0 +1,23 @@
+[package]
+name = "dc-cli"
+description = "DrorControl command-line tool: connect, dump parameters and telemetry, run the core daemon."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "dc-cli"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6", features = ["derive"] }
+api = { path = "../api" }
+dc-core = { path = "../dc-core" }
+mavlink-codec.workspace = true
+protocols = { path = "../protocols" }
+tokio.workspace = true
+tonic = "0.14"
+
+[lints]
+workspace = true

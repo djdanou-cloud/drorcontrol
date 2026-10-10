@@ -25,7 +25,7 @@ fi
 cd "$SRC"
 git submodule update --init --depth 1 --recursive \
   modules/waf modules/mavlink modules/DroneCAN/DSDL modules/DroneCAN/dronecan_dsdlc \
-  modules/DroneCAN/libcanard modules/DroneCAN/pydronecan modules/littlefs
+  modules/DroneCAN/libcanard modules/DroneCAN/pydronecan modules/littlefs modules/lwip
 export PATH="$WORK/venv/bin:$PATH"
 python ./waf configure --board sitl --no-submodule-update > "$WORK/configure-$VEHICLE.log" 2>&1 \
   || { tail -40 "$WORK/configure-$VEHICLE.log"; exit 1; }

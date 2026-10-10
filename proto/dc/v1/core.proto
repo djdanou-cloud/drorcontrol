@@ -1,0 +1,143 @@
+// DrorControl core API, version 1.
+//
+// Served by `dc-cli daemon` (and later the desktop app's embedded core) over gRPC.
+// Read-only in v1: parameter writes and vehicle commands arrive with the command-safety
+// layer (CommandPolicy, plan 08 §4) so remote clients cannot bypass interlocks.
+//
+// Compatibility: fields are only ever added (buf breaking-change check in CI, plan 06).
+syntax = "proto3";
+
+package dc.v1;
+
+service Core {
+  // Core identity and versions.
+  rpc GetInfo(GetInfoRequest) returns (Info);
+  // Open an additional link (same syntax as dc-cli --connect).
+  rpc OpenLink(OpenLinkRequest) returns (OpenLinkReply);
+  // Vehicles heard so far with their latest telemetry.
+  rpc ListVehicles(ListVehiclesRequest) returns (VehicleList);
+  // Download every parameter from a component (may take tens of seconds on slow links).
+  rpc GetParams(GetParamsRequest) returns (ParamList);
+  // Telemetry snapshots for one vehicle at a fixed rate.
+  rpc StreamTelemetry(StreamTelemetryRequest) returns (stream Vehicle);
+  // STATUSTEXT messages and link/vehicle events as they happen.
+  rpc StreamEvents(StreamEventsRequest) returns (stream Event);
+}
+
+message GetInfoRequest {}
+
+message Info {
+  string version = 1;        // crate version of dc-core
+  uint32 sysid = 2;          // our MAVLink system id
+  uint32 compid = 3;         // our MAVLink component id
+  string dialect = 4;        // root MAVLink XML, e.g. "ardupilotmega.xml"
+}
+
+message OpenLinkRequest {
+  string spec = 1;           // e.g. "tcp:127.0.0.1:5760", "udp:0.0.0.0:14550", "serial:/dev/ttyACM0:115200"
+}
+
+message OpenLinkReply {
+  uint32 link_id = 1;
+}
+
+message ListVehiclesRequest {}
+
+message VehicleList {
+  repeated Vehicle vehicles = 1;
+}
+
+// Latest telemetry for one system. Each group is absent until first received; `age_ms`
+// tells how old it is (UIs must flag stale data, plan 04 §4).
+message Vehicle {
+  uint32 sysid = 1;
+  optional HeartbeatState heartbeat = 2;
+  optional AttitudeState attitude = 3;
+  optional PositionState position = 4;
+  optional PowerState power = 5;
+  optional GpsState gps = 6;
+}
+
+message HeartbeatState {
+  uint32 age_ms = 1;
+  uint32 mav_type = 2;
+  uint32 autopilot = 3;
+  uint32 custom_mode = 4;   // ArduPilot flight mode number
+  bool armed = 5;
+  uint32 system_status = 6;
+}
+
+message AttitudeState {
+  uint32 age_ms = 1;
+  float roll_rad = 2;
+  float pitch_rad = 3;
+  float yaw_rad = 4;
+}
+
+message PositionState {
+  uint32 age_ms = 1;
+  double lat_deg = 2;
+  double lon_deg = 3;
+  float alt_msl_m = 4;
+  float alt_rel_m = 5;
+  optional float heading_deg = 6;
+}
+
+message PowerState {
+  uint32 age_ms = 1;
+  optional float voltage_v = 2;
+  optional float current_a = 3;
+  optional uint32 remaining_pct = 4;
+}
+
+message GpsState {
+  uint32 age_ms = 1;
+  uint32 fix_type = 2;
+  optional uint32 satellites = 3;
+  optional float hdop = 4;
+}
+
+message GetParamsRequest {
+  uint32 sysid = 1;          // 0 = first vehicle heard
+  uint32 compid = 2;         // 0 = autopilot (1)
+}
+
+message Param {
+  string name = 1;
+  float value = 2;
+  uint32 mav_param_type = 3;
+  uint32 index = 4;
+}
+
+message ParamList {
+  uint32 sysid = 1;
+  uint32 compid = 2;
+  repeated Param params = 3;
+}
+
+message StreamTelemetryRequest {
+  uint32 sysid = 1;          // 0 = first vehicle heard
+  float rate_hz = 2;         // 0 = 1 Hz; capped at 50 Hz
+}
+
+message StreamEventsRequest {}
+
+message Event {
+  oneof kind {
+    StatusTextEvent status_text = 1;
+    LinkEvent link = 2;
+    uint32 vehicle_seen = 3; // system id
+  }
+}
+
+message StatusTextEvent {
+  uint32 sysid = 1;
+  uint32 severity = 2;       // MAV_SEVERITY
+  string text = 3;
+}
+
+message LinkEvent {
+  uint32 link_id = 1;
+  bool up = 2;
+  string detail = 3;
+}

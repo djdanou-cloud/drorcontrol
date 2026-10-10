@@ -1,0 +1,20 @@
+[package]
+name = "core-ffi"
+description = "Stable C ABI over dc-core for the Qt/QML shell and other native hosts."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["rlib", "staticlib", "cdylib"]
+
+[dependencies]
+dc-core = { path = "../dc-core" }
+tokio.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+mavlink-codec.workspace = true

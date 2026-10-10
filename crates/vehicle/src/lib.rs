@@ -1,0 +1,428 @@
+//! Vehicle telemetry state.
+//!
+//! [`Fleet::apply`] folds incoming messages into one [`VehicleState`] per system id.
+//! Every group of fields carries the time it was last updated, so the UI can grey out or
+//! invalidate stale values instead of showing old numbers as live (plan 04 §4).
+//!
+//! Units are SI in the public fields (radians, metres, m/s, volts, amperes) — conversion
+//! from MAVLink's scaled integers happens here, once.
+
+use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
+
+use mavlink_codec::Message;
+use mavlink_codec::enums::MavModeFlag;
+
+/// Identity and mode from `HEARTBEAT`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Heartbeat {
+    /// Component that sent it.
+    pub compid: u8,
+    /// `MAV_TYPE`.
+    pub mav_type: u8,
+    /// `MAV_AUTOPILOT`.
+    pub autopilot: u8,
+    /// `MAV_MODE_FLAG` bits.
+    pub base_mode: u8,
+    /// Autopilot-specific mode number (ArduPilot flight mode).
+    pub custom_mode: u32,
+    /// `MAV_STATE`.
+    pub system_status: u8,
+    /// MAVLink version field.
+    pub mavlink_version: u8,
+}
+
+impl Heartbeat {
+    /// Motors armed (`MAV_MODE_FLAG_SAFETY_ARMED`).
+    pub fn armed(&self) -> bool {
+        self.base_mode & MavModeFlag::SAFETY_ARMED.0 != 0
+    }
+}
+
+/// `ATTITUDE`.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Attitude {
+    /// Roll, rad.
+    pub roll: f32,
+    /// Pitch, rad.
+    pub pitch: f32,
+    /// Yaw, rad.
+    pub yaw: f32,
+    /// Roll rate, rad/s.
+    pub roll_rate: f32,
+    /// Pitch rate, rad/s.
+    pub pitch_rate: f32,
+    /// Yaw rate, rad/s.
+    pub yaw_rate: f32,
+}
+
+/// `GLOBAL_POSITION_INT`.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Position {
+    /// Latitude, degrees.
+    pub lat_deg: f64,
+    /// Longitude, degrees.
+    pub lon_deg: f64,
+    /// Altitude above MSL, m.
+    pub alt_msl_m: f32,
+    /// Altitude above home, m.
+    pub alt_rel_m: f32,
+    /// Velocity north/east/down, m/s.
+    pub vel_ned: [f32; 3],
+    /// Heading, degrees (None when unknown).
+    pub heading_deg: Option<f32>,
+}
+
+/// `VFR_HUD`.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Hud {
+    /// Airspeed, m/s.
+    pub airspeed: f32,
+    /// Ground speed, m/s.
+    pub groundspeed: f32,
+    /// Altitude (MSL), m.
+    pub alt_m: f32,
+    /// Climb rate, m/s.
+    pub climb: f32,
+    /// Heading, degrees.
+    pub heading_deg: i16,
+    /// Throttle, percent.
+    pub throttle_pct: u16,
+}
+
+/// Battery and health from `SYS_STATUS`.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Power {
+    /// Battery voltage, V (None if not measured).
+    pub voltage: Option<f32>,
+    /// Battery current, A (None if not measured).
+    pub current: Option<f32>,
+    /// Remaining capacity, percent (None if unknown).
+    pub remaining_pct: Option<u8>,
+    /// Communication drop rate seen by the vehicle, percent.
+    pub drop_rate_pct: f32,
+}
+
+/// `GPS_RAW_INT`.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Gps {
+    /// `GPS_FIX_TYPE` (0 none … 6 RTK fixed).
+    pub fix_type: u8,
+    /// Satellites visible (None if unknown).
+    pub satellites: Option<u8>,
+    /// Horizontal dilution of precision (None if unknown).
+    pub hdop: Option<f32>,
+}
+
+/// A value plus when it was last updated.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Timed<T> {
+    /// Last value.
+    pub value: T,
+    /// Host time of the update.
+    pub at: Instant,
+}
+
+impl<T> Timed<T> {
+    /// Age at `now`.
+    pub fn age(&self, now: Instant) -> Duration {
+        now.saturating_duration_since(self.at)
+    }
+}
+
+/// Status text line (`STATUSTEXT`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatusText {
+    /// `MAV_SEVERITY` (0 emergency … 7 debug).
+    pub severity: u8,
+    /// Text without trailing NULs.
+    pub text: String,
+}
+
+/// Everything known about one system.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct VehicleState {
+    /// MAVLink system id.
+    pub sysid: u8,
+    /// Last heartbeat from the autopilot component.
+    pub heartbeat: Option<Timed<Heartbeat>>,
+    /// Attitude.
+    pub attitude: Option<Timed<Attitude>>,
+    /// Position.
+    pub position: Option<Timed<Position>>,
+    /// HUD values.
+    pub hud: Option<Timed<Hud>>,
+    /// Power.
+    pub power: Option<Timed<Power>>,
+    /// GPS.
+    pub gps: Option<Timed<Gps>>,
+    /// Messages applied, by message id.
+    pub message_counts: BTreeMap<u32, u64>,
+}
+
+/// Which component's HEARTBEAT defines the vehicle. Autopilots are component 1; other
+/// components (cameras, gimbals) also send heartbeats and must not overwrite mode/armed.
+pub const AUTOPILOT_COMPID: u8 = 1;
+/// `MAV_TYPE_GCS`: heartbeats from ground stations are not vehicles.
+pub const MAV_TYPE_GCS: u8 = 6;
+
+fn timed<T>(at: Instant, value: T) -> Option<Timed<T>> {
+    Some(Timed { value, at })
+}
+
+/// State of every system heard.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Fleet {
+    vehicles: BTreeMap<u8, VehicleState>,
+}
+
+impl Fleet {
+    /// Empty fleet.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// State of `sysid`, if heard.
+    pub fn get(&self, sysid: u8) -> Option<&VehicleState> {
+        self.vehicles.get(&sysid)
+    }
+
+    /// All systems heard, by id.
+    pub fn vehicles(&self) -> impl Iterator<Item = &VehicleState> {
+        self.vehicles.values()
+    }
+
+    /// Fold one message into the fleet. Returns the status text, if this was one, so the
+    /// caller can raise it as an event. Messages from ground stations are ignored.
+    pub fn apply(
+        &mut self,
+        sysid: u8,
+        compid: u8,
+        msg: &Message,
+        now: Instant,
+    ) -> Option<StatusText> {
+        if let Message::Heartbeat(h) = msg
+            && h.r#type == MAV_TYPE_GCS
+        {
+            return None;
+        }
+        let v = self.vehicles.entry(sysid).or_insert_with(|| VehicleState {
+            sysid,
+            ..Default::default()
+        });
+        *v.message_counts.entry(msg.id()).or_default() += 1;
+        match msg {
+            Message::Heartbeat(h) if compid == AUTOPILOT_COMPID || v.heartbeat.is_none() => {
+                v.heartbeat = timed(
+                    now,
+                    Heartbeat {
+                        compid,
+                        mav_type: h.r#type,
+                        autopilot: h.autopilot,
+                        base_mode: h.base_mode,
+                        custom_mode: h.custom_mode,
+                        system_status: h.system_status,
+                        mavlink_version: h.mavlink_version,
+                    },
+                );
+            }
+            Message::Attitude(a) => {
+                v.attitude = timed(
+                    now,
+                    Attitude {
+                        roll: a.roll,
+                        pitch: a.pitch,
+                        yaw: a.yaw,
+                        roll_rate: a.rollspeed,
+                        pitch_rate: a.pitchspeed,
+                        yaw_rate: a.yawspeed,
+                    },
+                );
+            }
+            Message::GlobalPositionInt(p) => {
+                v.position = timed(
+                    now,
+                    Position {
+                        lat_deg: f64::from(p.lat) * 1e-7,
+                        lon_deg: f64::from(p.lon) * 1e-7,
+                        alt_msl_m: p.alt as f32 / 1000.0,
+                        alt_rel_m: p.relative_alt as f32 / 1000.0,
+                        vel_ned: [
+                            f32::from(p.vx) / 100.0,
+                            f32::from(p.vy) / 100.0,
+                            f32::from(p.vz) / 100.0,
+                        ],
+                        heading_deg: (p.hdg != u16::MAX).then(|| f32::from(p.hdg) / 100.0),
+                    },
+                );
+            }
+            Message::VfrHud(h) => {
+                v.hud = timed(
+                    now,
+                    Hud {
+                        airspeed: h.airspeed,
+                        groundspeed: h.groundspeed,
+                        alt_m: h.alt,
+                        climb: h.climb,
+                        heading_deg: h.heading,
+                        throttle_pct: h.throttle,
+                    },
+                );
+            }
+            Message::SysStatus(s) => {
+                v.power = timed(
+                    now,
+                    Power {
+                        voltage: (s.voltage_battery != u16::MAX)
+                            .then(|| f32::from(s.voltage_battery) / 1000.0),
+                        current: (s.current_battery != -1)
+                            .then(|| f32::from(s.current_battery) / 100.0),
+                        remaining_pct: u8::try_from(s.battery_remaining).ok(),
+                        drop_rate_pct: f32::from(s.drop_rate_comm) / 100.0,
+                    },
+                );
+            }
+            Message::GpsRawInt(g) => {
+                v.gps = timed(
+                    now,
+                    Gps {
+                        fix_type: g.fix_type,
+                        satellites: (g.satellites_visible != u8::MAX)
+                            .then_some(g.satellites_visible),
+                        hdop: (g.eph != u16::MAX).then(|| f32::from(g.eph) / 100.0),
+                    },
+                );
+            }
+            Message::Statustext(s) => {
+                let end = s.text.iter().position(|&b| b == 0).unwrap_or(s.text.len());
+                return Some(StatusText {
+                    severity: s.severity,
+                    text: String::from_utf8_lossy(&s.text[..end]).into_owned(),
+                });
+            }
+            _ => {}
+        }
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mavlink_codec::messages::{GlobalPositionInt, Heartbeat as Hb, Statustext, SysStatus};
+
+    #[test]
+    fn folds_messages_into_si_units() {
+        let mut f = Fleet::new();
+        let now = Instant::now();
+        let hb = Hb {
+            r#type: 2,
+            autopilot: 3,
+            base_mode: 128 | 1,
+            custom_mode: 5,
+            ..Default::default()
+        };
+        f.apply(1, 1, &Message::Heartbeat(hb), now);
+        f.apply(
+            1,
+            1,
+            &Message::GlobalPositionInt(GlobalPositionInt {
+                lat: 473_977_418,
+                lon: 85_455_939,
+                alt: 488_000,
+                relative_alt: 10_500,
+                vx: 150,
+                hdg: u16::MAX,
+                ..Default::default()
+            }),
+            now,
+        );
+        f.apply(
+            1,
+            1,
+            &Message::SysStatus(SysStatus {
+                voltage_battery: 12_600,
+                current_battery: -1,
+                battery_remaining: -1,
+                ..Default::default()
+            }),
+            now,
+        );
+        let v = f.get(1).unwrap();
+        let hb = &v.heartbeat.as_ref().unwrap().value;
+        assert!(hb.armed());
+        assert_eq!(hb.custom_mode, 5);
+        let p = v.position.as_ref().unwrap().value;
+        assert!((p.lat_deg - 47.397_741_8).abs() < 1e-9);
+        assert_eq!(
+            (p.alt_rel_m, p.vel_ned[0], p.heading_deg),
+            (10.5, 1.5, None)
+        );
+        let pw = v.power.as_ref().unwrap().value;
+        assert_eq!(
+            (pw.voltage, pw.current, pw.remaining_pct),
+            (Some(12.6), None, None)
+        );
+        assert_eq!(v.message_counts[&0], 1);
+    }
+
+    #[test]
+    fn ignores_gcs_and_non_autopilot_heartbeats() {
+        let mut f = Fleet::new();
+        let now = Instant::now();
+        f.apply(
+            255,
+            190,
+            &Message::Heartbeat(Hb {
+                r#type: MAV_TYPE_GCS,
+                ..Default::default()
+            }),
+            now,
+        );
+        assert!(f.get(255).is_none(), "ground stations are not vehicles");
+
+        f.apply(
+            1,
+            1,
+            &Message::Heartbeat(Hb {
+                custom_mode: 4,
+                ..Default::default()
+            }),
+            now,
+        );
+        f.apply(
+            1,
+            100,
+            &Message::Heartbeat(Hb {
+                custom_mode: 99,
+                ..Default::default()
+            }),
+            now,
+        );
+        assert_eq!(
+            f.get(1)
+                .unwrap()
+                .heartbeat
+                .as_ref()
+                .unwrap()
+                .value
+                .custom_mode,
+            4,
+            "camera must not overwrite mode"
+        );
+    }
+
+    #[test]
+    fn returns_status_text() {
+        let mut f = Fleet::new();
+        let mut s = Statustext {
+            severity: 3,
+            ..Default::default()
+        };
+        s.text[..14].copy_from_slice(b"PreArm: RC not");
+        let t = f
+            .apply(1, 1, &Message::Statustext(s), Instant::now())
+            .unwrap();
+        assert_eq!((t.severity, t.text.as_str()), (3, "PreArm: RC not"));
+    }
+}
