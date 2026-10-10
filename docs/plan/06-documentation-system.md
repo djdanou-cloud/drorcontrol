@@ -72,7 +72,7 @@ Target: **new engineer builds, runs tests, and flies SITL in the UI in < 60 minu
 ```bash
 xcode-select --install                       # Command Line Tools
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-git clone https://github.com/djdanou-cloud/droraero-mission-planner && cd droraero-mission-planner
+git clone https://github.com/djdanou-cloud/drorcontrol && cd drorcontrol
 brew bundle --file=packaging/macos/Brewfile  # qt@6 (pinned), gstreamer, cmake, ninja, just, protobuf, buf, doxygen, pkg-config, create-dmg
 rustup show                                  # toolchain pinned by rust-toolchain.toml
 just bootstrap && just build && just test
