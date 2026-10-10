@@ -13,3 +13,5 @@ Thumbs.db
 .idea/
 # Local-only settings
 .claude/settings.local.json
+# Local ArduPilot SITL builds (scripts/build_sitl.sh)
+/.sitl/
