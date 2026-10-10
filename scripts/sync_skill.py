@@ -26,7 +26,7 @@ def relink(text, target):
         if re.match(r"^(https?:|#|mailto:)", link): return m.group(0)
         path, _, frag = link.partition("#")
         abs_ = (SRC.parent / path).resolve()
-        rel = os.path.relpath(abs_, target.parent.resolve())
+        rel = os.path.relpath(abs_, target.parent.resolve()).replace(os.sep, "/")  # POSIX links on Windows too
         return f"{m.group(1)}({rel}{'#' + frag if frag else ''})"
     return re.sub(r"(\[[^\]]*\])\(([^)]+)\)", fix, text)
 

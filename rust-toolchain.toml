@@ -1,0 +1,5 @@
+# Pinned toolchain for every developer and CI job. Bump deliberately (one PR, CI green on all targets).
+[toolchain]
+channel = "1.97.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

@@ -1,0 +1,15 @@
+# Build outputs
+/target/
+/dist/
+/build/
+# Python
+__pycache__/
+*.pyc
+.venv/
+# OS / editors
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+# Local-only settings
+.claude/settings.local.json
