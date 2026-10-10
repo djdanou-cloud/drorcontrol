@@ -190,6 +190,18 @@ impl Message {
         self.fields.iter().map(|f| f.ty.wire_size()).sum()
     }
 
+    /// Wire offset of the `uint8_t` field `name`, if the message has one.
+    pub fn u8_field_offset(&self, name: &str) -> Option<usize> {
+        let mut ofs = 0;
+        for f in self.wire_fields() {
+            if f.name == name {
+                return (f.ty.wire_size() == 1).then_some(ofs);
+            }
+            ofs += f.ty.wire_size();
+        }
+        None
+    }
+
     /// The CRC_EXTRA seed byte: a hash of the message name and base-field layout,
     /// so that sender and receiver disagreeing on the layout fail the checksum.
     pub fn crc_extra(&self) -> u8 {
@@ -307,6 +319,10 @@ mod tests {
         assert_eq!(m.base_len(), 9);
         assert_eq!(m.max_len(), 18);
         assert_eq!(m.crc_extra(), 50, "extensions must not change CRC_EXTRA");
+        assert_eq!(m.u8_field_offset("type"), Some(4));
+        assert_eq!(m.u8_field_offset("custom_mode"), None, "not a u8");
+        assert_eq!(m.u8_field_offset("ext_a"), Some(9));
+        assert_eq!(m.u8_field_offset("missing"), None);
     }
 
     #[test]

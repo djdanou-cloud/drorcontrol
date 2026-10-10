@@ -3,7 +3,7 @@
 //! Vectors come from `scripts/mavlink_vectors.py`, which builds pymavlink's dialect from the
 //! same vendored XML. For every vector the Rust codec must:
 //! 1. accept the frame (checksum, length, signature layout),
-//! 2. agree on CRC_EXTRA and header fields,
+//! 2. agree on CRC_EXTRA, routing-target offsets and header fields,
 //! 3. decode exactly the field values pymavlink decoded,
 //! 4. re-encode (and re-sign) to byte-identical output,
 //! 5. verify the signature with the same key.
@@ -76,6 +76,17 @@ fn matches_pymavlink_reference_vectors() {
             failures.push(format!(
                 "{tag}: CRC_EXTRA rust {} vs pymavlink {}",
                 info.crc_extra, rec["crc_extra"]
+            ));
+        }
+
+        let want_ofs = (
+            rec["target_ofs"][0].as_u64().map(|v| v as usize),
+            rec["target_ofs"][1].as_u64().map(|v| v as usize),
+        );
+        if (info.target_system_ofs, info.target_component_ofs) != want_ofs {
+            failures.push(format!(
+                "{tag}: target offsets rust {:?} vs pymavlink {want_ofs:?}",
+                (info.target_system_ofs, info.target_component_ofs)
             ));
         }
 

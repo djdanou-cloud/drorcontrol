@@ -184,6 +184,16 @@ impl Frame {
         self.crc_checked
     }
 
+    /// Routing target `(target_system, target_component)` read straight from the payload
+    /// (no decoding). `None` if the message has no target fields or its id is unknown;
+    /// 0 means broadcast. Truncated (v2) payloads read missing bytes as 0.
+    pub fn target(&self) -> Option<(u8, u8)> {
+        let info = message_info(self.msgid())?;
+        let byte = |ofs: Option<usize>| ofs.map(|o| self.payload().get(o).copied().unwrap_or(0));
+        let sys = byte(info.target_system_ofs)?;
+        Some((sys, byte(info.target_component_ofs).unwrap_or(0)))
+    }
+
     /// Decode the payload into a typed message.
     pub fn decode(&self) -> Result<Message, UnknownMessage> {
         Message::parse(self.msgid(), self.payload())
@@ -583,6 +593,28 @@ mod tests {
         let got = lax.next_frame().unwrap();
         assert!(!got.crc_checked());
         assert_eq!(got.msgid(), 0xFF_FFFE);
+    }
+
+    #[test]
+    fn reads_routing_target_without_decoding() {
+        use crate::messages::{CommandLong, ParamRequestList};
+        let cmd = Message::CommandLong(CommandLong {
+            target_system: 7,
+            target_component: 1,
+            command: 400,
+            ..Default::default()
+        });
+        assert_eq!(encode(Version::V2, H, &cmd).unwrap().target(), Some((7, 1)));
+        let all = Message::ParamRequestList(ParamRequestList {
+            target_system: 3,
+            target_component: 0,
+        });
+        assert_eq!(encode(Version::V2, H, &all).unwrap().target(), Some((3, 0)));
+        assert_eq!(
+            encode(Version::V2, H, &hb()).unwrap().target(),
+            None,
+            "HEARTBEAT has no target"
+        );
     }
 
     #[test]

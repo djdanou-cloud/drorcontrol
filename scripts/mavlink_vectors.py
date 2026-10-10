@@ -57,6 +57,24 @@ def extension_fields(root_xml: Path) -> dict:
     return result
 
 
+def target_offsets(root_xml: Path) -> dict:
+    """{message name: [target_system_ofs|None, target_component_ofs|None]} from pymavlink's parser."""
+    from pymavlink.generator import mavparse
+    result, seen, todo = {}, set(), [root_xml.resolve()]
+    while todo:
+        path = todo.pop()
+        if path in seen:
+            continue
+        seen.add(path)
+        xml = mavparse.MAVXML(str(path), "2.0")
+        todo.extend((path.parent / inc).resolve() for inc in xml.include)
+        for m in xml.message:
+            sys_ofs = m.target_system_ofs if m.message_flags & mavparse.FLAG_HAVE_TARGET_SYSTEM else None
+            comp_ofs = m.target_component_ofs if m.message_flags & mavparse.FLAG_HAVE_TARGET_COMPONENT else None
+            result[m.name] = [sys_ofs, comp_ofs]
+    return result
+
+
 def load_dialect(root_xml: Path, workdir: Path):
     from pymavlink.generator import mavgen
     out = workdir / "dialect"
@@ -130,6 +148,7 @@ def main():
     rng = random.Random(a.seed)
     root_xml = Path(a.xml)
     exts = extension_fields(root_xml)
+    targets = target_offsets(root_xml)
     with tempfile.TemporaryDirectory() as tmp:
         d = load_dialect(root_xml, Path(tmp))
         records = []
@@ -146,6 +165,7 @@ def main():
                 mav = d.MAVLink(None, srcSystem=sysid, srcComponent=compid)
                 mav.seq = seq
                 rec = {"name": cls.msgname, "id": msgid, "crc_extra": cls.crc_extra, "variant": variant,
+                       "target_ofs": targets[cls.msgname],
                        "seq": seq, "sysid": sysid, "compid": compid}
                 if signed:
                     key = bytes(rng.randint(0, 255) for _ in range(32))

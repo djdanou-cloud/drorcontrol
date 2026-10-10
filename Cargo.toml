@@ -12,6 +12,11 @@ publish = false
 repository = "https://github.com/djdanou-cloud/drorcontrol"
 # `license` intentionally unset: licence posture is an open owner decision (docs/plan/README.md §5).
 
+[workspace.dependencies]
+link-core = { path = "crates/link-core" }
+mavlink-codec = { path = "crates/mavlink-codec" }
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util"] }
+
 [workspace.lints.rust]
 unsafe_code = "deny"     # crates that need FFI (core-ffi, platform-*) opt out with a crate-level allow + ADR note
 missing_docs = "warn"

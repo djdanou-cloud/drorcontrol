@@ -1,0 +1,17 @@
+[package]
+name = "link-net"
+description = "UDP and TCP MAVLink links for DrorControl."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+link-core.workspace = true
+mavlink-codec.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+
+[lints]
+workspace = true

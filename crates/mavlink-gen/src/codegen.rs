@@ -428,6 +428,17 @@ fn gen_message_enum(o: &mut String, msgs: &[Message]) {
     o.push_str("        }\n    }\n}\n\n");
 }
 
+/// Routing target field. MANUAL_CONTROL names it `target` (same special case as pymavlink).
+fn target_system_offset(m: &Message) -> Option<usize> {
+    m.u8_field_offset("target_system").or_else(|| {
+        if m.name == "MANUAL_CONTROL" {
+            m.u8_field_offset("target")
+        } else {
+            None
+        }
+    })
+}
+
 fn gen_info_table(o: &mut String, msgs: &[Message]) {
     let _ = writeln!(
         o,
@@ -437,12 +448,14 @@ fn gen_info_table(o: &mut String, msgs: &[Message]) {
     for m in msgs {
         let _ = writeln!(
             o,
-            "    crate::MessageInfo {{ id: {}, name: {:?}, crc_extra: {}, base_len: {}, max_len: {} }},",
+            "    crate::MessageInfo {{ id: {}, name: {:?}, crc_extra: {}, base_len: {}, max_len: {}, target_system_ofs: {:?}, target_component_ofs: {:?} }},",
             m.id,
             m.name,
             m.crc_extra(),
             m.base_len(),
-            m.max_len()
+            m.max_len(),
+            target_system_offset(m),
+            m.u8_field_offset("target_component"),
         );
     }
     o.push_str("];\n\n");

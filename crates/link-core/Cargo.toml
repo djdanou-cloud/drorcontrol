@@ -1,0 +1,16 @@
+[package]
+name = "link-core"
+description = "Shared link types for DrorControl: link ids, events, handles and the byte-stream pump."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+mavlink-codec.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+
+[lints]
+workspace = true

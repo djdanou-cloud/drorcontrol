@@ -80,6 +80,10 @@ pub struct MessageInfo {
     pub base_len: usize,
     /// Full payload length including extensions.
     pub max_len: usize,
+    /// Payload offset of a `target_system` field, if any (used for routing).
+    pub target_system_ofs: Option<usize>,
+    /// Payload offset of a `target_component` field, if any.
+    pub target_component_ofs: Option<usize>,
 }
 
 /// A message ID that is not part of the compiled dialect.

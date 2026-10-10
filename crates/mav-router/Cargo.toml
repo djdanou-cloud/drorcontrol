@@ -1,0 +1,19 @@
+[package]
+name = "mav-router"
+description = "MAVLink routing (sysid/compid learning, targeted and broadcast forwarding) and the async link hub."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+link-core.workspace = true
+mavlink-codec.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+recorder = { path = "../recorder" }
+link-net = { path = "../link-net" }
+
+[lints]
+workspace = true

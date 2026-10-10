@@ -1,0 +1,18 @@
+[package]
+name = "link-serial"
+description = "Serial MAVLink link for DrorControl (blocking I/O threads; platform enumeration/hotplug come from platform crates)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+link-core.workspace = true
+mavlink-codec.workspace = true
+tokio.workspace = true
+serialport = { version = "4.10", default-features = false }
+
+[dev-dependencies]
+
+[lints]
+workspace = true
