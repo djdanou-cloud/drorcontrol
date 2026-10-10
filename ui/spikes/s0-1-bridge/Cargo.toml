@@ -1,0 +1,21 @@
+[package]
+name = "spike-s0-1-bridge"
+description = "Spike S0-1: cxx-qt bridge throughput and UI-thread isolation under 200k msg/s (ADR-0001)."
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Standalone workspace: needs Qt 6 (qmake6 on PATH or QMAKE=...), which the main CI matrix
+# does not install.
+[workspace]
+
+[dependencies]
+cxx = "1.0"
+cxx-qt = "0.10"
+cxx-qt-lib = { version = "0.10", features = ["qt_full"] }
+dc-core = { path = "../../../crates/dc-core" }
+mavlink-codec = { path = "../../../crates/mavlink-codec" }
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
+
+[build-dependencies]
+cxx-qt-build = { version = "0.10", features = ["link_qt_object_files"] }

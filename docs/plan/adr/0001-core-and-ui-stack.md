@@ -21,6 +21,14 @@ macOS fidelity (20 %), GPU pipeline (15 %), throughput/latency determinism (15 %
 ## Decision
 We will implement protocol, state, logs, geo and video-pipeline management in Rust (`dc-core`), and the presentation layer in Qt 6/QML (C++20 glue), connected through our own stable `core-ffi` boundary (C ABI + schema'd payloads), with `cxx-qt` used as an implementation detail of the bridge, not as the architecture.
 
+## Validation — spike S0-1 (2026-10-10, Linux, software GL; see `ui/spikes/s0-1-bridge/RESULTS.md`)
+* PASS: real ingest path sustains 200 k msg/s (and 400 k) with achieved = offered; 0 frames > 25 ms.
+* PASS: cxx-qt bridge + snapshot read ≈ 5 µs (p99 26 µs), independent of ingest rate.
+* OPEN: frame-interval p99 17.7 ms (> 16.7 ms) in a GPU-less shared container; re-measure on macOS/Metal.
+* FINDING: QML binding re-evaluation (~0.7 ms/frame) dominates UI cost regardless of ingest → instruments
+  as custom scene-graph/QRhi items (plan 04 §4), confirmed as a requirement.
+* Recommendation: keep this ADR (Rust core + Qt/QML + cxx-qt); accept at M0 after the macOS run.
+
 ## Consequences
 * + Memory-safe parsers/state machines; Qt RHI Metal rendering, native menus/gestures; core reusable headless in CI.
 * − Two toolchains; Qt licence compliance; `cxx-qt` maturity risk (mitigated by hand-written C++ adapter fallback).
