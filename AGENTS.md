@@ -11,3 +11,4 @@ Non-negotiables:
 - Never commit secrets. Stop and ask a human for credentials, licensing, scope changes, safety-path changes (command pipeline, interlocks, failsafes, firmware flashing), and irreversible actions.
 - Report outcomes faithfully: evidence for "done", plain statements for failures and skipped steps.
 - Brand: DrorAero visual identity (see `docs/plan/04-ux-design-system.md`); product name is **DrorControl**.
+- UI work: follow the [`drorcontrol-ui` skill](.claude/skills/drorcontrol-ui/SKILL.md). Where it differs from `docs/plan/04-ux-design-system.md` or the stack ADRs, see the open `decision-request` in `docs/coordination/log/` before choosing; log your choice.
