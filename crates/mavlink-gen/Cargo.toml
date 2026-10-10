@@ -1,0 +1,13 @@
+[package]
+name = "mavlink-gen"
+description = "MAVLink XML dialect parser and Rust code generator for DrorControl."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+quick-xml = "0.42"
+
+[lints]
+workspace = true

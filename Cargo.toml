@@ -1,8 +1,8 @@
 [workspace]
 resolver = "3"
-# Add "crates/*" here when the first crate lands (T0-02); after that, new crates need no
-# edit to this file. (Cargo rejects a glob that matches nothing.)
-members = ["xtask"]
+members = ["xtask", "crates/*"]
+# Fuzz crates need nightly and are standalone workspaces.
+exclude = ["crates/mavlink-codec/fuzz"]
 
 [workspace.package]
 version = "0.0.0"

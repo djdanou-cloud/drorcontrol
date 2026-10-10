@@ -1,0 +1,25 @@
+[package]
+name = "mavlink-codec"
+description = "MAVLink v1/v2 framing, CRC, signing and the generated ArduPilot dialect for DrorControl."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+# Generate from all.xml (every upstream dialect) instead of ardupilotmega.xml.
+dialect-all = []
+
+[dependencies]
+sha2 = "0.11"
+
+[build-dependencies]
+mavlink-gen = { path = "../mavlink-gen" }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+hex = "0.4"
+serde_json = { version = "1", features = ["float_roundtrip"] }
