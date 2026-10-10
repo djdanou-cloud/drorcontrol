@@ -36,7 +36,7 @@ Goal: macOS is a **Tier-1** target — same feature set, same release cadence, s
 * For USB-CDC boards the baud is nominal (full-speed USB bulk); we still set it so USB-UART bridges and flow control behave.
 * Raw mode (`cfmakeraw`), `CLOCAL | CREAD`, hardware flow control (`CRTSCTS`) optional per profile (RFD900x), `VMIN=0/VTIME=0` with `kqueue`/`mio` readiness rather than blocking reads.
 * Low latency: set `IOSSDATALAT` where supported; disable FTDI latency timer coalescing via vendor settings where possible; measure with S0-2.
-* **Auto-baud probe:** on new device try [921600, 115200, 57600, 460800, 500000, 1500000, 2000000, 230400, 38400] in parallel pairs, accept first valid MAVLink CRC-checked HEARTBEAT; cache result.
+* **Auto-baud probe:** a port can be opened only once, so rates are tried one after another — [115200, 57600, 921600, 460800, 230400, 500000, 1500000, 2000000, 38400] — accepting the first CRC-checked HEARTBEAT within ~1.5 s each (USB-CDC ignores the rate, so the first try succeeds); cache the result per `device_key`. Implemented in `link-serial::discovery::probe_baud` / `dc-cli ports --probe`.
 
 ### 2.4 Hotplug (no polling)
 ```rust

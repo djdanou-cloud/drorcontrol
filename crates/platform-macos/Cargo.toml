@@ -1,0 +1,15 @@
+[package]
+name = "platform-macos"
+description = "macOS platform layer for DrorControl: IOKit serial hotplug notifications (more to come: GameController, power, sleep/wake)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+core-foundation-sys = "0.8"
+io-kit-sys = "0.4"
+
+[lints]
+workspace = true

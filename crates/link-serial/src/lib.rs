@@ -1,8 +1,10 @@
 //! Serial MAVLink link.
 //!
 //! Uses the `serialport` crate with one blocking reader thread and one blocking writer
-//! thread per port. Port enumeration, macOS `IOSSIOSPEED` high baud rates and hotplug
-//! belong to the platform crates (task T0-05); this crate only moves bytes.
+//! thread per port. Non-standard baud rates on macOS go through `IOSSIOSPEED` (done by
+//! `serialport`). [`discovery`] adds port listing, board hints, hotplug and auto-baud.
+
+pub mod discovery;
 
 use std::io::{self, Read, Write};
 use std::time::{Duration, SystemTime};

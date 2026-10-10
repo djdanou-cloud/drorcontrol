@@ -14,8 +14,10 @@ path = "src/main.rs"
 clap = { version = "4.6", features = ["derive"] }
 api = { path = "../api" }
 dc-core = { path = "../dc-core" }
+link-serial = { path = "../link-serial" }
 mavlink-codec.workspace = true
 protocols = { path = "../protocols" }
+serialport = { version = "4.10", default-features = false }
 tokio.workspace = true
 tonic = "0.14"
 

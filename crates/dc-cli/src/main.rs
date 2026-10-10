@@ -70,6 +70,31 @@ enum Cmd {
         #[command(subcommand)]
         what: RemoteCmd,
     },
+    /// List serial ports with board hints; optionally watch hotplug or probe for MAVLink.
+    Ports {
+        /// Keep printing attach/remove events for this many seconds.
+        #[arg(long)]
+        watch: Option<u64>,
+        /// Probe this port for a HEARTBEAT at common baud rates.
+        #[arg(long)]
+        probe: Option<String>,
+    },
+    /// Serial integrity soak: stream MAVLink frames out of `tx` and verify them on `rx`
+    /// (same port with a TX-RX loopback jumper, or two adapters cross-wired).
+    Soak {
+        /// Sending port.
+        #[arg(long)]
+        tx: String,
+        /// Receiving port (default: same as --tx, i.e. loopback).
+        #[arg(long)]
+        rx: Option<String>,
+        /// Baud rate.
+        #[arg(long, default_value_t = 921_600)]
+        baud: u32,
+        /// Duration in seconds.
+        #[arg(long, default_value_t = 60)]
+        seconds: u64,
+    },
     /// Print a telemetry summary once per second.
     Telemetry {
         /// Link to open.
@@ -201,6 +226,13 @@ async fn run(cli: Cli) -> Result<(), String> {
             }
         }
         Cmd::Remote { grpc, what } => remote(grpc, what).await,
+        Cmd::Ports { watch, probe } => ports(*watch, probe.as_deref()),
+        Cmd::Soak {
+            tx,
+            rx,
+            baud,
+            seconds,
+        } => soak(tx, rx.as_deref().unwrap_or(tx), *baud, *seconds),
         Cmd::Telemetry { connect, seconds } => {
             let core = start(&cli, connect).await?;
             let mut events = core.events();
@@ -219,6 +251,145 @@ async fn run(cli: Cli) -> Result<(), String> {
             }
             Ok(())
         }
+    }
+}
+
+fn ports(watch: Option<u64>, probe: Option<&str>) -> Result<(), String> {
+    use link_serial::discovery::{
+        DeviceEvent, DeviceMonitor, PROBE_BAUDS, PortInfo, list_ports, probe_baud,
+    };
+    let show = |p: &PortInfo| {
+        let usb = p.usb.as_ref().map(|u| {
+            format!(
+                "{:04x}:{:04x} {} {}",
+                u.vid,
+                u.pid,
+                u.manufacturer.as_deref().unwrap_or("?"),
+                u.product.as_deref().unwrap_or("?")
+            )
+        });
+        let hint = p
+            .hint
+            .as_ref()
+            .map(|h| format!("{} ({:?})", h.vendor, h.role));
+        format!(
+            "{:<28} {:<40} {}",
+            p.path,
+            usb.unwrap_or_default(),
+            hint.unwrap_or_default()
+        )
+    };
+    if let Some(path) = probe {
+        eprintln!("probing {path} at {PROBE_BAUDS:?} …");
+        return match probe_baud(path, &PROBE_BAUDS, Duration::from_millis(1500))
+            .map_err(|e| format!("{path}: {e}"))?
+        {
+            Some(r) => {
+                println!(
+                    "{path}: HEARTBEAT at {} baud from sysid {} compid {}",
+                    r.baud, r.sysid, r.compid
+                );
+                Ok(())
+            }
+            None => Err(format!("{path}: no HEARTBEAT at any probed baud rate")),
+        };
+    }
+    match watch {
+        None => {
+            for p in list_ports().map_err(|e| e.to_string())? {
+                println!("{}", show(&p));
+            }
+        }
+        Some(secs) => {
+            let m = DeviceMonitor::start().map_err(|e| e.to_string())?;
+            let end = Instant::now() + Duration::from_secs(secs);
+            while let Some(left) = end.checked_duration_since(Instant::now()) {
+                match m.events().recv_timeout(left) {
+                    Ok(DeviceEvent::Added(p)) => println!("+ {}", show(&p)),
+                    Ok(DeviceEvent::Removed { path }) => println!("- {path}"),
+                    Err(_) => break,
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Serial soak test. Exit status is failure on any checksum error or lost frame.
+fn soak(tx_path: &str, rx_path: &str, baud: u32, seconds: u64) -> Result<(), String> {
+    use mavlink_codec::messages::Statustext;
+    use mavlink_codec::{FrameParser, Header, Message, Version, encode};
+    use std::io::{Read, Write};
+
+    let open = |p: &str| {
+        serialport::new(p, baud)
+            .timeout(Duration::from_millis(20))
+            .open()
+            .map_err(|e| format!("{p}: {e}"))
+    };
+    let mut tx = open(tx_path)?;
+    let mut rx = if rx_path == tx_path {
+        tx.try_clone().map_err(|e| e.to_string())?
+    } else {
+        open(rx_path)?
+    };
+    let end = Instant::now() + Duration::from_secs(seconds);
+    let reader = std::thread::spawn(move || {
+        let mut parser = FrameParser::new();
+        let (mut ok, mut lost, mut expect) = (0u64, 0u64, None::<u8>);
+        let mut buf = [0u8; 4096];
+        let quiet_until = |t: Instant| Instant::now() < t + Duration::from_secs(1);
+        while quiet_until(end) {
+            if let Ok(n) = rx.read(&mut buf) {
+                parser.push(&buf[..n]);
+                while let Some(f) = parser.next_frame() {
+                    if let Some(e) = expect {
+                        lost += u64::from(f.seq().wrapping_sub(e));
+                    }
+                    expect = Some(f.seq().wrapping_add(1));
+                    ok += 1;
+                }
+            }
+        }
+        (ok, lost, parser.stats().clone())
+    });
+
+    // Frames of varying length (STATUSTEXT with 1..50 chars) at full line rate.
+    let mut seq = 0u8;
+    let mut sent = 0u64;
+    while Instant::now() < end {
+        let mut s = Statustext {
+            severity: 6,
+            ..Default::default()
+        };
+        let n = 1 + usize::from(seq) % 50;
+        for (i, b) in s.text[..n].iter_mut().enumerate() {
+            *b = b'A' + ((i + usize::from(seq)) % 26) as u8;
+        }
+        let f = encode(
+            Version::V2,
+            Header {
+                seq,
+                sysid: 255,
+                compid: 190,
+            },
+            &Message::Statustext(s),
+        )
+        .map_err(|e| e.to_string())?;
+        tx.write_all(f.as_bytes())
+            .map_err(|e| format!("write: {e}"))?;
+        seq = seq.wrapping_add(1);
+        sent += 1;
+    }
+    let (ok, lost, stats) = reader.join().map_err(|_| "reader panicked".to_string())?;
+    println!(
+        "{tx_path} -> {rx_path} @ {baud}: sent {sent}, received {ok}, lost {lost}, crc_errors {}, skipped_bytes {}",
+        stats.crc_errors, stats.skipped_bytes
+    );
+    if stats.crc_errors == 0 && lost == 0 && ok + 2 >= sent {
+        Ok(())
+    } else {
+        Err("soak FAILED: errors or lost frames".into())
     }
 }
 

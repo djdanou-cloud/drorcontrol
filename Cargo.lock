@@ -293,8 +293,10 @@ dependencies = [
  "api",
  "clap",
  "dc-core",
+ "link-serial",
  "mavlink-codec",
  "protocols",
+ "serialport",
  "tokio",
  "tonic",
 ]
@@ -648,6 +650,7 @@ version = "0.0.0"
 dependencies = [
  "link-core",
  "mavlink-codec",
+ "platform-macos",
  "serialport",
  "tokio",
 ]
@@ -855,6 +858,15 @@ name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
+
+[[package]]
+name = "platform-macos"
+version = "0.0.0"
+dependencies = [
+ "core-foundation",
+ "core-foundation-sys",
+ "io-kit-sys",
+]
 
 [[package]]
 name = "prettyplease"

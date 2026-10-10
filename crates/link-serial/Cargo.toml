@@ -12,6 +12,9 @@ mavlink-codec.workspace = true
 tokio.workspace = true
 serialport = { version = "4.10", default-features = false }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+platform-macos = { path = "../platform-macos" }
+
 [dev-dependencies]
 
 [lints]
