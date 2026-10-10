@@ -12,3 +12,4 @@ Non-negotiables:
 - Report outcomes faithfully: evidence for "done", plain statements for failures and skipped steps.
 - Brand: DrorAero visual identity (see `docs/plan/04-ux-design-system.md`); product name is **DrorControl**.
 - UI work: follow the [`drorcontrol-ui` skill](.claude/skills/drorcontrol-ui/SKILL.md) (aligned with `docs/plan/04-ux-design-system.md` and `docs/plan/08-safety-vv.md`; the plan wins on any disagreement). Use design tokens, never literal colors.
+- The skill is mirrored for Cursor (`.cursor/rules/`), Copilot (`.github/`) and Gemini (`GEMINI.md`, `.gemini/`). **Edit only `.claude/skills/drorcontrol-ui/SKILL.md`**, then run `python3 scripts/sync_skill.py` (use `--check` in CI).
