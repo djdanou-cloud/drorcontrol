@@ -933,3 +933,39 @@ fn emergency_termination_is_two_stage_without_typed_text() {
         .is_ok()
     );
 }
+
+/// Mode changes name the mode once the firmware is confirmed; the number stays visible, and
+/// without names the label is the plain number (never a guess).
+#[test]
+fn mode_labels_use_confirmed_names_and_keep_the_number() {
+    let t0 = Instant::now();
+    let mut p = CommandPolicy::new(PolicyConfig::default());
+    let five = Command::SetMode { custom_mode: 5 };
+    assert_eq!(p.label(T.sysid, &five), "MODE 5");
+    p.set_mode_names(T.sysid, [(5, "LOITER".to_string()), (6, "RTL".to_string())]);
+    assert_eq!(p.label(T.sysid, &five), "MODE LOITER (5)");
+    assert_eq!(
+        p.label(T.sysid, &Command::SetMode { custom_mode: 99 }),
+        "MODE 99",
+        "unknown number: no name"
+    );
+    assert_eq!(
+        p.label(T.sysid + 1, &five),
+        "MODE 5",
+        "names are per vehicle"
+    );
+    let (id, _, _) = p
+        .submit(T, five, Approval::None, &armed(), connected(), t0)
+        .unwrap();
+    assert!(
+        p.status(id, t0)
+            .unwrap()
+            .summary()
+            .starts_with("MODE LOITER (5): ")
+    );
+    let audit: Vec<String> = p.drain_audit().into_iter().map(|e| e.text).collect();
+    assert!(
+        audit.iter().any(|t| t.contains("MODE LOITER (5)")),
+        "{audit:?}"
+    );
+}

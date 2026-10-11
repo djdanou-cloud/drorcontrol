@@ -13,6 +13,9 @@ use std::time::{Duration, Instant};
 use mavlink_codec::Message;
 use mavlink_codec::enums::MavModeFlag;
 
+pub mod modes;
+pub use modes::{Firmware, FirmwareSource};
+
 /// Identity and mode from `HEARTBEAT`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Heartbeat {
@@ -30,6 +33,23 @@ pub struct Heartbeat {
     pub system_status: u8,
     /// MAVLink version field.
     pub mavlink_version: u8,
+}
+
+impl VehicleState {
+    /// Firmware confirmed by its version banner: the only basis for offering or naming modes
+    /// to the operator.
+    pub fn confirmed_firmware(&self) -> Option<Firmware> {
+        match self.firmware {
+            Some((f, FirmwareSource::Banner)) => Some(f),
+            _ => None,
+        }
+    }
+
+    /// Name of the current flight mode, if the firmware is confirmed and the mode known.
+    pub fn mode_name(&self) -> Option<&'static str> {
+        let hb = self.heartbeat.as_ref()?;
+        self.confirmed_firmware()?.mode_name(hb.value.custom_mode)
+    }
 }
 
 impl Heartbeat {
@@ -233,6 +253,8 @@ pub struct VehicleState {
     pub gps: Option<Timed<Gps>>,
     /// Landed and VTOL state.
     pub extended: Option<Timed<Extended>>,
+    /// Firmware family and how it was identified (see [`modes`]).
+    pub firmware: Option<(Firmware, FirmwareSource)>,
     /// Messages applied, by message id.
     pub message_counts: BTreeMap<u32, u64>,
 }
@@ -290,6 +312,12 @@ impl Fleet {
         *v.message_counts.entry(msg.id()).or_default() += 1;
         match msg {
             Message::Heartbeat(h) if compid == AUTOPILOT_COMPID || v.heartbeat.is_none() => {
+                if compid == AUTOPILOT_COMPID
+                    && !matches!(v.firmware, Some((_, FirmwareSource::Banner)))
+                {
+                    v.firmware = Firmware::from_mav_type(h.r#type, h.autopilot)
+                        .map(|f| (f, FirmwareSource::MavType));
+                }
                 v.heartbeat = timed(
                     now,
                     Heartbeat {
@@ -381,6 +409,11 @@ impl Fleet {
             }
             Message::Statustext(s) => {
                 let end = s.text.iter().position(|&b| b == 0).unwrap_or(s.text.len());
+                if compid == AUTOPILOT_COMPID
+                    && let Some(f) = Firmware::from_banner(&String::from_utf8_lossy(&s.text[..end]))
+                {
+                    v.firmware = Some((f, FirmwareSource::Banner));
+                }
                 return Some(StatusText {
                     severity: s.severity,
                     text: String::from_utf8_lossy(&s.text[..end]).into_owned(),
@@ -541,5 +574,46 @@ mod tests {
         // Unknown values are Undefined, never guessed.
         assert_eq!(LandedState::from_mavlink(9), LandedState::Undefined);
         assert_eq!(VtolState::from_mavlink(9), VtolState::Undefined);
+    }
+
+    #[test]
+    fn mode_names_need_the_banner() {
+        use mavlink_codec::messages::{Heartbeat as Hb, Statustext};
+        let mut f = Fleet::new();
+        let now = Instant::now();
+        // A QuadPlane whose Q_MAV_TYPE says "quadrotor", in mode 5.
+        let hb = Hb {
+            r#type: 2,
+            autopilot: 3,
+            custom_mode: 5,
+            ..Default::default()
+        };
+        f.apply(1, 1, &Message::Heartbeat(hb.clone()), now);
+        let v = f.get(1).unwrap();
+        assert_eq!(
+            v.firmware,
+            Some((Firmware::Copter, FirmwareSource::MavType))
+        );
+        assert_eq!(v.mode_name(), None, "a guess never names a mode");
+        let mut text = [0u8; 50];
+        let banner = b"ArduPlane V4.7.1 (3f2a9c1e)";
+        text[..banner.len()].copy_from_slice(banner);
+        let st = Statustext {
+            severity: 6,
+            text,
+            ..Default::default()
+        };
+        // From another component: ignored.
+        f.apply(1, 100, &Message::Statustext(st.clone()), now);
+        assert_eq!(f.get(1).unwrap().confirmed_firmware(), None);
+        f.apply(1, 1, &Message::Statustext(st), now);
+        f.apply(1, 1, &Message::Heartbeat(hb), now);
+        let v = f.get(1).unwrap();
+        assert_eq!(
+            v.confirmed_firmware(),
+            Some(Firmware::Plane),
+            "banner wins, and sticks"
+        );
+        assert_eq!(v.mode_name(), Some("FLY_BY_WIRE_A"), "not LOITER");
     }
 }

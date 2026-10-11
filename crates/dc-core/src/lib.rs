@@ -37,14 +37,18 @@ use mavlink_codec::enums::{MavAutopilot, MavCmd, MavState, MavType};
 use mavlink_codec::messages::{CommandLong, Heartbeat};
 use mavlink_codec::{Frame, Header, Message, Version, encode};
 use protocols::audit::{self, AuditLog};
-use protocols::command::{
-    Approval, AuditEvent, Command, CommandId, CommandPolicy, CommandStatus, LinkInfo, LinkState,
-    PolicyConfig, Refusal, Request, Target, VehicleFacts,
+/// Command types for [`Core::request_command`] and [`Core::submit_command`].
+pub use protocols::command::{
+    Approval, Command, CommandId, CommandState, CommandStatus, PolicyConfig, Refusal, Request,
+    VehicleFacts,
 };
+use protocols::command::{AuditEvent, CommandPolicy, LinkInfo, LinkState, Target};
 use protocols::params::{DownloadConfig, DownloadStatus, Param, ParamDownload};
 use tokio::sync::broadcast;
 
-pub use vehicle::{Extended, Fleet, LandedState, StatusText, VehicleState, VtolState};
+pub use vehicle::{
+    Extended, Firmware, FirmwareSource, Fleet, LandedState, StatusText, VehicleState, VtolState,
+};
 
 /// How to reach a vehicle. Parsed from strings such as `tcp:127.0.0.1:5760`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -603,8 +607,19 @@ impl Core {
         if first_heartbeat && compid == vehicle::AUTOPILOT_COMPID {
             let _ = self.events.send(CoreEvent::VehicleSeen { sysid });
             self.request_streams(sysid, compid).await;
+            self.request_banner(sysid, compid);
         }
         if let Some(text) = text {
+            // The firmware's version banner confirms it: from now on mode changes are named.
+            if compid == vehicle::AUTOPILOT_COMPID
+                && vehicle::Firmware::from_banner(&text.text).is_some()
+                && let Some(fw) = self.fleet().get(sysid).and_then(|v| v.confirmed_firmware())
+            {
+                self.policy().set_mode_names(
+                    sysid,
+                    fw.modes().into_iter().map(|(n, m)| (n, m.to_string())),
+                );
+            }
             let _ = self.events.send(CoreEvent::StatusText { sysid, text });
         }
         let _ = self
@@ -839,6 +854,35 @@ impl Core {
         .await
         .ok()
         .flatten()
+    }
+
+    /// Ask the autopilot for its version banner (`MAV_CMD_DO_SEND_BANNER`), which confirms the
+    /// firmware and so the meaning of its mode numbers (`vehicle::modes`). Retried every 3 s,
+    /// up to 5 times, until a banner arrives.
+    fn request_banner(&self, sysid: u8, compid: u8) {
+        let core = self.clone();
+        tokio::spawn(async move {
+            for _ in 0..5 {
+                if core
+                    .fleet()
+                    .get(sysid)
+                    .and_then(|v| v.confirmed_firmware())
+                    .is_some()
+                {
+                    return;
+                }
+                let cmd = Message::CommandLong(CommandLong {
+                    target_system: sysid,
+                    target_component: compid,
+                    command: MavCmd::DO_SEND_BANNER.0,
+                    ..Default::default()
+                });
+                if !core.send(&cmd).await {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_secs(3)).await;
+            }
+        });
     }
 
     /// Ask the vehicle for the configured telemetry rates (`MAV_CMD_SET_MESSAGE_INTERVAL`).

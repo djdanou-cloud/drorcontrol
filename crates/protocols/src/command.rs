@@ -661,13 +661,15 @@ pub struct CommandStatus {
     pub time_left: Duration,
     /// Link at the last transmission.
     pub link: LinkInfo,
+    /// Operator-facing name of the command ("MODE LOITER (5)" once the firmware is known).
+    pub label: String,
 }
 
 impl CommandStatus {
     /// Operator-facing status line, e.g.
     /// `RTL: SENT — NOT CONFIRMED (link LOST 7.2 s), attempt 3, 22 s left`.
     pub fn summary(&self) -> String {
-        let what = self.command.label();
+        let what = &self.label;
         let link = if self.link.state == LinkState::Connected {
             String::new()
         } else {
@@ -761,10 +763,20 @@ struct InFlight {
     ambiguous_until: Option<Instant>,
 }
 
+fn label_with(modes: &HashMap<u8, HashMap<u32, String>>, sysid: u8, command: &Command) -> String {
+    if let Command::SetMode { custom_mode } = command
+        && let Some(name) = modes.get(&sysid).and_then(|m| m.get(custom_mode))
+    {
+        return format!("MODE {name} ({custom_mode})");
+    }
+    command.label()
+}
+
 /// The policy. One per core; holds tokens, in-flight commands and pending audit events.
 pub struct CommandPolicy {
     cfg: PolicyConfig,
     names: HashMap<u8, String>,
+    mode_names: HashMap<u8, HashMap<u32, String>>,
     tokens: HashMap<Token, Issued>,
     inflight: BTreeMap<CommandId, InFlight>,
     next_token: u64,
@@ -778,6 +790,7 @@ impl CommandPolicy {
         CommandPolicy {
             cfg,
             names: HashMap::new(),
+            mode_names: HashMap::new(),
             tokens: HashMap::new(),
             inflight: BTreeMap::new(),
             next_token: 1,
@@ -794,6 +807,18 @@ impl CommandPolicy {
     /// Operator-facing vehicle name (used in summaries and the class D challenge).
     pub fn set_vehicle_name(&mut self, sysid: u8, name: impl Into<String>) {
         self.names.insert(sysid, name.into());
+    }
+
+    /// Flight-mode names of `sysid`'s firmware, from the MAVLink metadata. Set only once the
+    /// firmware is confirmed (its version banner); until then mode changes read "MODE 5".
+    pub fn set_mode_names(&mut self, sysid: u8, modes: impl IntoIterator<Item = (u32, String)>) {
+        self.mode_names.insert(sysid, modes.into_iter().collect());
+    }
+
+    /// The command's operator-facing label for this vehicle: mode changes name the mode
+    /// ("MODE LOITER (5)") when its firmware is confirmed. The number always stays visible.
+    pub fn label(&self, sysid: u8, command: &Command) -> String {
+        label_with(&self.mode_names, sysid, command)
     }
 
     fn vehicle(&self, sysid: u8) -> String {
@@ -822,7 +847,7 @@ impl CommandPolicy {
         link: LinkInfo,
         now: Instant,
     ) -> Result<Request, Refusal> {
-        let label = command.label();
+        let label = self.label(target.sysid, &command);
         if let Err(r) = command
             .validate()
             .and_then(|_| command.preconditions(facts))
@@ -903,7 +928,7 @@ impl CommandPolicy {
         link: LinkInfo,
         now: Instant,
     ) -> Result<(CommandId, Vec<Outgoing>, Vec<CommandStatus>), Refusal> {
-        let label = command.label();
+        let label = self.label(target.sysid, &command);
         let checked = self.check_approval(target, &command, &approval, facts, now);
         if let Err(r) = checked {
             self.log(now, target.sysid, None, format!("refused {label}: {r}"));
@@ -1036,7 +1061,10 @@ impl CommandPolicy {
             flood: link.state != LinkState::Connected,
             attempt: f.attempts,
         };
-        let (sysid, label) = (f.target.sysid, f.command.label());
+        let (sysid, label) = (
+            f.target.sysid,
+            label_with(&self.mode_names, f.target.sysid, &f.command),
+        );
         let note = if out.flood { ", all links" } else { "" };
         self.log(
             now,
@@ -1113,7 +1141,11 @@ impl CommandPolicy {
         let (label, sysid, ambiguous) = {
             let f = &self.inflight[&id];
             let ambiguous = f.ambiguous_until.is_some_and(|t| now < t);
-            (f.command.label(), f.target.sysid, ambiguous)
+            (
+                label_with(&self.mode_names, f.target.sysid, &f.command),
+                f.target.sysid,
+                ambiguous,
+            )
         };
         if ambiguous {
             self.log(
@@ -1186,7 +1218,10 @@ impl CommandPolicy {
     fn finish(&mut self, id: CommandId, state: CommandState, now: Instant) -> CommandStatus {
         let f = self.inflight.get_mut(&id).expect("known command");
         f.state = state;
-        let (sysid, label) = (f.target.sysid, f.command.label());
+        let (sysid, label) = (
+            f.target.sysid,
+            label_with(&self.mode_names, f.target.sysid, &f.command),
+        );
         let status = self.status_at(id, now).expect("known command");
         self.log(now, sysid, Some(id), format!("{label}: {state:?}"));
         status
@@ -1206,6 +1241,7 @@ impl CommandPolicy {
                 f.deadline.saturating_duration_since(now)
             },
             link: f.link,
+            label: self.label(f.target.sysid, &f.command),
         })
     }
 

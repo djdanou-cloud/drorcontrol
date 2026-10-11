@@ -251,3 +251,65 @@ async fn reconnects_after_the_connection_is_cut() {
         "fresh heartbeat after reconnect: {age:?}"
     );
 }
+
+/// The banner confirms the firmware, so modes are named from the metadata; a mode change is a
+/// single action (ADR-0011), labelled with the name and verified by the vehicle's heartbeat.
+#[tokio::test(flavor = "multi_thread")]
+async fn firmware_is_confirmed_and_a_named_mode_change_is_verified() {
+    use dc_core::{Approval, Command, CommandState, Firmware, Request};
+    let Some(cfg) = SitlConfig::copter_or_skip() else {
+        return;
+    };
+    let sitl = Sitl::start(&cfg).unwrap();
+    let core = core_on(sitl.addr()).await;
+    assert_eq!(
+        core.wait_for_vehicle(Duration::from_secs(60)).await,
+        Some(1)
+    );
+    tokio::time::timeout(Duration::from_secs(20), async {
+        while core
+            .fleet()
+            .get(1)
+            .and_then(|v| v.confirmed_firmware())
+            .is_none()
+        {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("version banner within 20 s");
+    let v = core.fleet().get(1).unwrap().clone();
+    assert_eq!(v.confirmed_firmware(), Some(Firmware::Copter));
+    assert_eq!(
+        v.mode_name(),
+        Some("STABILIZE"),
+        "copter.parm starts in STABILIZE"
+    );
+
+    let loiter = Firmware::Copter.mode_number("LOITER").unwrap();
+    let mode = Command::SetMode {
+        custom_mode: loiter,
+    };
+    assert!(matches!(
+        core.request_command(1, mode.clone()).await.unwrap(),
+        Request::Ready { .. }
+    ));
+    let id = core
+        .submit_command(1, mode, Approval::None)
+        .await
+        .expect("single action");
+    let status = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let s = core.command_status(id).unwrap();
+            if s.state.is_final() {
+                return s;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("final within the 3 s lifetime");
+    assert_eq!(status.state, CommandState::Verified, "{}", status.summary());
+    assert_eq!(status.summary(), "MODE LOITER (5): VERIFIED");
+    assert_eq!(core.fleet().get(1).unwrap().mode_name(), Some("LOITER"));
+}
