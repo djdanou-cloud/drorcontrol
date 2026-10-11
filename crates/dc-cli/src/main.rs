@@ -95,6 +95,11 @@ enum Cmd {
         #[arg(long, default_value_t = 60)]
         seconds: u64,
     },
+    /// Dataflash (.bin) log tools: index statistics and downsampled plots, with timings.
+    Log {
+        #[command(subcommand)]
+        what: LogCmd,
+    },
     /// Print a telemetry summary once per second.
     Telemetry {
         /// Link to open.
@@ -103,6 +108,33 @@ enum Cmd {
         /// Stop after this many seconds.
         #[arg(long, default_value_t = 10)]
         seconds: u64,
+    },
+}
+
+#[derive(Subcommand)]
+enum LogCmd {
+    /// Index a log and print message counts, timings and memory use.
+    Info {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+    },
+    /// Extract MSG.FIELD and downsample it (MinMaxLTTB) for plotting.
+    Plot {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+        /// Message name, e.g. ATT.
+        msg: String,
+        /// Field name, e.g. Roll.
+        field: String,
+        /// Output points (plot width in pixels).
+        #[arg(long, default_value_t = 2000)]
+        width: usize,
+        /// Keep only records whose field `I` equals this instance number.
+        #[arg(long)]
+        instance: Option<f64>,
+        /// Write the downsampled points as CSV (time_s,value).
+        #[arg(long)]
+        csv: Option<std::path::PathBuf>,
     },
 }
 
@@ -227,6 +259,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
         Cmd::Remote { grpc, what } => remote(grpc, what).await,
         Cmd::Ports { watch, probe } => ports(*watch, probe.as_deref()),
+        Cmd::Log { what } => log_cmd(what),
         Cmd::Soak {
             tx,
             rx,
@@ -252,6 +285,100 @@ async fn run(cli: Cli) -> Result<(), String> {
             Ok(())
         }
     }
+}
+
+/// Resident memory (Linux): (current total, anonymous, file-backed, peak) in MiB.
+fn rss_mib() -> Option<(f64, f64, f64, f64)> {
+    let s = std::fs::read_to_string("/proc/self/status").ok()?;
+    let kb = |key: &str| {
+        s.lines()
+            .find(|l| l.starts_with(key))?
+            .split_whitespace()
+            .nth(1)?
+            .parse::<f64>()
+            .ok()
+            .map(|v| v / 1024.0)
+    };
+    Some((
+        kb("VmRSS:")?,
+        kb("RssAnon:")?,
+        kb("RssFile:")?,
+        kb("VmHWM:")?,
+    ))
+}
+
+fn log_cmd(what: &LogCmd) -> Result<(), String> {
+    let mem = || match rss_mib() {
+        Some((t, a, f, peak)) => {
+            format!("RSS {t:.0} MiB (anon {a:.0}, file {f:.0}; peak {peak:.0})")
+        }
+        None => "RSS n/a".into(),
+    };
+    let open = |path: &std::path::Path| {
+        let t0 = Instant::now();
+        let log = logs::Log::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let size = log.bytes().len() as f64 / (1 << 20) as f64;
+        let dt = t0.elapsed().as_secs_f64();
+        eprintln!(
+            "indexed {size:.0} MiB in {dt:.2} s ({:.0} MiB/s): {} records, {} types, {} skipped bytes, {} FMT ({} conflicts); {}",
+            size / dt,
+            log.stats.records,
+            log.formats.len(),
+            log.stats.skipped_bytes,
+            log.stats.fmt_records,
+            log.stats.fmt_conflicts,
+            mem()
+        );
+        Ok::<_, String>(log)
+    };
+    match what {
+        LogCmd::Info { path } => {
+            let log = open(path)?;
+            for (name, n) in log.counts() {
+                println!("{name:<6} {n}");
+            }
+        }
+        LogCmd::Plot {
+            path,
+            msg,
+            field,
+            width,
+            instance,
+            csv,
+        } => {
+            let log = open(path)?;
+            let t0 = Instant::now();
+            let col = log
+                .column(msg, field, instance.map(|i| ("I", i)))
+                .ok_or_else(|| format!("no column {msg}.{field}"))?;
+            let t_extract = t0.elapsed().as_secs_f64();
+            let x: Vec<f64> = if col.time_us.is_empty() {
+                (0..col.values.len()).map(|i| i as f64).collect()
+            } else {
+                col.time_us.iter().map(|&t| t as f64 * 1e-6).collect()
+            };
+            let t1 = Instant::now();
+            let keep = logs::downsample::minmax_lttb(&x, &col.values, *width, 4);
+            let t_ds = t1.elapsed().as_secs_f64();
+            eprintln!(
+                "{msg}.{field}: {} samples -> {} points; extract {:.0} ms, downsample {:.0} ms, total {:.0} ms; {}",
+                col.values.len(),
+                keep.len(),
+                t_extract * 1e3,
+                t_ds * 1e3,
+                (t_extract + t_ds) * 1e3,
+                mem()
+            );
+            if let Some(path) = csv {
+                let text: String = keep
+                    .iter()
+                    .map(|&i| format!("{},{}\n", x[i], col.values[i]))
+                    .collect();
+                std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn ports(watch: Option<u64>, probe: Option<&str>) -> Result<(), String> {
