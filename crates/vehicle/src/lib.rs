@@ -139,6 +139,81 @@ pub struct StatusText {
     pub text: String,
 }
 
+/// `MAV_LANDED_STATE` from `EXTENDED_SYS_STATE`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LandedState {
+    /// The autopilot does not know (`MAV_LANDED_STATE_UNDEFINED`, or a value we do not know).
+    Undefined,
+    /// On the ground.
+    OnGround,
+    /// Flying.
+    InAir,
+    /// Taking off.
+    Takeoff,
+    /// Landing.
+    Landing,
+}
+
+impl LandedState {
+    /// From the MAVLink value.
+    pub fn from_mavlink(v: u8) -> Self {
+        match v {
+            1 => LandedState::OnGround,
+            2 => LandedState::InAir,
+            3 => LandedState::Takeoff,
+            4 => LandedState::Landing,
+            _ => LandedState::Undefined,
+        }
+    }
+    /// The MAVLink value.
+    pub fn to_mavlink(self) -> u8 {
+        match self {
+            LandedState::Undefined => 0,
+            LandedState::OnGround => 1,
+            LandedState::InAir => 2,
+            LandedState::Takeoff => 3,
+            LandedState::Landing => 4,
+        }
+    }
+}
+
+/// `MAV_VTOL_STATE` from `EXTENDED_SYS_STATE`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VtolState {
+    /// Not a VTOL, or unknown.
+    Undefined,
+    /// Transitioning to fixed-wing flight.
+    TransitionToFw,
+    /// Transitioning to multicopter flight.
+    TransitionToMc,
+    /// Multicopter flight.
+    Mc,
+    /// Fixed-wing flight.
+    Fw,
+}
+
+impl VtolState {
+    /// From the MAVLink value.
+    pub fn from_mavlink(v: u8) -> Self {
+        match v {
+            1 => VtolState::TransitionToFw,
+            2 => VtolState::TransitionToMc,
+            3 => VtolState::Mc,
+            4 => VtolState::Fw,
+            _ => VtolState::Undefined,
+        }
+    }
+}
+
+/// Flight phase from `EXTENDED_SYS_STATE` (autopilot component only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Extended {
+    /// Landed state.
+    pub landed: LandedState,
+    /// VTOL state.
+    pub vtol: VtolState,
+}
+
 /// Everything known about one system.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct VehicleState {
@@ -156,6 +231,8 @@ pub struct VehicleState {
     pub power: Option<Timed<Power>>,
     /// GPS.
     pub gps: Option<Timed<Gps>>,
+    /// Landed and VTOL state.
+    pub extended: Option<Timed<Extended>>,
     /// Messages applied, by message id.
     pub message_counts: BTreeMap<u32, u64>,
 }
@@ -293,6 +370,15 @@ impl Fleet {
                     },
                 );
             }
+            Message::ExtendedSysState(e) if compid == AUTOPILOT_COMPID => {
+                v.extended = timed(
+                    now,
+                    Extended {
+                        landed: LandedState::from_mavlink(e.landed_state),
+                        vtol: VtolState::from_mavlink(e.vtol_state),
+                    },
+                );
+            }
             Message::Statustext(s) => {
                 let end = s.text.iter().position(|&b| b == 0).unwrap_or(s.text.len());
                 return Some(StatusText {
@@ -424,5 +510,36 @@ mod tests {
             .apply(1, 1, &Message::Statustext(s), Instant::now())
             .unwrap();
         assert_eq!((t.severity, t.text.as_str()), (3, "PreArm: RC not"));
+    }
+
+    #[test]
+    fn landed_state_comes_from_the_autopilot_only() {
+        use mavlink_codec::messages::ExtendedSysState;
+        let mut f = Fleet::new();
+        let now = Instant::now();
+        let ext = |landed, vtol| {
+            Message::ExtendedSysState(ExtendedSysState {
+                vtol_state: vtol,
+                landed_state: landed,
+            })
+        };
+        f.apply(1, 1, &ext(1, 0), now);
+        let e = f.get(1).unwrap().extended.clone().unwrap().value;
+        assert_eq!(
+            (e.landed, e.vtol),
+            (LandedState::OnGround, VtolState::Undefined)
+        );
+        // A camera or gimbal (another component) must not change the flight phase.
+        f.apply(1, 100, &ext(2, 0), now);
+        assert_eq!(
+            f.get(1).unwrap().extended.clone().unwrap().value.landed,
+            LandedState::OnGround
+        );
+        f.apply(1, 1, &ext(2, 4), now);
+        let e = f.get(1).unwrap().extended.clone().unwrap().value;
+        assert_eq!((e.landed, e.vtol), (LandedState::InAir, VtolState::Fw));
+        // Unknown values are Undefined, never guessed.
+        assert_eq!(LandedState::from_mavlink(9), LandedState::Undefined);
+        assert_eq!(VtolState::from_mavlink(9), VtolState::Undefined);
     }
 }

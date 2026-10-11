@@ -433,6 +433,10 @@ pub struct VehicleFacts {
     pub armed: Option<bool>,
     /// `custom_mode` from the last heartbeat.
     pub custom_mode: Option<u32>,
+    /// `MAV_LANDED_STATE` from the last `EXTENDED_SYS_STATE`, with its age. Recorded for
+    /// ADR-0011 interpretation 2 (single-action disarm once landed is known); no rule uses it
+    /// yet — that waits for the safety lead's decision.
+    pub landed_state: Option<(u8, Duration)>,
 }
 
 /// Heartbeat link state (mirrors dc-core's `VehicleLink`, plan 08 §4.3).

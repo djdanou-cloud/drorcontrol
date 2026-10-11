@@ -75,7 +75,10 @@
 **Interpretations awaiting confirmation** (from ADR-0011):
 * (I1) Arm, Takeoff and motor test are single action, because the directive keeps two-stage
   confirmation "exclusively" for D2.
-* (I2) `Disarm` stays two-stage even on the ground until landed state is known.
+* (I2) `Disarm` stays two-stage even on the ground until landed state is known. The core now
+  reads the landed state (`EXTENDED_SYS_STATE`, requested at 2 Hz) and passes it with its age
+  to the command policy (SITL check: a copter on the ground reports ON_GROUND). No rule uses
+  it yet: making a disarm on the ground single action is the safety lead's decision.
 * (I3) Force-arm (class D, typed), and parameter reset, mission upload while armed and
   firmware flash (class C), keep their confirmation. None of them is a flight control.
 

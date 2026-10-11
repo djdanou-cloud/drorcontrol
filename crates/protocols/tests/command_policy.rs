@@ -29,12 +29,14 @@ fn disarmed() -> VehicleFacts {
     VehicleFacts {
         armed: Some(false),
         custom_mode: Some(5),
+        ..Default::default()
     }
 }
 fn armed() -> VehicleFacts {
     VehicleFacts {
         armed: Some(true),
         custom_mode: Some(5),
+        ..Default::default()
     }
 }
 fn ack(cmd: u16, result: MavResult) -> CommandAck {

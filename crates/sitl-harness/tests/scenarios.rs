@@ -56,6 +56,17 @@ async fn connect_detects_the_vehicle_and_receives_telemetry() {
     .await
     .expect("ATTITUDE within 20 s");
     assert_eq!(core.vehicle_link(1), Some(VehicleLink::Connected));
+    // EXTENDED_SYS_STATE is requested too: a copter on the ground says so (ADR-0011 I2).
+    tokio::time::timeout(Duration::from_secs(20), async {
+        while core.facts(1).landed_state.is_none() {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("EXTENDED_SYS_STATE within 20 s");
+    let ext = core.fleet().get(1).unwrap().extended.clone().unwrap().value;
+    assert_eq!(ext.landed, dc_core::LandedState::OnGround);
+    assert_eq!(core.facts(1).landed_state.map(|(s, _)| s), Some(1));
 }
 
 #[tokio::test(flavor = "multi_thread")]

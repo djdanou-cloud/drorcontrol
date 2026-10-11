@@ -44,7 +44,7 @@ use protocols::command::{
 use protocols::params::{DownloadConfig, DownloadStatus, Param, ParamDownload};
 use tokio::sync::broadcast;
 
-pub use vehicle::{Fleet, StatusText, VehicleState};
+pub use vehicle::{Extended, Fleet, LandedState, StatusText, VehicleState, VtolState};
 
 /// How to reach a vehicle. Parsed from strings such as `tcp:127.0.0.1:5760`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -219,8 +219,16 @@ impl Default for CoreConfig {
             sysid: 255,
             compid: 190,
             tlog: None,
-            // ATTITUDE, GLOBAL_POSITION_INT, VFR_HUD, SYS_STATUS, GPS_RAW_INT
-            stream_rates: vec![(30, 10.0), (33, 5.0), (74, 5.0), (1, 2.0), (24, 2.0)],
+            // ATTITUDE, GLOBAL_POSITION_INT, VFR_HUD, SYS_STATUS, GPS_RAW_INT,
+            // EXTENDED_SYS_STATE (landed / VTOL state)
+            stream_rates: vec![
+                (30, 10.0),
+                (33, 5.0),
+                (74, 5.0),
+                (1, 2.0),
+                (24, 2.0),
+                (245, 2.0),
+            ],
             link_stale: Duration::from_millis(1500),
             link_lost: Duration::from_secs(5),
             policy: PolicyConfig::default(),
@@ -618,10 +626,15 @@ impl Core {
     /// Last-known vehicle state, as the command policy sees it.
     pub fn facts(&self, sysid: u8) -> VehicleFacts {
         let fleet = self.fleet();
-        let hb = fleet.get(sysid).and_then(|v| v.heartbeat.as_ref());
+        let v = fleet.get(sysid);
+        let hb = v.and_then(|v| v.heartbeat.as_ref());
+        let now = Instant::now();
         VehicleFacts {
             armed: hb.map(|h| h.value.armed()),
             custom_mode: hb.map(|h| h.value.custom_mode),
+            landed_state: v
+                .and_then(|v| v.extended.as_ref())
+                .map(|e| (e.value.landed.to_mavlink(), e.age(now))),
         }
     }
 
