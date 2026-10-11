@@ -1,6 +1,6 @@
 # ADR-0005: macOS distribution — Developer ID, Hardened Runtime, notarized, not sandboxed (v1)
 
-* Status: proposed
+* Status: superseded by ADR-0010 (no Apple credentials; internal distribution)
 * Date: 2026-10-10
 * Validation: notarized artefact verified via `spctl`/`stapler` on clean VM (S0-6); nightly dry-run job
 

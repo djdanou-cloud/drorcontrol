@@ -93,7 +93,7 @@ flowchart LR
   UIT --> D[Docs build: cargo doc, doxygen, buf, mavlink-gen, mkdocs --strict, lychee]
   D --> G{Gates: doc coverage, ADR check, parity.yaml diff}
   G -->|merge to main| P[Publish versioned docs via mike to Pages]
-  G -->|tag| R[Release: sign, notarize, SBOM, docs bundle, appcast]
+  G -->|tag| R[Release: ad-hoc sign + SHA-256 (ADR-0010), SBOM, docs bundle, appcast]
 ```
 Gates: `mkdocs build --strict` warnings = failure; missing-doc lint on public items; `parity.yaml` rows that flip to *implemented* must reference a handbook page and test ID; broken link = failure; generated files verified up-to-date (`git diff --exit-code`).
 

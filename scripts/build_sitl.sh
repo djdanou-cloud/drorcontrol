@@ -12,9 +12,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="${1:-$ROOT/.sitl}"
 TAG="${2:-Copter-4.7.1}"
 VEHICLE="${3:-copter}"
-SRC="$WORK/ardupilot-$TAG"
-
 mkdir -p "$WORK"
+WORK="$(cd "$WORK" && pwd)"   # absolute: the build cd's into the source tree
+SRC="$WORK/ardupilot-$TAG"
 if [ ! -d "$SRC/.git" ]; then
   git clone --quiet --depth 1 --branch "$TAG" https://github.com/ArduPilot/ardupilot "$SRC"
 fi

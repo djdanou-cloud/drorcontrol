@@ -9,7 +9,7 @@
 A cross-platform ground control station (GCS) for ArduPilot vehicles that:
 
 1. Reaches **100 % functional parity** with Mission Planner, tracked as numbered, testable parity items (`PAR-xxx`, [02](02-parity-matrix.md)).
-2. Is a **Tier-1 native macOS application** (Apple Silicon + Intel, Metal-accelerated, notarized, driverless serial) and equally first-class on Windows 10/11 and Linux ([03](03-macos-platform.md)).
+2. Is a **Tier-1 native macOS application** (Apple Silicon + Intel, Metal-accelerated, ad-hoc signed for internal distribution per ADR-0010, driverless serial) and equally first-class on Windows 10/11 and Linux ([03](03-macos-platform.md)).
 3. Replaces WinForms/GDI+ with a **glass-cockpit UI** built on the DrorAero visual identity, with Daylight and Night-Ops (NVG-safe) themes ([04](04-ux-design-system.md)).
 4. Is built around a **headless Rust core** so the same engine drives the desktop app, CI test pilots, scripts, and remote/web viewers ([01](01-architecture.md)).
 5. Ships with a **publication-grade documentation system** treated as a release gate, not an afterthought ([06](06-documentation-system.md)).
@@ -59,7 +59,7 @@ A cross-platform ground control station (GCS) for ArduPilot vehicles that:
 1. **Licence & IP posture.** Mission Planner is GPLv3. The plan assumes a *clean-room* implementation from public specs and behavioural observation (reading GPL source to learn protocol behaviour is fine; copying code is not). Qt (LGPL, dynamic link), GStreamer (LGPL) permit a proprietary build; ArduPilot-derived assets (parameter metadata, SITL) are GPLv3 but consumed as *data/separate processes*. **Legal must confirm** before any MP source is imported. If DrorAero prefers GPLv3 for the GCS itself, code reuse from MP becomes possible and schedule drops ~8 %.
 2. **Trademark clearance** for "DrorControl" (name confirmed; search/registration pending). Avoid "Mission Planner" in product marketing — it is an ArduPilot community name.
 3. **Urbane font licence** for redistribution inside the app bundle (fallback: Inter).
-4. **Apple multicast networking entitlement** requested early (lead time weeks).
+4. ~~Apple multicast networking entitlement~~ Not needed: no Apple credentials, unsandboxed app (ADR-0010).
 5. **Hebrew/RTL** is specified here as P1 (DrorAero is Israel-based) — confirm.
 6. **Sandboxed Mac App Store** distribution desired at all? (v1 plan: no.)
 

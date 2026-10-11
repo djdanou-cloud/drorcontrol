@@ -59,7 +59,7 @@ flowchart LR
 | UI | QtQuickTest, accessibility tree assertions, **golden-image screenshots** (PFD, map, wizards) × 4 themes × 3 DPI with tolerance; layout under RTL |
 | Performance | `/bench` regression gates (ingest, parse, plot, frame time, power) ±10 % |
 | Static/security | clippy `-D warnings`, `cargo-deny/audit`, clang-tidy, CodeQL, SBOM (CycloneDX), secret scanning |
-| Packaging | install/upgrade/uninstall on clean VMs; Gatekeeper first-run test; signature/notarization verification |
+| Packaging | install/upgrade/uninstall on clean VMs; Gatekeeper first-run procedure (ADR-0010 "Open Anyway"); ad-hoc signature + checksum verification |
 
 ## 3. Hardware-in-the-loop (HITL) test bench
 

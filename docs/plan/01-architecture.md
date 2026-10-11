@@ -263,4 +263,4 @@ SQLite (WAL) for settings, vehicle profiles, parameter snapshots, mission librar
 | S0-3 | Map: MapLibre Metal ↔ Qt RHI texture import | See §5.1 gate |
 | S0-4 | Dataflash: 4 GB log index + LTTB plot | Index ≤ 20 s; plot ≤ 1 s; RSS ≤ 1.2 GB |
 | S0-5 | Video: 1080p30 H.264 RTSP VideoToolbox zero-copy + overlay | ≤ 8 ms decode, ≤ 5 % CPU on M1 |
-| S0-6 | Notarized universal build produced by GitHub Actions | `spctl --assess` passes; staple verified on clean VM |
+| S0-6 | Ad-hoc signed universal build produced by GitHub Actions (ADR-0010; was: notarized) | `codesign --verify --deep --strict` passes; `lipo` shows arm64 + x86_64; app starts on both runner architectures; SHA-256 published |

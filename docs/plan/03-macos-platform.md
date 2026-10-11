@@ -72,6 +72,8 @@ trait SerialBackend { fn list() -> Vec<PortInfo>; fn open(&PortInfo, &Config) ->
 ## 4. Permissions, entitlements & sandboxing
 
 ### 4.1 Decision (ADR-0005)
+> **Superseded in part by [ADR-0010](adr/0010-internal-distribution-without-apple-credentials.md):** no Apple credentials; the app is **ad-hoc signed**, not notarized, and shared as a file with a SHA-256 checksum. Developer ID and notarization below apply only if that decision is ever reversed.
+
 Distribute **outside the Mac App Store** with **Developer ID + Hardened Runtime + notarization**. App Sandbox is **off** in v1 because: SITL supervisor spawns/downloads executables, plugins/scripts run as child processes, users pick arbitrary log/mission/DEM paths, and bundled GStreamer plugins are loaded dynamically. A **sandboxed MAS variant** is a separate later target (feasible subset: serial, network, user-selected file access via security-scoped bookmarks; SITL and plugin features reduced).
 
 ### 4.2 Hardened Runtime entitlements (`DrorControl.entitlements`)
@@ -109,6 +111,8 @@ Distribute **outside the Mac App Store** with **Developer ID + Hardened Runtime 
 * **Permission UX rule:** never prompt at launch. Prompt contextually when the user first uses the feature, with a pre-prompt explainer card.
 
 ## 5. Signing, notarization & CI pipeline (GitHub Actions)
+
+> **Current pipeline ([ADR-0010](adr/0010-internal-distribution-without-apple-credentials.md)):** universal build → inside-out **ad-hoc** `codesign --sign -` → `codesign --verify --deep --strict` + `lipo` checks → launch test on arm64 and x86_64 runners → `.zip` + `.dmg` + SHA-256. Steps below that need Apple credentials (Developer ID, `notarytool`, `stapler`, `spctl` acceptance) are not used.
 
 ### 5.1 Steps
 1. Build arm64 + x86_64 → lipo → assemble `.app` (`macdeployqt` then our post-processor).

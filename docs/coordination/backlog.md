@@ -13,7 +13,7 @@ Static task definitions. **Task state is not stored here** (that would cause mer
 | T0-07 | WS-GFX | Spike S0-3: MapLibre Native (Metal) ↔ Qt RHI texture import | 01 §5.1, ADR-0003 | T0-01 | Go/no-go memo by week 6 with numbers |
 | T0-08 | WS-LOGS | Spike S0-4: 4 GB `.bin` index + LTTB/MinMaxLTTB plot | 05 §1, S0-4 | T0-01 | Index ≤ 20 s, plot ≤ 1 s, RSS ≤ 1.2 GB |
 | T0-09 | WS-VIDEO | Spike S0-5: 1080p30 RTSP H.264 VideoToolbox zero-copy + overlay | 01 §6 | T0-01 | ≤ 8 ms decode, ≤ 5 % CPU on M1 |
-| T0-10 | WS-MACOS | Notarized universal build in GitHub Actions (S0-6); Apple entitlements/multicast request | 03 §5, 07 D0-6 | T0-01 | `spctl`/`stapler` verified on clean VM; human provides Apple credentials |
+| T0-10 | WS-MACOS | Universal `.app` build in GitHub Actions, **ad-hoc signed**, `.zip` + `.dmg` + SHA-256 (S0-6, re-scoped by ADR-0010: no Apple credentials) | 03 §5, 07 D0-6, ADR-0010 | T0-01 | CI: `codesign --verify --deep --strict` passes; `lipo` shows arm64 + x86_64; app starts on arm64 and x86_64 runners; checksums published |
 | T0-11 | WS-QA | Parity audit → frozen `parity.yaml`; test corpus collection | 02, 07 D0-7 | — | `parity.yaml` merged; every row has ID/owner/test id placeholder |
 | T0-12 | WS-UX | Design tokens v0 (JSON → QML/CSS), 4 themes, type scale, contrast unit test | 04 §1–2, 07 D0-8 | — | Contrast test passes (≥ 7:1 telemetry text) |
 | T0-13 | WS-DOCS | MkDocs Material site, ADR tooling, generated MAVLink reference, CI doc gates | 06, 07 D0-9 | T0-01 | `mkdocs build --strict` in CI; ADR index generated |

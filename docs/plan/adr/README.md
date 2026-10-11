@@ -5,7 +5,7 @@
 Process and template: see [`../06-documentation-system.md`](../06-documentation-system.md) §4.2 and
 [`0000-template.md`](0000-template.md). Accepted ADRs are immutable; supersede instead of editing.
 
-9 ADRs: 7 proposed, 2 accepted.
+10 ADRs: 6 proposed, 3 accepted, 1 superseded.
 
 | ADR | Title | Status | Date |
 |-----|-------|--------|------|
@@ -13,8 +13,9 @@ Process and template: see [`../06-documentation-system.md`](../06-documentation-
 | [0002](0002-ipc-planes.md) | Four IPC planes (control, state, events, bulk) | proposed | 2026-10-10 |
 | [0003](0003-map-engine.md) | MapSurface abstraction; MapLibre Native primary, wgpu fallback; wgpu for 3-D | proposed — go/no-go at week 6 (spike S0-3) | 2026-10-10 |
 | [0004](0004-video-pipeline.md) | GStreamer-based video with zero-copy GPU import and in-compositor telemetry overlay | proposed | 2026-10-10 |
-| [0005](0005-macos-distribution.md) | macOS distribution — Developer ID, Hardened Runtime, notarized, not sandboxed (v1) | proposed | 2026-10-10 |
+| [0005](0005-macos-distribution.md) | macOS distribution — Developer ID, Hardened Runtime, notarized, not sandboxed (v1) | superseded by ADR-0010 (no Apple credentials; internal distribution) | 2026-10-10 |
 | [0006](0006-plugins-scripting.md) | Out-of-process plugins and scripts over the public gRPC API | proposed | 2026-10-10 |
 | [0007](0007-docs-as-code.md) | Documentation as code with enforced CI gates | proposed | 2026-10-10 |
 | [0008](0008-parity-out-of-scope.md) | Mission Planner items outside the parity scope | accepted | 2026-10-11 |
 | [0009](0009-link-state-never-blocks-commands.md) | Link state never blocks commands | accepted | 2026-10-11 |
+| [0010](0010-internal-distribution-without-apple-credentials.md) | Internal distribution without Apple developer credentials | accepted | 2026-10-11 |
