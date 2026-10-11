@@ -19,7 +19,7 @@
 //! reports [`CoreEvent::Command`] on every change and appends each step to a hash-chained
 //! audit log ([`CoreConfig::audit_log`]).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::io;
 use std::net::SocketAddr;
@@ -49,6 +49,7 @@ use tokio::sync::broadcast;
 pub use vehicle::{
     Extended, Firmware, FirmwareSource, Fleet, LandedState, StatusText, VehicleState, VtolState,
 };
+pub use vehicle::{NavHealth, NavThresholds, PositionTrust};
 
 /// How to reach a vehicle. Parsed from strings such as `tcp:127.0.0.1:5760`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -179,6 +180,8 @@ pub struct CoreConfig {
     /// Append the hash-chained command audit log here. An existing file is verified and
     /// continued; a broken chain refuses to start (tamper evidence).
     pub audit_log: Option<PathBuf>,
+    /// Navigation-health thresholds (hazard H16; defaults mirror ArduPilot's EKF check).
+    pub nav: NavThresholds,
 }
 
 impl CoreConfig {
@@ -224,7 +227,7 @@ impl Default for CoreConfig {
             compid: 190,
             tlog: None,
             // ATTITUDE, GLOBAL_POSITION_INT, VFR_HUD, SYS_STATUS, GPS_RAW_INT,
-            // EXTENDED_SYS_STATE (landed / VTOL state)
+            // EXTENDED_SYS_STATE (landed / VTOL state), EKF_STATUS_REPORT (navigation health)
             stream_rates: vec![
                 (30, 10.0),
                 (33, 5.0),
@@ -232,11 +235,13 @@ impl Default for CoreConfig {
                 (1, 2.0),
                 (24, 2.0),
                 (245, 2.0),
+                (193, 2.0),
             ],
             link_stale: Duration::from_millis(1500),
             link_lost: Duration::from_secs(5),
             policy: PolicyConfig::default(),
             audit_log: None,
+            nav: NavThresholds::default(),
         }
     }
 }
@@ -398,6 +403,8 @@ pub struct Core {
     events: broadcast::Sender<CoreEvent>,
     policy: Arc<std::sync::Mutex<CommandPolicy>>,
     audit: Option<std::sync::mpsc::Sender<(SystemTime, AuditEvent)>>,
+    /// Last navigation trust per vehicle, to alert on changes.
+    nav_trust: Arc<std::sync::Mutex<HashMap<u8, PositionTrust>>>,
 }
 
 impl Core {
@@ -430,6 +437,7 @@ impl Core {
             events,
             policy,
             audit,
+            nav_trust: Arc::default(),
         };
 
         // Recorder: lossless, on a blocking thread so disk latency never touches routing.
@@ -613,6 +621,11 @@ impl Core {
         };
         if !changed.is_empty() {
             self.deliver(Vec::new(), changed).await;
+        }
+        if compid == vehicle::AUTOPILOT_COMPID
+            && matches!(msg, Message::EkfStatusReport(_) | Message::GpsRawInt(_))
+        {
+            self.check_nav(sysid, now);
         }
         if first_heartbeat && compid == vehicle::AUTOPILOT_COMPID {
             let _ = self.events.send(CoreEvent::VehicleSeen { sysid });
@@ -871,6 +884,48 @@ impl Core {
         .await
         .ok()
         .flatten()
+    }
+
+    /// Navigation health of `sysid` now (hazard H16): whether the displayed position can be
+    /// trusted, from the autopilot's own EKF report.
+    pub fn nav_health(&self, sysid: u8) -> NavHealth {
+        match self.fleet().get(sysid) {
+            Some(v) => vehicle::nav::assess(v, &self.cfg.nav, Instant::now()),
+            None => NavHealth {
+                trust: PositionTrust::Unknown,
+                reasons: vec!["vehicle not seen"],
+            },
+        }
+    }
+
+    /// Alert when the navigation trust of `sysid` changes: Untrusted is a Warning, Degraded
+    /// a Caution, back to Good an Advisory.
+    fn check_nav(&self, sysid: u8, now: Instant) {
+        let Some(health) = self
+            .fleet()
+            .get(sysid)
+            .map(|v| vehicle::nav::assess(v, &self.cfg.nav, now))
+        else {
+            return;
+        };
+        let before = self
+            .nav_trust
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(sysid, health.trust);
+        if before == Some(health.trust) || health.trust == PositionTrust::Unknown {
+            return;
+        }
+        let why = health.reasons.join(", ");
+        let (level, text) = match health.trust {
+            PositionTrust::Untrusted => (AlertLevel::Warning, format!("POSITION UNTRUSTED: {why}")),
+            PositionTrust::Degraded => (AlertLevel::Caution, format!("POSITION DEGRADED: {why}")),
+            PositionTrust::Good if before.is_some_and(|b| b != PositionTrust::Unknown) => {
+                (AlertLevel::Advisory, "Position good again".to_string())
+            }
+            _ => return,
+        };
+        let _ = self.events.send(CoreEvent::Alert { sysid, level, text });
     }
 
     /// Ask the autopilot for its version banner (`MAV_CMD_DO_SEND_BANNER`), which confirms the

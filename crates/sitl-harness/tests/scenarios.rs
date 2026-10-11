@@ -313,3 +313,62 @@ async fn firmware_is_confirmed_and_a_named_mode_change_is_verified() {
     assert_eq!(status.summary(), "MODE LOITER (5): VERIFIED");
     assert_eq!(core.fleet().get(1).unwrap().mode_name(), Some("LOITER"));
 }
+
+/// Hazard H16: the GCS mirrors the autopilot's EKF. With GPS the position is trusted; when the
+/// GPS fails the core says the position cannot be trusted and raises a Warning.
+#[tokio::test(flavor = "multi_thread")]
+async fn gps_loss_makes_the_position_untrusted() {
+    use dc_core::{AlertLevel, PositionTrust};
+    use mavlink_codec::Message;
+    use mavlink_codec::messages::ParamSet;
+    let Some(cfg) = SitlConfig::copter_or_skip() else {
+        return;
+    };
+    let sitl = Sitl::start(&cfg).unwrap();
+    let core = core_on(sitl.addr()).await;
+    let mut events = core.events();
+    assert_eq!(
+        core.wait_for_vehicle(Duration::from_secs(60)).await,
+        Some(1)
+    );
+    let t0 = Instant::now();
+    tokio::time::timeout(Duration::from_secs(90), async {
+        while core.nav_health(1).trust != PositionTrust::Good {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("EKF never good: {:?}", core.nav_health(1)));
+    eprintln!("position good after {:.1} s", t0.elapsed().as_secs_f32());
+    while events.try_recv().is_ok() {}
+
+    // Fail the simulated GPS.
+    let mut param_id = [0u8; 16];
+    param_id[..15].copy_from_slice(b"SIM_GPS1_ENABLE");
+    core.send(&Message::ParamSet(ParamSet {
+        target_system: 1,
+        target_component: 1,
+        param_id,
+        param_value: 0.0,
+        param_type: 9,
+    }))
+    .await;
+    let t1 = Instant::now();
+    let warning = tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            if let Ok(dc_core::CoreEvent::Alert {
+                level: AlertLevel::Warning,
+                text,
+                ..
+            }) = events.recv().await
+                && text.starts_with("POSITION UNTRUSTED")
+            {
+                return text;
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("no untrusted warning; health {:?}", core.nav_health(1)));
+    eprintln!("{warning} after {:.1} s", t1.elapsed().as_secs_f32());
+    assert_eq!(core.nav_health(1).trust, PositionTrust::Untrusted);
+}

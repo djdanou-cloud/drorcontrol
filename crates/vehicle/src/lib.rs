@@ -14,7 +14,9 @@ use mavlink_codec::Message;
 use mavlink_codec::enums::MavModeFlag;
 
 pub mod modes;
+pub mod nav;
 pub use modes::{Firmware, FirmwareSource};
+pub use nav::{Ekf, NavHealth, NavThresholds, PositionTrust};
 
 /// Identity and mode from `HEARTBEAT`.
 #[derive(Debug, Clone, PartialEq)]
@@ -253,6 +255,8 @@ pub struct VehicleState {
     pub gps: Option<Timed<Gps>>,
     /// Landed and VTOL state.
     pub extended: Option<Timed<Extended>>,
+    /// EKF status (see [`nav`]).
+    pub ekf: Option<Timed<Ekf>>,
     /// Firmware family and how it was identified (see [`modes`]).
     pub firmware: Option<(Firmware, FirmwareSource)>,
     /// Messages applied, by message id.
@@ -395,6 +399,18 @@ impl Fleet {
                         satellites: (g.satellites_visible != u8::MAX)
                             .then_some(g.satellites_visible),
                         hdop: (g.eph != u16::MAX).then(|| f32::from(g.eph) / 100.0),
+                    },
+                );
+            }
+            Message::EkfStatusReport(e) if compid == AUTOPILOT_COMPID => {
+                v.ekf = timed(
+                    now,
+                    Ekf {
+                        flags: e.flags,
+                        velocity_var: e.velocity_variance,
+                        pos_horiz_var: e.pos_horiz_variance,
+                        pos_vert_var: e.pos_vert_variance,
+                        compass_var: e.compass_variance,
                     },
                 );
             }
