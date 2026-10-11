@@ -577,6 +577,7 @@ name = "protocols"
 version = "0.0.0"
 dependencies = [
  "mavlink-codec",
+ "sha2",
 ]
 
 [[package]]
