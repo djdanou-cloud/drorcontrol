@@ -1247,6 +1247,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sitl-harness"
+version = "0.0.0"
+dependencies = [
+ "dc-core",
+ "mavlink-codec",
+ "tokio",
+]
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"

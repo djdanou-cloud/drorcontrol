@@ -467,21 +467,40 @@ impl Core {
         });
 
         // Link watchdog: heartbeat age -> CONNECTED / STALE / LOST, events on transitions.
+        // Sampling every 100 ms could miss a state that lasted less than that (a LOST that
+        // ends just after the threshold), so the gap between consecutive heartbeats is also
+        // checked and any skipped states are reported in order before the recovery.
         let c = core.clone();
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(Duration::from_millis(100));
-            let mut last: BTreeMap<u8, VehicleLink> = BTreeMap::new();
+            let mut last: BTreeMap<u8, (VehicleLink, Instant)> = BTreeMap::new();
             loop {
                 tick.tick().await;
                 let now = Instant::now();
-                for v in c.fleet().vehicles().filter(|v| v.heartbeat.is_some()) {
+                for v in c.fleet().vehicles() {
+                    let Some(hb) = v.heartbeat.as_ref() else {
+                        continue;
+                    };
                     let state = vehicle_link(v, now, &c.cfg);
-                    if last
-                        .insert(v.sysid, state)
-                        .is_some_and(|prev| prev != state)
-                    {
-                        let heartbeat_age =
-                            v.heartbeat.as_ref().map(|h| h.age(now)).unwrap_or_default();
+                    let mut report = Vec::new();
+                    if let Some(&(prev, prev_at)) = last.get(&v.sysid) {
+                        let gap = hb.at.saturating_duration_since(prev_at);
+                        if hb.at != prev_at {
+                            // A new heartbeat ended a gap: states the sampler skipped.
+                            if prev == VehicleLink::Connected && gap >= c.cfg.link_stale {
+                                report.push((VehicleLink::Stale, gap));
+                            }
+                            if prev != VehicleLink::Lost && gap >= c.cfg.link_lost {
+                                report.push((VehicleLink::Lost, gap));
+                            }
+                        }
+                        let shown = report.last().map_or(prev, |r| r.0);
+                        if shown != state {
+                            report.push((state, hb.age(now)));
+                        }
+                    }
+                    last.insert(v.sysid, (state, hb.at));
+                    for (state, heartbeat_age) in report {
                         let ev = CoreEvent::VehicleLink {
                             sysid: v.sysid,
                             state,

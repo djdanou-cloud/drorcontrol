@@ -179,3 +179,45 @@ fn shutdown_flushes_the_tlog() {
     );
     assert_eq!(records[0].frame.decode().unwrap().name(), "HEARTBEAT");
 }
+
+/// A LOST that ends within one watchdog tick must still be reported (found by the SITL
+/// fade scenario): the heartbeat gap reveals states the 100 ms sampler skipped.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_brief_lost_is_never_skipped() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (talk, talking) = watch::channel(true);
+    tokio::spawn(vehicle(listener, talking));
+    let core = Core::start(CoreConfig {
+        link_stale: Duration::from_millis(300),
+        link_lost: Duration::from_millis(900),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let mut events = core.events();
+    core.connect(&LinkSpec::Tcp(addr)).await.unwrap();
+    assert_eq!(core.wait_for_vehicle(Duration::from_secs(5)).await, Some(1));
+    for round in 0..5 {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        while events.try_recv().is_ok() {}
+        // Silent just past the LOST threshold, then back: LOST lasts only a few ms.
+        talk.send(false).unwrap();
+        tokio::time::sleep(Duration::from_millis(905 + 17 * round)).await;
+        talk.send(true).unwrap();
+        let mut seen = Vec::new();
+        while !seen.contains(&VehicleLink::Connected) {
+            let (s, _) = next_link_state(&mut events).await;
+            seen.push(s);
+        }
+        assert_eq!(
+            seen,
+            [
+                VehicleLink::Stale,
+                VehicleLink::Lost,
+                VehicleLink::Connected
+            ],
+            "round {round}"
+        );
+    }
+}

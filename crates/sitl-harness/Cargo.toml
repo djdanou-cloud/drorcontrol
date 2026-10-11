@@ -1,0 +1,17 @@
+[package]
+name = "sitl-harness"
+description = "ArduPilot SITL launcher, link-chaos proxy and scenario tests for DrorControl (plan 08 §2)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+mavlink-codec.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+dc-core = { path = "../dc-core" }
+
+[lints]
+workspace = true

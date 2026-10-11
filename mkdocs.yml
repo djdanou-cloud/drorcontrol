@@ -78,6 +78,7 @@ nav:
   - Reference:
       - MAVLink: reference/mavlink/index.md
   - Quality:
+      - SITL harness: dev/sitl-harness.md
       - Parity inventory: parity/README.md
       - Test corpus: corpus/README.md
       - Audit 2026-10-11: audit/2026-10-11-external-audit.md

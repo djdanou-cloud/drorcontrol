@@ -110,3 +110,45 @@ jobs:
           name: docs-site
           path: site/
           retention-days: 14
+
+  sitl:
+    name: sitl scenarios (ArduCopter 4.7.1)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      SITL_TAG: Copter-4.7.1
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Only the binary and its default parameters are cached, keyed on the build script and
+      # the pinned tag; a cache miss builds ArduPilot from source (~10 min).
+      - name: Restore SITL build
+        id: sitl-cache
+        uses: actions/cache@v4
+        with:
+          path: .sitl-dist
+          key: sitl-${{ env.SITL_TAG }}-${{ runner.os }}-${{ hashFiles('scripts/build_sitl.sh') }}
+
+      - name: Build SITL from source (cache miss)
+        if: steps.sitl-cache.outputs.cache-hit != 'true'
+        run: |
+          scripts/build_sitl.sh .sitl "$SITL_TAG" copter
+          mkdir -p .sitl-dist
+          cp ".sitl/ardupilot-$SITL_TAG/build/sitl/bin/arducopter" .sitl-dist/
+          cp ".sitl/ardupilot-$SITL_TAG/Tools/autotest/default_params/copter.parm" .sitl-dist/
+
+      - name: Scenarios (connect, parameters, 30 % loss, fade, reconnect)
+        env:
+          DC_SITL_REQUIRED: "1"
+          DC_SITL_BIN: ${{ github.workspace }}/.sitl-dist/arducopter
+          DC_SITL_DEFAULTS: ${{ github.workspace }}/.sitl-dist/copter.parm
+        run: cargo test -p sitl-harness --locked -- --nocapture

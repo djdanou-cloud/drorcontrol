@@ -21,3 +21,4 @@ Thumbs.db
 /.venv-docs/
 /docs/reference/mavlink/
 /docs/stylesheets/tokens.css
+/.sitl-dist/
