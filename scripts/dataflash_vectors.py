@@ -9,6 +9,10 @@ parser against these.
 
 Usage (pymavlink is dev-only, LGPLv3, never shipped):
     .venv/bin/python scripts/dataflash_vectors.py path/to/00000001.BIN --name sitl-copter-4.7.1
+
+For a whole log that stays out of git (checked by `cargo test -p logs -- --ignored`):
+    .venv/bin/python scripts/dataflash_vectors.py big.BIN --name big --max-bytes 0 --out ~/dc-corpus
+    DC_LOG_CORPUS=~/dc-corpus cargo test -p logs -- --ignored
 """
 import argparse
 import json
@@ -39,16 +43,18 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("log")
     ap.add_argument("--name", required=True)
-    ap.add_argument("--max-bytes", type=int, default=900_000)
+    ap.add_argument("--max-bytes", type=int, default=900_000, help="0 = whole log")
+    ap.add_argument("--out", type=Path, default=OUT)
     ap.add_argument("--sample-every", type=int, default=97)
     a = ap.parse_args()
 
     from pymavlink import DFReader
     import pymavlink
 
-    OUT.mkdir(parents=True, exist_ok=True)
-    fixture = OUT / f"{a.name}-head.bin"
-    fixture.write_bytes(head_at_record_boundary(Path(a.log).read_bytes(), a.max_bytes))
+    a.out.mkdir(parents=True, exist_ok=True)
+    data = Path(a.log).read_bytes()
+    fixture = a.out / f"{a.name}-head.bin"
+    fixture.write_bytes(head_at_record_boundary(data, a.max_bytes or len(data)))
 
     reader = DFReader.DFReader_binary(str(fixture), zero_time_base=False)
     counts, stats, samples = {}, {}, []
@@ -84,9 +90,9 @@ def main():
         "stats": stats,
         "samples": samples,
     }
-    out = OUT / f"{a.name}-head.json"
+    out = a.out / f"{a.name}-head.json"
     out.write_text(json.dumps(ref, separators=(",", ":")) + "\n", encoding="utf-8")
-    print(f"wrote {fixture.relative_to(ROOT)} ({fixture.stat().st_size} B) and {out.relative_to(ROOT)} "
+    print(f"wrote {fixture} ({fixture.stat().st_size} B) and {out} "
           f"({out.stat().st_size} B): {sum(counts.values())} records, {len(counts)} types, {len(samples)} samples")
 
 

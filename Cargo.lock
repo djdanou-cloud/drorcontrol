@@ -731,6 +731,7 @@ version = "0.0.0"
 dependencies = [
  "memchr",
  "memmap2",
+ "protocols",
  "rayon",
  "serde_json",
 ]

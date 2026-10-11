@@ -5,6 +5,7 @@
 //! dc-cli telemetry --connect udp:0.0.0.0:14550 [--seconds 10]
 //! dc-cli daemon    --connect tcp:127.0.0.1:5760 [--listen 127.0.0.1:50051]
 //! dc-cli remote    --grpc http://127.0.0.1:50051 vehicles|params|events
+//! dc-cli params-diff old.param flight.bin
 //! ```
 //!
 //! Read-only by design for now: parameter writes and vehicle commands will be exposed only
@@ -15,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use clap::{Parser, Subcommand};
 use dc_core::{Core, CoreConfig, CoreEvent, LinkSpec};
-use protocols::params::to_param_file;
+use protocols::params::{diff_params, parse_param_file, to_param_file};
 
 #[derive(Parser)]
 #[command(name = "dc-cli", version, about = "DrorControl command-line tool")]
@@ -94,6 +95,13 @@ enum Cmd {
         /// Duration in seconds.
         #[arg(long, default_value_t = 60)]
         seconds: u64,
+    },
+    /// Compare two parameter sets, each a .param file or the parameters recorded in a .bin log.
+    ParamsDiff {
+        /// Left side (.param or .bin).
+        a: std::path::PathBuf,
+        /// Right side (.param or .bin).
+        b: std::path::PathBuf,
     },
     /// Dataflash (.bin) log tools: index statistics and downsampled plots, with timings.
     Log {
@@ -260,6 +268,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         Cmd::Remote { grpc, what } => remote(grpc, what).await,
         Cmd::Ports { watch, probe } => ports(*watch, probe.as_deref()),
         Cmd::Log { what } => log_cmd(what),
+        Cmd::ParamsDiff { a, b } => params_diff(a, b),
         Cmd::Soak {
             tx,
             rx,
@@ -305,6 +314,51 @@ fn rss_mib() -> Option<(f64, f64, f64, f64)> {
         kb("RssFile:")?,
         kb("VmHWM:")?,
     ))
+}
+
+/// Parameters from a .param file, or from the `PARM` records of a .bin log.
+fn load_params(path: &std::path::Path) -> Result<std::collections::BTreeMap<String, f64>, String> {
+    let is_log = path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("bin"));
+    if is_log {
+        let log = logs::Log::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let p = log.params();
+        if p.is_empty() {
+            return Err(format!("{}: no PARM records", path.display()));
+        }
+        Ok(p)
+    } else {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        parse_param_file(&text).map_err(|e| format!("{}: {e}", path.display()))
+    }
+}
+
+fn params_diff(a: &std::path::Path, b: &std::path::Path) -> Result<(), String> {
+    let (pa, pb) = (load_params(a)?, load_params(b)?);
+    let d = diff_params(&pa, &pb);
+    // Shortest text that round-trips the vehicle's f32.
+    let f = |v: f64| v as f32;
+    for (k, x, y) in &d.changed {
+        println!("~ {k:<16} {} -> {}", f(*x), f(*y));
+    }
+    for k in &d.only_left {
+        println!("- {k:<16} {}", f(pa[k]));
+    }
+    for k in &d.only_right {
+        println!("+ {k:<16} {}", f(pb[k]));
+    }
+    println!(
+        "{} vs {}: {} vs {} parameters; {} changed, {} only left, {} only right",
+        a.display(),
+        b.display(),
+        pa.len(),
+        pb.len(),
+        d.changed.len(),
+        d.only_left.len(),
+        d.only_right.len()
+    );
+    Ok(())
 }
 
 fn log_cmd(what: &LogCmd) -> Result<(), String> {

@@ -345,6 +345,105 @@ pub fn to_param_file(params: &BTreeMap<String, Param>) -> String {
         .collect()
 }
 
+/// A line of a parameter file that could not be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParamFileError {
+    /// 1-based line number.
+    pub line: usize,
+    /// What was wrong.
+    pub reason: String,
+}
+
+impl std::fmt::Display for ParamFileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "line {}: {}", self.line, self.reason)
+    }
+}
+
+impl std::error::Error for ParamFileError {}
+
+/// Read a parameter file: Mission Planner (`NAME,VALUE`), MAVProxy (`NAME VALUE`) or
+/// QGroundControl (`SYSID<TAB>COMPID<TAB>NAME<TAB>VALUE<TAB>TYPE`). `#` starts a comment.
+/// A name given twice keeps its last value, as on the vehicle.
+pub fn parse_param_file(text: &str) -> Result<BTreeMap<String, f64>, ParamFileError> {
+    let mut out = BTreeMap::new();
+    for (i, raw) in text.lines().enumerate() {
+        let err = |reason: String| ParamFileError {
+            line: i + 1,
+            reason,
+        };
+        let line = raw.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        let cols: Vec<&str> = if line.contains(',') {
+            line.split(',').map(str::trim).collect()
+        } else {
+            line.split_whitespace().collect()
+        };
+        let (name, value) = match cols.as_slice() {
+            [sys, comp, name, value, _ty]
+                if sys.parse::<u8>().is_ok() && comp.parse::<u8>().is_ok() =>
+            {
+                (*name, *value)
+            }
+            [name, value] | [name, value, _] => (*name, *value),
+            _ => return Err(err(format!("expected NAME,VALUE: {raw:?}"))),
+        };
+        if name.is_empty()
+            || name.len() > 16
+            || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        {
+            return Err(err(format!("bad parameter name {name:?}")));
+        }
+        let v: f64 = value
+            .parse()
+            .map_err(|_| err(format!("bad value {value:?} for {name}")))?;
+        if !v.is_finite() {
+            return Err(err(format!("non-finite value for {name}")));
+        }
+        out.insert(name.to_string(), v);
+    }
+    Ok(out)
+}
+
+/// Differences between two parameter sets (e.g. vehicle vs file).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ParamDiff {
+    /// Names only in the left set.
+    pub only_left: Vec<String>,
+    /// Names only in the right set.
+    pub only_right: Vec<String>,
+    /// Names in both with different values: (name, left, right).
+    pub changed: Vec<(String, f64, f64)>,
+}
+
+impl ParamDiff {
+    /// True when the sets are identical.
+    pub fn is_empty(&self) -> bool {
+        self.only_left.is_empty() && self.only_right.is_empty() && self.changed.is_empty()
+    }
+}
+
+/// Compare two parameter sets. Values are compared as the vehicle stores them (`f32`), so
+/// `0.143237` in a file equals the vehicle's nearest float.
+pub fn diff_params(left: &BTreeMap<String, f64>, right: &BTreeMap<String, f64>) -> ParamDiff {
+    let mut d = ParamDiff::default();
+    for (k, &a) in left {
+        match right.get(k) {
+            None => d.only_left.push(k.clone()),
+            Some(&b) if a as f32 != b as f32 => d.changed.push((k.clone(), a, b)),
+            Some(_) => {}
+        }
+    }
+    d.only_right = right
+        .keys()
+        .filter(|k| !left.contains_key(*k))
+        .cloned()
+        .collect();
+    d
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -482,5 +581,33 @@ mod tests {
             },
         );
         assert_eq!(to_param_file(&m), "A_INT,3\nB_FLT,0.135\n");
+    }
+
+    #[test]
+    fn param_file_formats() {
+        let mp = parse_param_file("# saved\nRTL_ALT,300\nATC_RAT_RLL_P,0.143237\n\n").unwrap();
+        assert_eq!(mp["RTL_ALT"], 300.0);
+        assert_eq!(mp["ATC_RAT_RLL_P"], 0.143237);
+        let mavproxy =
+            parse_param_file("RTL_ALT 300.000000\nFS_THR_ENABLE\t3 # comment\n").unwrap();
+        assert_eq!(mavproxy["FS_THR_ENABLE"], 3.0);
+        let qgc = parse_param_file("# Onboard parameters\n1\t1\tRTL_ALT\t300\t4\n").unwrap();
+        assert_eq!(qgc["RTL_ALT"], 300.0);
+        let e = parse_param_file("RTL_ALT,300\nBAD NAME!,1\n").unwrap_err();
+        assert_eq!(e.line, 2);
+        assert!(parse_param_file("RTL_ALT,nan").is_err());
+        assert!(parse_param_file("RTL_ALT").is_err());
+    }
+
+    #[test]
+    fn diff_compares_as_f32() {
+        let a = parse_param_file("A,0.1\nB,1\nC,2").unwrap();
+        let mut b = parse_param_file("A,0.1\nB,1.5\nD,4").unwrap();
+        b.insert("A".into(), f64::from(0.1f32)); // vehicle's float: same parameter value
+        let d = diff_params(&a, &b);
+        assert_eq!(d.only_left, ["C"]);
+        assert_eq!(d.only_right, ["D"]);
+        assert_eq!(d.changed, [("B".to_string(), 1.0, 1.5)]);
+        assert!(diff_params(&a, &a).is_empty());
     }
 }

@@ -1,12 +1,14 @@
-//! The dataflash parser against pymavlink `DFReader` (the reference) on a real ArduCopter
-//! 4.7.1 SITL log. Fixture and reference from `scripts/dataflash_vectors.py`.
+//! The dataflash parser against pymavlink `DFReader` (the reference) on real logs: an
+//! ArduCopter 4.7.1 SITL log and an ArduCopter 4.6.2 flight on a MatekH743 (see
+//! docs/corpus/README.md). Fixtures and references from `scripts/dataflash_vectors.py`.
 
 use std::path::Path;
 
 use logs::Log;
 use serde_json::Value;
 
-const REF: &str = include_str!("data/sitl-copter-4.7.1-head.json");
+const SITL: &str = include_str!("data/sitl-copter-4.7.1-head.json");
+const MATEK: &str = include_str!("data/copter-4.6.2-matekh743-head.json");
 
 fn same(a: f64, b: &Value) -> bool {
     match b.as_f64() {
@@ -15,12 +17,42 @@ fn same(a: f64, b: &Value) -> bool {
     }
 }
 
+fn data_dir() -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data")
+}
+
 #[test]
-fn matches_pymavlink_dfreader() {
-    let r: Value = serde_json::from_str(REF).unwrap();
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/data")
-        .join(r["fixture"].as_str().unwrap());
+fn matches_pymavlink_on_sitl_log() {
+    check(SITL, &data_dir());
+}
+
+#[test]
+fn matches_pymavlink_on_real_flight_log() {
+    check(MATEK, &data_dir());
+}
+
+/// Full-size logs that are not committed: point `DC_LOG_CORPUS` at a directory of
+/// `scripts/dataflash_vectors.py` outputs and run `cargo test -p logs -- --ignored`.
+#[test]
+#[ignore = "needs DC_LOG_CORPUS"]
+fn matches_pymavlink_on_external_corpus() {
+    let dir = std::env::var("DC_LOG_CORPUS").expect("set DC_LOG_CORPUS");
+    let dir = Path::new(&dir);
+    let mut n = 0;
+    for e in std::fs::read_dir(dir).unwrap() {
+        let p = e.unwrap().path();
+        if p.extension().is_some_and(|x| x == "json") {
+            eprintln!("checking {}", p.display());
+            check(&std::fs::read_to_string(&p).unwrap(), dir);
+            n += 1;
+        }
+    }
+    assert!(n > 0, "no *.json references in {}", dir.display());
+}
+
+fn check(reference: &str, dir: &Path) {
+    let r: Value = serde_json::from_str(reference).unwrap();
+    let path = dir.join(r["fixture"].as_str().unwrap());
     let log = Log::open(&path).unwrap();
     assert_eq!(log.stats.skipped_bytes, 0, "fixture is clean");
 
@@ -84,7 +116,8 @@ fn matches_pymavlink_dfreader() {
     }
     assert!(
         failures.is_empty(),
-        "{} mismatches:\n{}",
+        "{}: {} mismatches:\n{}",
+        path.display(),
         failures.len(),
         failures.join("\n")
     );
@@ -92,10 +125,8 @@ fn matches_pymavlink_dfreader() {
 
 #[test]
 fn survives_corruption_and_truncation() {
-    let r: Value = serde_json::from_str(REF).unwrap();
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/data")
-        .join(r["fixture"].as_str().unwrap());
+    let r: Value = serde_json::from_str(SITL).unwrap();
+    let path = data_dir().join(r["fixture"].as_str().unwrap());
     let mut bytes = std::fs::read(&path).unwrap();
     let clean = Log::open(&path).unwrap().stats.records;
     // Smash 64 bytes in the middle and cut the tail mid-record.
