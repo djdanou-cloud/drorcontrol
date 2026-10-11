@@ -67,7 +67,10 @@ exists, implement plan 08 §4 `CommandPolicy` in `dc-core`, so the UI is never t
 * Classes A–D.
 * Preconditions per command, such as disarmed for calibration and motor test.
 * Ranges from ArduPilot parameter metadata.
-* Gating by the new link state (STALE/LOST allow only RTL/Land retry).
+* Link state never blocks a command ([ADR-0009](../plan/adr/0009-link-state-never-blocks-commands.md),
+  product-owner decision): it is shown in the confirmation card, drives adaptive retransmission
+  with a bounded command lifetime, and the outcome stays `NOT CONFIRMED` until telemetry
+  verifies it.
 * Single-use confirmation tokens for class C/D.
 * Audit log.
 

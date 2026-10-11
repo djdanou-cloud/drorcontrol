@@ -99,6 +99,9 @@ impl fmt::Display for LinkSpec {
 }
 
 /// Heartbeat-based link state of one vehicle (plan 08 §4.3).
+///
+/// Informational: it drives annunciation and command *delivery* (retransmission), never
+/// whether a command is sent ([ADR-0009](../../docs/plan/adr/0009-link-state-never-blocks-commands.md)).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VehicleLink {
     /// Heartbeat younger than [`CoreConfig::link_stale`].

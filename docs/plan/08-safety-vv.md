@@ -108,7 +108,7 @@ stateDiagram-v2
   InProgress --> Verified: expected state observed (e.g. HEARTBEAT armed flag)
   Pending --> Verified: ACK ACCEPTED + state observed
   Pending --> Failed: ACK denied/failed/unsupported
-  Pending --> Timeout: no ACK after N retries
+  Pending --> Timeout: not verified within the command lifetime (ADR-0009)
   Verified --> Idle
   Failed --> Idle
   Timeout --> Idle
@@ -122,12 +122,14 @@ stateDiagram-v2
 ### 4.3 Degraded communications — explicit UI states
 | State | Definition (defaults) | UI | Behaviour |
 |-------|-----------------------|----|-----------|
-| **CONNECTED** | HEARTBEAT < 1.5 s, loss < 5 % | Normal | All commands allowed |
-| **DEGRADED** | loss 5–30 % or latency > 500 ms or RSSI/rem-RSSI low | Amber banner `LINK DEGRADED`, link quality widget pulses | Class C/D require extra confirm text “link degraded”; auto-retry tuned; param/mission transfers warn |
-| **STALE** | No HEARTBEAT 1.5–5 s | Instruments dim; values show age; amber `NO DATA 2.1s` | Class B+ disabled except RTL/Land retry (sent repeatedly with explicit user intent) |
-| **LOST** | No HEARTBEAT > 5 s | **Red** `LINK LOST` + audio + last-known position marker with age; instruments flagged invalid (X); map shows predicted position cone | Only “re-send RTL/Land” and reconnect assistance; what the vehicle will do (from `FS_GCS_*`) displayed |
+| **CONNECTED** | HEARTBEAT < 1.5 s, loss < 5 % | Normal | Commands sent normally |
+| **DEGRADED** | loss 5–30 % or latency > 500 ms or RSSI/rem-RSSI low | Amber banner `LINK DEGRADED`, link quality widget pulses | Commands sent with adaptive retry ([ADR-0009](adr/0009-link-state-never-blocks-commands.md)); confirmation card shows link quality; param/mission transfers warn |
+| **STALE** | No HEARTBEAT 1.5–5 s | Instruments dim; values show age; amber `NO DATA 2.1s` | Commands **still sent**, retransmitted until ACK/verified or lifetime expires; card and ribbon show `NO DATA 2.1s` and “may not arrive” |
+| **LOST** | No HEARTBEAT > 5 s | **Red** `LINK LOST` + audio + last-known position marker with age; instruments flagged invalid (X); map shows predicted position cone | Commands **still sent** (all links, retransmitted, bounded lifetime); what the vehicle will do (from `FS_GCS_*`) displayed; reconnect assistance |
 | **REPLAY** | Source is log | Blue/cyan `REPLAY` watermark | Command path hard-disabled |
 | **SIM** | SITL flag in vehicle/SYSID or user-set | `SIM` badge | Same code path, but clearly labelled |
+**Link state never blocks, delays or drops a confirmed command** ([ADR-0009](adr/0009-link-state-never-blocks-commands.md), product-owner decision 2026-10-11): heartbeat loss is not proof the uplink is down, and locking the operator out of recovery is the greater hazard. Link state informs (card, ribbon, failsafe preview) and adapts delivery (retransmit on every link until `COMMAND_ACK` or verified state); every command has a bounded lifetime (default 30 s RTL/Land, 10 s others), is superseded by a newer conflicting command, and is reported `SENT — NOT CONFIRMED` until verified or `EXPIRED`. Only REPLAY has no command path (no vehicle).
+
 Thresholds are user-configurable within safe bounds and stored per link profile; transitions are logged and announced. A **watchdog** on the UI frame loop and on the core’s ingest loop raises `GCS SOFTWARE FAULT` banner if either stalls > 500 ms (UI) / > 2 s (ingest).
 
 ### 4.4 Other UI safety rules

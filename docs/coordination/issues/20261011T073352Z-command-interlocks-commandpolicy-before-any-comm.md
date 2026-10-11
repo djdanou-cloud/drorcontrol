@@ -28,10 +28,14 @@ dc-core:
 - classes A-D;
 - per-command preconditions (e.g. disarmed for calibration and motor test);
 - value ranges from ArduPilot parameter metadata;
-- gating by the new vehicle link state (STALE/LOST allow only RTL/Land retry);
+- link state never blocks a command (ADR-0009): it is shown in the card and drives adaptive
+  retransmission with a bounded lifetime;
 - single-use confirmation tokens for class C/D;
 - an audit log.
 
 No command RPC is exposed before then.
 
 ## Updates
+
+- 2026-10-11 (core-1): Product owner: link state must not block commands. Recorded as ADR-0009;
+  plan 08 §4.3, the UI skill and this proposal updated.

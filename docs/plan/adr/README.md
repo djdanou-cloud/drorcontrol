@@ -12,3 +12,4 @@ Process and template: see [`../06-documentation-system.md`](../06-documentation-
 | [0006](0006-plugins-scripting.md) | Out-of-process plugins over gRPC | proposed |
 | [0007](0007-docs-as-code.md) | Docs-as-code with CI gates | proposed |
 | [0008](0008-parity-out-of-scope.md) | Mission Planner items outside the parity scope | accepted |
+| [0009](0009-link-state-never-blocks-commands.md) | Link state never blocks commands | accepted |

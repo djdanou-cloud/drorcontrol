@@ -91,7 +91,7 @@ Command classes and the lifecycle are defined in `docs/plan/08-safety-vv.md` §4
     - *Autonomous / Guided:* Auto (Mission), Guided, Follow.
     - *Emergency:* RTL, SmartRTL, Land.
   - Mode changes are verified against `HEARTBEAT`; hazardous modes need confirmation.
-- **Degraded comms:** explicit CONNECTED / DEGRADED / STALE / LOST / REPLAY / SIM states with banner, instrument invalidation and restricted command set (plan 08 §4.3). In REPLAY the command path is hard-disabled.
+- **Degraded comms:** explicit CONNECTED / DEGRADED / STALE / LOST / REPLAY / SIM states with banner and instrument invalidation (plan 08 §4.3). **Link state never blocks a command** (ADR-0009): show the state, heartbeat age and the vehicle's own failsafe action in the confirmation card, add no extra step, and show `SENT — NOT CONFIRMED` (retries, time left) until telemetry verifies or the command expires. Only REPLAY has no command path (no vehicle).
 
 ---
 
