@@ -18,3 +18,9 @@ qt_add_qml_module(spike-s0-3-map
 )
 target_link_libraries(spike-s0-3-map PRIVATE Qt::Quick QMapLibre::Core)
 qmaplibre_quick_setup_plugins(spike-s0-3-map)
+# For a shared QMapLibre the helper only tells Qt's tooling where the MapLibre QML module is;
+# hand the same directory to the running engine.
+get_target_property(S03_MAPLIBRE_QML spike-s0-3-map QT_QML_IMPORT_PATH)
+if(S03_MAPLIBRE_QML)
+    target_compile_definitions(spike-s0-3-map PRIVATE S03_MAPLIBRE_QML="${S03_MAPLIBRE_QML}")
+endif()

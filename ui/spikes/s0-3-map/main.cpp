@@ -107,6 +107,9 @@ int main(int argc, char *argv[]) {
     const bool manual = cli.isSet("manual");
 
     QQmlApplicationEngine engine;
+#ifdef S03_MAPLIBRE_QML
+    engine.addImportPath(QStringLiteral(S03_MAPLIBRE_QML));
+#endif
     engine.setInitialProperties({
         {"styleUrl", cli.value("style")},
         {"passSeconds", passSeconds},

@@ -36,6 +36,7 @@ person-weeks, already budgeted).
 
 | Where | API | Window (px) | Warm fps / p99 interval | Missed vsync | GPU | Verdict |
 |-------|-----|-------------|-------------------------|--------------|-----|---------|
+| macOS CI runner, first run (2026-10-11) | — | — | — | — | — | QMapLibre built with Metal (about 13 min) and the harness compiled; start-up failed: `module "MapLibre" is not installed` (QML import path not given to the engine). Fixed in the next commit; not yet re-run |
 | macOS CI runner (VM) | see the `spike-map` run summary | — | — | — | — | indicative |
 | **M1 Mac, 5K display, full screen** | pending | pending | pending | pending | pending | **decides T0-07** |
 
