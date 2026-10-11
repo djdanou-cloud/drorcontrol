@@ -39,8 +39,8 @@ use mavlink_codec::{Frame, Header, Message, Version, encode};
 use protocols::audit::{self, AuditLog};
 /// Command types for [`Core::request_command`] and [`Core::submit_command`].
 pub use protocols::command::{
-    Approval, Command, CommandId, CommandState, CommandStatus, PolicyConfig, Refusal, Request,
-    VehicleFacts,
+    Alert, AlertLevel, Approval, Command, CommandId, CommandState, CommandStatus, PolicyConfig,
+    Refusal, Request, VehicleFacts,
 };
 use protocols::command::{AuditEvent, CommandPolicy, LinkInfo, LinkState, Target};
 use protocols::params::{DownloadConfig, DownloadStatus, Param, ParamDownload};
@@ -277,6 +277,16 @@ pub enum CoreEvent {
     /// A command changed state (plan 08 §4.2, ADR-0009). `status.summary()` is the
     /// operator-facing line.
     Command(Box<CommandStatus>),
+    /// Something the operator must be told (SR-05): e.g. a mode change that was not
+    /// confirmed within its 2–3 s lifetime is a Warning; the UI shows it with audio.
+    Alert {
+        /// System id.
+        sysid: u8,
+        /// Level (Warning / Caution / Advisory).
+        level: AlertLevel,
+        /// Operator-facing text.
+        text: String,
+    },
     /// A link went up/down.
     Link {
         /// Link id.
@@ -749,6 +759,13 @@ impl Core {
             }
         }
         for s in changed {
+            if let Some(a) = s.alert() {
+                let _ = self.events.send(CoreEvent::Alert {
+                    sysid: s.target.sysid,
+                    level: a.level,
+                    text: a.text,
+                });
+            }
             let _ = self.events.send(CoreEvent::Command(Box::new(s)));
         }
         let events = self.policy().drain_audit();

@@ -11,7 +11,7 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 
-use dc_core::{Core, CoreEvent, VehicleLink, VehicleState};
+use dc_core::{AlertLevel, Core, CoreEvent, VehicleLink, VehicleState};
 use tokio_stream::Stream;
 use tonic::{Request, Response, Status};
 
@@ -256,6 +256,18 @@ impl CoreApi for CoreService {
                         attempts: st.attempts,
                         summary: st.summary(),
                     }),
+                    Ok(CoreEvent::Alert { sysid, level, text }) => {
+                        use pb::alert_event::Level;
+                        Kind::Alert(pb::AlertEvent {
+                            sysid: u32::from(sysid),
+                            level: match level {
+                                AlertLevel::Advisory => Level::Advisory,
+                                AlertLevel::Caution => Level::Caution,
+                                AlertLevel::Warning => Level::Warning,
+                            } as i32,
+                            text,
+                        })
+                    }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 };

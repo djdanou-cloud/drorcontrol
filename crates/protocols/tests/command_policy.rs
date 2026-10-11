@@ -969,3 +969,93 @@ fn mode_labels_use_confirmed_names_and_keep_the_number() {
         "{audit:?}"
     );
 }
+
+/// SR-05: an unconfirmed flight command is a Warning, an unconfirmed ground command a Caution,
+/// a verified mode change an Advisory; nothing for operator-driven endings.
+#[test]
+fn command_outcomes_raise_the_right_alerts() {
+    let status = |command: Command, state: CommandState, label: &str| CommandStatus {
+        id: CommandId(1),
+        target: T,
+        command,
+        state,
+        attempts: 3,
+        time_left: Duration::ZERO,
+        link: connected(),
+        label: label.into(),
+    };
+    let mode = Command::SetMode { custom_mode: 5 };
+    let mt = Command::MotorTest {
+        motor: 1,
+        throttle_pct: 5.0,
+        duration_s: 2.0,
+        props_removed: true,
+    };
+    let a = status(
+        mode.clone(),
+        CommandState::Expired { acked: false },
+        "MODE LOITER (5)",
+    )
+    .alert()
+    .unwrap();
+    assert_eq!(a.level, AlertLevel::Warning);
+    assert_eq!(
+        a.text,
+        "MODE LOITER (5) NOT CONFIRMED — EXPIRED: check the vehicle"
+    );
+    assert_eq!(
+        status(
+            mode.clone(),
+            CommandState::Expired { acked: true },
+            "MODE 5"
+        )
+        .alert()
+        .unwrap()
+        .level,
+        AlertLevel::Warning
+    );
+    let r = status(rtl(), CommandState::Rejected(MavResult::DENIED.0), "RTL")
+        .alert()
+        .unwrap();
+    assert_eq!(r.level, AlertLevel::Warning);
+    assert!(r.text.contains("REFUSED BY VEHICLE (denied)"), "{}", r.text);
+    for c in [
+        Command::Disarm,
+        Command::ForceDisarm,
+        Command::Arm,
+        Command::Land { expect_mode: None },
+    ] {
+        assert_eq!(
+            status(c, CommandState::Expired { acked: false }, "X")
+                .alert()
+                .unwrap()
+                .level,
+            AlertLevel::Warning
+        );
+    }
+    for c in [mt, Command::Reboot, Command::ParamReset, Command::ForceArm] {
+        assert_eq!(
+            status(c, CommandState::Expired { acked: false }, "X")
+                .alert()
+                .unwrap()
+                .level,
+            AlertLevel::Caution
+        );
+    }
+    let v = status(mode.clone(), CommandState::Verified, "MODE LOITER (5)")
+        .alert()
+        .unwrap();
+    assert_eq!(
+        (v.level, v.text.as_str()),
+        (AlertLevel::Advisory, "MODE LOITER (5) engaged")
+    );
+    assert_eq!(status(rtl(), CommandState::Verified, "RTL").alert(), None);
+    assert_eq!(
+        status(mode.clone(), CommandState::Cancelled, "M").alert(),
+        None
+    );
+    assert_eq!(
+        status(mode, CommandState::Superseded(CommandId(2)), "M").alert(),
+        None
+    );
+}

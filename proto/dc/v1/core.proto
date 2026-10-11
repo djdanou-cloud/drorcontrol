@@ -130,7 +130,22 @@ message Event {
     VehicleLinkEvent vehicle_link = 4;
     RecorderEvent recorder = 5;
     CommandEvent command = 6;
+    AlertEvent alert = 7;
   }
+}
+
+// Something the operator must be told (SR-05, ADR-0011), e.g. a mode change not confirmed
+// within its 2-3 s lifetime (WARNING), or a verified mode change (ADVISORY).
+message AlertEvent {
+  enum Level {
+    LEVEL_UNSPECIFIED = 0;
+    ADVISORY = 1;   // information
+    CAUTION = 2;    // awareness, action may be needed later
+    WARNING = 3;    // immediate action; shown with audio
+  }
+  uint32 sysid = 1;
+  Level level = 2;
+  string text = 3;
 }
 
 // A vehicle command changed state (plan 08 §4.2, ADR-0009). Commands are submitted through the

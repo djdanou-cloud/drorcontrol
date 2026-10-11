@@ -665,7 +665,75 @@ pub struct CommandStatus {
     pub label: String,
 }
 
+/// Alert level (UI skill §2 taxonomy; plan 04).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum AlertLevel {
+    /// Information, no action needed.
+    Advisory,
+    /// Awareness; action may be needed later.
+    Caution,
+    /// Immediate action.
+    Warning,
+}
+
+/// An alert raised by a command outcome.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Alert {
+    /// Level.
+    pub level: AlertLevel,
+    /// Operator-facing text.
+    pub text: String,
+}
+
+impl Command {
+    /// Flight commands change what the aircraft does; an unconfirmed one means the operator
+    /// may not have control (rated Critical, hazard log H9/H13, SR-05).
+    fn is_flight_command(&self) -> bool {
+        !matches!(
+            self,
+            Command::MotorTest { .. } | Command::Reboot | Command::ParamReset | Command::ForceArm
+        )
+    }
+}
+
 impl CommandStatus {
+    /// The alert this outcome raises, if any (SR-05, ADR-0011):
+    /// * a flight command that ends unconfirmed (expired, or refused by the vehicle) is a
+    ///   **Warning** — the vehicle may not be doing what the operator commanded;
+    /// * a ground command that ends unconfirmed is a **Caution**;
+    /// * a verified mode change is an **Advisory** (mode-change notice);
+    /// * nothing for cancelled, superseded or other outcomes.
+    pub fn alert(&self) -> Option<Alert> {
+        let label = &self.label;
+        let unconfirmed = |what: &str| {
+            let level = if self.command.is_flight_command() {
+                AlertLevel::Warning
+            } else {
+                AlertLevel::Caution
+            };
+            Some(Alert {
+                level,
+                text: format!("{label} {what}: check the vehicle"),
+            })
+        };
+        match self.state {
+            CommandState::Expired { acked: false } => unconfirmed("NOT CONFIRMED — EXPIRED"),
+            CommandState::Expired { acked: true } => {
+                unconfirmed("ACKNOWLEDGED BUT NOT SEEN — EXPIRED")
+            }
+            CommandState::Rejected(r) => {
+                unconfirmed(&format!("REFUSED BY VEHICLE ({})", result_name(r)))
+            }
+            CommandState::Verified if matches!(self.command, Command::SetMode { .. }) => {
+                Some(Alert {
+                    level: AlertLevel::Advisory,
+                    text: format!("{label} engaged"),
+                })
+            }
+            _ => None,
+        }
+    }
+
     /// Operator-facing status line, e.g.
     /// `RTL: SENT — NOT CONFIRMED (link LOST 7.2 s), attempt 3, 22 s left`.
     pub fn summary(&self) -> String {

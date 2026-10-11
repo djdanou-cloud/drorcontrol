@@ -345,3 +345,53 @@ async fn lost_link_still_sends_retries_and_expires() {
     assert_eq!(after, sent, "no RTL after its lifetime");
     let _ = stop.send(true);
 }
+
+async fn next_alert(
+    events: &mut tokio::sync::broadcast::Receiver<CoreEvent>,
+    within: Duration,
+) -> (dc_core::AlertLevel, String) {
+    tokio::time::timeout(within, async {
+        loop {
+            if let Ok(CoreEvent::Alert { level, text, .. }) = events.recv().await {
+                return (level, text);
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("no alert within {within:?}"))
+}
+
+/// SR-05 / ADR-0011: a mode change the vehicle never confirms is dropped after its 3 s lifetime
+/// and raises a Warning for the pilot; a confirmed one raises an Advisory.
+#[tokio::test(flavor = "multi_thread")]
+async fn unconfirmed_mode_change_alerts_the_pilot() {
+    let (core, v, stop) = setup(CoreConfig::default()).await;
+    let mut events = core.events();
+
+    // Confirmed: Advisory. (No banner from this fake vehicle, so the mode has no name.)
+    core.submit_command(1, Command::SetMode { custom_mode: 4 }, Approval::None)
+        .await
+        .unwrap();
+    let (level, text) = next_alert(&mut events, Duration::from_secs(3)).await;
+    assert_eq!(
+        (level, text.as_str()),
+        (dc_core::AlertLevel::Advisory, "MODE 4 engaged")
+    );
+
+    // Uplink down: no ACK, no mode change.
+    v.lock().unwrap().deaf = true;
+    let t0 = std::time::Instant::now();
+    core.submit_command(1, Command::SetMode { custom_mode: 6 }, Approval::None)
+        .await
+        .unwrap();
+    let (level, text) = next_alert(&mut events, Duration::from_secs(5)).await;
+    let after = t0.elapsed();
+    assert_eq!(level, dc_core::AlertLevel::Warning);
+    assert_eq!(text, "MODE 6 NOT CONFIRMED — EXPIRED: check the vehicle");
+    assert!(
+        after >= Duration::from_secs(3) && after < Duration::from_millis(3400),
+        "alert when the 3 s lifetime ends: {after:?}"
+    );
+    assert_eq!(v.lock().unwrap().mode, 4, "the vehicle never changed mode");
+    let _ = stop.send(true);
+}

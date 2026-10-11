@@ -316,6 +316,9 @@ async fn run(cli: Cli) -> Result<(), String> {
                             println!("vehicle {sysid} link {state} (last heartbeat {:.1} s ago)", heartbeat_age.as_secs_f32())
                         }
                         Ok(CoreEvent::Command(st)) => println!("[{}] {}", st.target.sysid, st.summary()),
+                        Ok(CoreEvent::Alert { sysid, level, text }) => {
+                            eprintln!("[{sysid}] {} {text}", format!("{level:?}").to_uppercase())
+                        }
                         Ok(CoreEvent::Recorder { stopped, detail }) => {
                             eprintln!("tlog {}: {detail}", if stopped { "STOPPED" } else { "warning" })
                         }

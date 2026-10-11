@@ -123,7 +123,7 @@ Columns:
 | SR-02 | Class C/D commands need a single-use token bound to the vehicle and the exact command; the core enforces it | H1, H2 | `CommandPolicy::submit` |
 | SR-03 | Link state never refuses a command | H11 | ADR-0009 |
 | SR-04 | No command is sent after its lifetime; a mode change lives 2–3 s | H12 | `PolicyConfig`, `CoreConfig::validate` |
-| SR-05 | An expired or unconfirmed command raises an operator alert | H9, H12 | `CoreEvent::Command` → UI alert (UI pending) |
+| SR-05 | An expired or unconfirmed command raises an operator alert | H9, H12 | `CommandStatus::alert` → `CoreEvent::Alert` / gRPC `AlertEvent`: Warning for unconfirmed flight commands (incl. mode change after 3 s), Caution for ground commands, Advisory for a verified mode change (tests `command_outcomes_raise_the_right_alerts`, `unconfirmed_mode_change_alerts_the_pilot`); UI display and audio pending |
 | SR-06 | Success is shown only from observed vehicle state | H15 | `CommandPolicy::on_state` |
 | SR-07 | Motor test needs props-off attestation and a known disarmed state, for every vehicle type | H7 | `Command::preconditions` |
 | SR-08 | Reboot and parameter reset are refused while armed | H1, H5 | `Command::preconditions` |
