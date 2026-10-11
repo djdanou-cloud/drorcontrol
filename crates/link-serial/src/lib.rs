@@ -47,13 +47,35 @@ pub async fn spawn_serial(
     events: mpsc::Sender<LinkEvent>,
 ) -> io::Result<LinkHandle> {
     let port = open(path, baud)?;
-    let (handle, outbound) = LinkHandle::new(id, format!("serial {path} @ {baud}"));
+    let reopen_path = path.to_string();
+    Ok(spawn_reopening(
+        id,
+        format!("serial {path} @ {baud}"),
+        port,
+        Box::new(move || open(&reopen_path, baud)),
+        events,
+    )
+    .await)
+}
+
+/// Opens the device again after a failure (the same path, or a device found by hotplug).
+pub type Opener = Box<dyn FnMut() -> io::Result<Box<dyn SerialPort>> + Send>;
+
+/// Start a link over `first` that calls `reopen` (with back-off) whenever the port fails,
+/// as [`spawn_serial`] does with the port's path.
+pub async fn spawn_reopening(
+    id: LinkId,
+    name: String,
+    first: Box<dyn SerialPort>,
+    reopen: Opener,
+    events: mpsc::Sender<LinkEvent>,
+) -> LinkHandle {
+    let (handle, outbound) = LinkHandle::new(id, name.clone());
     let _ = events.send(LinkEvent::Added(handle.clone())).await;
-    let path = path.to_string();
     tokio::spawn(async move {
-        supervise(id, port, Some((path, baud)), outbound, events).await;
+        supervise(id, name, first, Some(reopen), outbound, events).await;
     });
-    Ok(handle)
+    handle
 }
 
 /// Start a link over an already-open port (also used by tests with pseudo-terminals).
@@ -64,10 +86,10 @@ pub async fn spawn_port(
     port: Box<dyn SerialPort>,
     events: mpsc::Sender<LinkEvent>,
 ) -> io::Result<LinkHandle> {
-    let (handle, outbound) = LinkHandle::new(id, name);
+    let (handle, outbound) = LinkHandle::new(id, name.clone());
     let _ = events.send(LinkEvent::Added(handle.clone())).await;
     tokio::spawn(async move {
-        supervise(id, port, None, outbound, events).await;
+        supervise(id, name, port, None, outbound, events).await;
     });
     Ok(handle)
 }
@@ -82,8 +104,9 @@ enum SessionEnd {
 
 async fn supervise(
     id: LinkId,
+    name: String,
     first: Box<dyn SerialPort>,
-    reopen: Option<(String, u32)>,
+    mut reopen: Option<Opener>,
     mut outbound: mpsc::Receiver<Frame>,
     events: mpsc::Sender<LinkEvent>,
 ) {
@@ -106,7 +129,9 @@ async fn supervise(
             last_detail = detail;
             backoff = REOPEN_BACKOFF_MIN;
         }
-        let Some((path, baud)) = &reopen else { break };
+        let Some(mut opener) = reopen.take() else {
+            break;
+        };
 
         // Wait before reopening; frames sent meanwhile are dropped (never sent late), and a
         // dropped handle ends the link promptly.
@@ -121,23 +146,31 @@ async fn supervise(
                 },
             }
         }
-        let (p, b) = (path.clone(), *baud);
-        match tokio::task::spawn_blocking(move || open(&p, b)).await {
-            Ok(Ok(p)) => {
+        let attempt = tokio::task::spawn_blocking(move || {
+            let r = opener();
+            (opener, r)
+        })
+        .await;
+        let Ok((opener, result)) = attempt else {
+            break; // runtime shutting down
+        };
+        reopen = Some(opener);
+        match result {
+            Ok(p) => {
                 while outbound.try_recv().is_ok() {}
                 let _ = events
                     .send(LinkEvent::Status {
                         link: id,
                         up: true,
-                        detail: format!("reopened {path}"),
+                        detail: format!("reopened {name}"),
                     })
                     .await;
                 last_detail.clear();
                 port = Some(p);
             }
-            Ok(Err(e)) => {
+            Err(e) => {
                 // Report a new reason once, not every attempt.
-                let detail = format!("reopening {path}: {e}");
+                let detail = format!("reopening {name}: {e}");
                 if detail != last_detail {
                     let _ = events
                         .send(LinkEvent::Status {
@@ -150,7 +183,6 @@ async fn supervise(
                 }
                 backoff = (backoff * 2).min(REOPEN_BACKOFF_MAX);
             }
-            Err(_) => break, // runtime shutting down
         }
     }
     let _ = events.send(LinkEvent::Removed(id)).await;
@@ -302,16 +334,13 @@ mod tests {
         .unwrap()
     }
 
-    /// A pseudo-terminal whose slave is reachable at `link` (a symlink standing in for the
-    /// device path, e.g. `/dev/cu.usbmodem1101`). Returns the master side.
-    fn plug(link: &std::path::Path) -> TTYPort {
+    /// A pseudo-terminal pair: the master is the "device" side the test drives; the slave is
+    /// what the link opens. (On macOS a pty cannot be opened by path through `serialport`:
+    /// setting the baud rate uses `IOSSIOSPEED`, which ptys reject.)
+    fn device() -> (TTYPort, TTYPort) {
         let (mut far, near) = TTYPort::pair().expect("pty pair");
         far.set_timeout(Duration::from_secs(2)).unwrap();
-        let slave = near.name().expect("pty name");
-        drop(near); // the link opens it by path
-        let _ = std::fs::remove_file(link);
-        std::os::unix::fs::symlink(slave, link).unwrap();
-        far
+        (far, near)
     }
 
     async fn next(ev: &mut mpsc::Receiver<LinkEvent>) -> LinkEvent {
@@ -325,21 +354,22 @@ mod tests {
     /// and frames queued during the outage are not sent late.
     #[tokio::test(flavor = "multi_thread")]
     async fn reopens_after_unplug_and_drops_stale_frames() {
-        let dir = std::env::temp_dir().join(format!("link-serial-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let dev = dir.join("radio");
-        let mut far = plug(&dev);
+        // Plugged devices waiting to be opened; empty = unplugged.
+        let (plug, plugged) = std::sync::mpsc::channel::<TTYPort>();
+        let plugged = std::sync::Mutex::new(plugged);
+        let opener: Opener = Box::new(move || match plugged.lock().unwrap().try_recv() {
+            Ok(p) => Ok(Box::new(p) as Box<dyn SerialPort>),
+            Err(_) => Err(io::Error::new(io::ErrorKind::NotFound, "no such device")),
+        });
+        let (mut far, near) = device();
         let (ev_tx, mut ev_rx) = mpsc::channel(64);
-        let h = spawn_serial(LinkId(7), dev.to_str().unwrap(), 115_200, ev_tx)
-            .await
-            .unwrap();
+        let h = spawn_reopening(LinkId(7), "radio".into(), Box::new(near), opener, ev_tx).await;
         assert!(matches!(next(&mut ev_rx).await, LinkEvent::Added(_)));
         far.write_all(hb(1).as_bytes()).unwrap();
         assert!(matches!(next(&mut ev_rx).await, LinkEvent::Frame { frame, .. } if frame == hb(1)));
 
         // Unplug: the link reports down but stays.
         drop(far);
-        let _ = std::fs::remove_file(&dev);
         match next(&mut ev_rx).await {
             LinkEvent::Status {
                 link, up: false, ..
@@ -352,8 +382,9 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(600)).await;
         h.send(hb(3));
 
-        // Replug (a new device node at the same path): reopened, frames flow both ways.
-        let mut far = plug(&dev);
+        // Replug: reopened, frames flow both ways.
+        let (mut far, near) = device();
+        plug.send(near).unwrap();
         loop {
             match next(&mut ev_rx).await {
                 LinkEvent::Status { up: true, .. } => break,
@@ -386,6 +417,5 @@ mod tests {
                 break;
             }
         }
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }
