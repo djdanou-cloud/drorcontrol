@@ -70,7 +70,7 @@ and the code are newer. Where either disagrees with an owner instruction, the ow
 | No Mac and no GPU in the cloud container | Mac work is verified on CI's macOS runners (VMs, indicative only). Real numbers come from the [Mac test runbook](../dev/mac-test-runbook.md). |
 | apt has only Qt 6.4; downloads from `download.qt.io` are blocked by the proxy | The map spike (Qt ≥ 6.5) cannot be built locally; it builds in the `spike-map` workflow. Spike S0-1 builds with Qt 6.4 (`QMAKE=qmake6`). |
 | GStreamer installs from apt (`libgstreamer1.0-dev` + plugins) | The video spike builds and runs locally (software decode only). |
-| Local ArduPilot SITL: `scripts/build_sitl.sh` → `.sitl/ardupilot-Copter-4.7.1/` (gitignored, about 5 min) | `DC_SITL_REQUIRED=1 cargo test -p sitl-harness --test scenarios` runs all scenarios (8, about 65 s). The pinned ArduPilot source in `.sitl/` is the reference for ArduPilot behaviour: read it instead of guessing. |
+| Local ArduPilot SITL: `scripts/build_sitl.sh` → `.sitl/ardupilot-Copter-4.7.1/` (gitignored, about 5 min) | `DC_SITL_REQUIRED=1 cargo test -p sitl-harness --test scenarios` runs all scenarios (9, including the longer parameter write/rollback test). Stop docs serving on port 8000 or use port 18000: SITL instance 224 uses port 8000. The pinned ArduPilot source in `.sitl/` is the reference for ArduPilot behaviour: read it instead of guessing. |
 | macOS pseudo-terminals cannot be opened by path through `serialport` (it sets the baud rate with `IOSSIOSPEED`) | Serial tests use `TTYPort::pair()` and the injectable `Opener` (`link-serial`). |
 | `coord.py` | Quote glob paths (`'crates/x/**'`). Log types are only `progress handoff question decision-request blocker conflict fyi done`. |
 
@@ -125,18 +125,27 @@ The backlog rows were added in [`backlog.md`](backlog.md), T0-17 onwards.
 1. **T0-17 — re-run `spike-map`** on the macOS runner. This verifies 0d5834a (QML import path)
    and records the indicative Metal frame timing in `ui/spikes/s0-3-map/RESULTS.md`. If it
    still fails, read the log and fix it.
-2. **T0-18 — H5 safe parameter changes:**
-   * Offline groundwork implemented locally by `core-2`: complete target-bound snapshots,
-     exact-value serialization with corruption checks, validated batch previews, comparison
-     reports and rollback previews limited to edited parameters. See
-     [`../dev/parameter-changes.md`](../dev/parameter-changes.md).
-     Ten offline tests pass. No core write API or vehicle-write policy is enabled.
-     The owner was asked for the armed-state rule; that decision remains pending.
-   * `ParamWrite` with read-back, exposed through `dc-core`;
-   * a snapshot before any write, so the change can be rolled back;
-   * failsafe and fence parameters marked dangerous;
-   * a decision on whether to refuse while armed (safety path: ask the owner);
-   * use the vehicle's own `FS_EKF_THRESH` in `NavThresholds`.
+2. **T0-18 — core implementation local (core-2):**
+   * The owner approved requiring a recent, explicitly disarmed autopilot heartbeat.
+     The core uses a fixed 1.5 s freshness limit before starting writes, and stops further
+     writes on arming or heartbeat gaps/staleness; a later disarmed report never revives
+     an interrupted write transaction automatically. Read-only preparation can see gaps.
+   * `Core::write_params` validates a complete baseline and batch, persists a new snapshot
+     before any set, then verifies values/types by an explicit read request with a bounded
+     10 s lifetime per parameter. Mismatches/timeouts stop the remaining batch.
+   * `Core::rollback_params` restores only selected parameters to their original values,
+     with a new recovery baseline and the same state, risk and read-back checks. It refuses
+     parameters that disappeared or changed type; it never starts automatic rollback.
+   * Failsafe/fence/arming/board-safety parameters are flagged dangerous and refused until
+     dedicated typed confirmation exists. These conservative labels are not a full metadata
+     catalog. Dangerous writes remain a follow-up, not implicitly authorized by disarming.
+   * Each vehicle's last valid autopilot `FS_EKF_THRESH` updates `NavThresholds.ekf_fail`.
+   * Ten offline tests, ten scripted-vehicle integration tests and the navigation-threshold
+     source/value test cover the implementation. A real SITL `WP_SPD` write and restoration
+     pass through 30% bidirectional loss (2,952 frames dropped in the initial run). The SITL
+     test requests 5 Hz heartbeats; the production freshness rule is not weakened.
+   * See [`../dev/parameter-changes.md`](../dev/parameter-changes.md). Changes are local only;
+     the owner's instruction remains **do not push**. Safety review is required before merge.
 3. **T0-19 — class C confirmation for an in-flight mission upload** (plan 08 §4.1, ADR-0011
    I3). It is refused today. This changes the command pipeline, so it needs owner/safety-lead
    approval first.

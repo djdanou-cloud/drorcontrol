@@ -2,9 +2,9 @@
 agent: core-2
 role: workstream-agent
 workstream: WS-CORE
-state: active
+state: idle
 task: T0-18
-updated: 2026-10-11T12:54:49Z
+updated: 2026-10-11T13:17:48Z
 ---
 
 ## Current focus
@@ -20,3 +20,5 @@ updated: 2026-10-11T12:54:49Z
 - 2026-10-11T12:50:42Z — Offline groundwork committed; armed-state decision needed before core writes; no push authorized
 
 - 2026-10-11T12:54:49Z — Owner approved recent known-disarmed write rule; implementing core transactions and SITL validation; no push
+
+- 2026-10-11T13:17:48Z — T0-18 implementation and full CI complete locally; safety review before merge; dangerous typed confirmation remains follow-up; no push
