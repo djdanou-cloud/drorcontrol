@@ -1,0 +1,87 @@
+# DrorControl documentation site (plan 06, ADR-0007).
+#   python3 -m venv .venv-docs && .venv-docs/bin/pip install -r docs/requirements.txt
+#   .venv-docs/bin/mkdocs serve          # http://127.0.0.1:8000
+#   .venv-docs/bin/mkdocs build --strict # what CI runs; any warning fails
+site_name: DrorControl
+site_description: Next-generation ArduPilot ground control station
+repo_url: https://github.com/djdanou-cloud/drorcontrol
+edit_uri: edit/main/docs/
+docs_dir: docs
+strict: true
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+  font: false            # brand fonts are referenced by name; no Google Fonts fetch
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - search.highlight
+    - content.code.copy
+    - toc.follow
+
+extra_css:
+  - stylesheets/tokens.css
+  - stylesheets/drorcontrol.css
+
+hooks:
+  - scripts/mkdocs_hooks.py
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+exclude_docs: |
+  coordination/_templates/
+
+validation:
+  links:
+    not_found: warn
+    anchors: warn
+    absolute_links: warn
+    unrecognized_links: warn
+
+nav:
+  - Home: index.md
+  - Plan:
+      - plan/README.md
+      - plan/01-architecture.md
+      - plan/02-parity-matrix.md
+      - plan/03-macos-platform.md
+      - plan/04-ux-design-system.md
+      - plan/05-telemetry-log-analytics.md
+      - plan/06-documentation-system.md
+      - plan/07-roadmap-team.md
+      - plan/08-safety-vv.md
+  - Decisions (ADRs):
+      - plan/adr/README.md
+      - plan/adr/0001-core-and-ui-stack.md
+      - plan/adr/0002-ipc-planes.md
+      - plan/adr/0003-map-engine.md
+      - plan/adr/0004-video-pipeline.md
+      - plan/adr/0005-macos-distribution.md
+      - plan/adr/0006-plugins-scripting.md
+      - plan/adr/0007-docs-as-code.md
+      - plan/adr/0008-parity-out-of-scope.md
+      - plan/adr/0009-link-state-never-blocks-commands.md
+      - plan/adr/0000-template.md
+  - Reference:
+      - MAVLink: reference/mavlink/index.md
+  - Quality:
+      - Parity inventory: parity/README.md
+      - Test corpus: corpus/README.md
+      - Audit 2026-10-11: audit/2026-10-11-external-audit.md
+  - Coordination:
+      - coordination/README.md
+      - coordination/BOARD.md
+      - coordination/backlog.md

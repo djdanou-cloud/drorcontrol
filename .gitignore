@@ -15,3 +15,9 @@ Thumbs.db
 .claude/settings.local.json
 # Local ArduPilot SITL builds (scripts/build_sitl.sh)
 /.sitl/
+
+# Docs site build outputs (scripts/mkdocs_hooks.py)
+/site/
+/.venv-docs/
+/docs/reference/mavlink/
+/docs/stylesheets/tokens.css

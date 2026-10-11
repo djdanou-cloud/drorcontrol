@@ -56,7 +56,7 @@ The ADD is reviewed each phase gate; diagrams are generated from code where poss
 * MADR format: *Title · Status (proposed/accepted/superseded) · Context · Decision drivers · Options (with scoring) · Decision · Consequences · Validation (spike/benchmark link) · Links*.
 * Any change touching: crate boundaries, IPC schemas, dependency adoption, licence, platform entitlement, or safety interlocks **requires an ADR in the same PR** (CODEOWNERS + a PR-template checkbox + a CI check that scans for labelled paths).
 * ADRs are immutable once accepted; supersede instead of edit. Index and status graph auto-generated.
-* Seed ADRs 0001–0007 are in [`adr/`](adr/).
+* Seed ADRs 0001–0007 are in [`adr/`](adr/README.md).
 
 ### 4.3 API references (headless core & IPC)
 * **Rust core**: rustdoc per crate, with a "stability" tag (`stable`, `unstable`, `internal`); examples are doctests; `cargo public-api`/`cargo-semver-checks` guard semver.

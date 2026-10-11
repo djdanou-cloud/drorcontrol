@@ -25,6 +25,15 @@ cargo run -p dc-cli -- remote vehicles                           # gRPC client
 
 CI runs `cargo xtask ci` on Linux x86_64, Windows x86_64, macOS arm64 and macOS x86_64 (`.github/workflows/ci.yml`).
 
+Docs site (MkDocs Material: plan, ADRs, generated MAVLink reference). CI builds it with
+`mkdocs build --strict`, so any warning fails:
+
+```bash
+python3 -m venv .venv-docs && .venv-docs/bin/pip install -r docs/requirements.txt
+.venv-docs/bin/mkdocs serve              # http://127.0.0.1:8000
+python3 scripts/gen_adr_index.py         # after adding an ADR (CI checks the index is current)
+```
+
 ## Repository layout
 
 | Path | Contents | Owner (see `docs/coordination/README.md` §4) |

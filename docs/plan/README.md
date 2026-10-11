@@ -26,7 +26,7 @@ A cross-platform ground control station (GCS) for ArduPilot vehicles that:
 | 06 | [Documentation architecture](06-documentation-system.md) | ADR/ADD, API refs, onboarding, protocol guide, operator handbook, in-app help |
 | 07 | [Roadmap, team, estimates](07-roadmap-team.md) | Phases 0–5, sprints, staffing, risks |
 | 08 | [Safety, V&V](08-safety-vv.md) | SITL-in-CI, HITL bench, command interlocks, degraded-link UX |
-| — | [ADRs](adr/) | Architecture Decision Records 0001–0007 + template |
+| — | [ADRs](adr/README.md) | Architecture Decision Records 0001–0007 + template |
 
 ## 3. Decision register (summary)
 

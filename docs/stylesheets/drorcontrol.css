@@ -1,0 +1,14 @@
+/* DrorAero look for the docs site, from the generated design tokens (tokens.css). */
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color: var(--dc-color-canvas);
+  --md-primary-fg-color: var(--dc-color-surface);
+  --md-accent-fg-color: var(--dc-color-accent);
+  --md-typeset-a-color: var(--dc-color-accent-text);
+}
+.md-typeset h1, .md-typeset h2 {
+  font-family: var(--dc-font-title);
+  letter-spacing: var(--dc-title-tracking);
+}
+.md-typeset code, .md-typeset table {
+  font-variant-numeric: tabular-nums slashed-zero;
+}
