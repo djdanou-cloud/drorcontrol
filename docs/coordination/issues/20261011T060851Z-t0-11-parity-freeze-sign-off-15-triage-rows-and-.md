@@ -1,12 +1,12 @@
 ---
 title: T0-11: parity freeze sign-off (15 triage rows) and test-corpus consent/licensing
 severity: S3
-state: open
+state: resolved
 owner: -
 reporter: qa-1
 needs_human: yes
 created: 2026-10-11T06:08:51Z
-updated: 2026-10-11T06:08:51Z
+updated: 2026-10-11T07:40:00Z
 ---
 
 ## Description
@@ -33,3 +33,8 @@ plan row under multi-vehicle. Decide where the corpus is stored and under what l
 the list frozen.
 
 ## Updates
+
+- 2026-10-11 (qa-1): Product owner decided the 15 triage rows. Recommendations accepted, CoT in
+  scope (CON-010), swarm control later (FD-024, 8 rows deferred), MicroDrone and structtest
+  waived (ADR-0008). parity.yaml is frozen with 0 triage rows. Corpus: the owner provided a real
+  flight log and a .param file (docs/corpus/README.md). A mission plan file would still help.

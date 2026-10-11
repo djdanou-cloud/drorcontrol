@@ -4,7 +4,7 @@
 
 MAVLink IDs in parentheses are message/command numbers from the common & ardupilotmega dialects and **must be re-verified against the pinned XML** (generated code is the source of truth, never this table).
 
-Legend — Phase: P1 HUD/map · P2 planning · P3 config/calibration · P4 analytics/SITL/video · P5 hardening.
+Legend — Phase: P1 HUD/map · P2 planning · P3 config/calibration · P4 analytics/SITL/video · P5 hardening · *later* = after 1.0, not required for GA (product-owner decision, recorded in `parity.yaml`).
 
 ---
 
@@ -21,6 +21,7 @@ Legend — Phase: P1 HUD/map · P2 planning · P3 config/calibration · P4 analy
 | CON-007 | Bluetooth SPP/BLE telemetry | stream | Windows-only | CoreBluetooth (mac), WinRT (Win), BlueZ (Linux) | 4 |
 | CON-008 | MAVLink Inspector | all | Slow, single table | Virtualised, filter/graph any field, rate histogram | 1 |
 | CON-009 | MAVLink forwarding / serial-over-UDP bridge | router | Hidden setting | Router config UI | 4 |
+| CON-010 | Cursor-on-Target (CoT) output to TAK/ATAK: vehicle position and track | CoT XML over UDP multicast (TAK SA 239.2.3.1:6969), TCP, UDP or serial | Hidden Ctrl-F tool | Output in link/router settings; per-vehicle UID, CoT type and rate; status chip | 4 |
 
 ## B. Flight Data (`PAR-FD`)
 
@@ -49,6 +50,7 @@ Legend — Phase: P1 HUD/map · P2 planning · P3 config/calibration · P4 analy
 | FD-021 | Python/IronPython scripts panel | — | Embedded, unsafe | Out-of-process scripts ([01 §7](01-architecture.md)) | 4 |
 | FD-022 | Distance-to-home, time-in-air, ETA, wind, battery remaining estimation | derived | Naïve | Computed in core with documented models | 1 |
 | FD-023 | Heading/track-up map, vehicle follow, multiple-vehicle overlays | — | — | Map orientation modes | 1 |
+| FD-024 | Swarm control: formation, follow-the-leader path, sequenced multi-vehicle choreography (incl. swarm SITL launch) | per-vehicle guided targets | Hidden Ctrl-F tools; no multi-vehicle interlocks | Deferred: needs a multi-vehicle command-safety review (08 §4) first | later |
 
 ## C. Flight Plan (`PAR-FP`)
 
@@ -141,6 +143,7 @@ Legend — Phase: P1 HUD/map · P2 planning · P3 config/calibration · P4 analy
 | XC-005 | Accessibility (VoiceOver labels, keyboard operation, colour-blind-safe) | Qt accessibility | 5 |
 | XC-006 | Audit log of all commands/parameter writes | SQLite, exportable | 1 |
 | XC-007 | Multi-window/multi-display, saved workspaces | Qt docking | 1 |
+| XC-008 | In-app help and about: handbook, offline search, version/build info, update check entry | Offline help bundle ([06](06-documentation-system.md)) | 3 |
 
 ## Coverage accounting
 Total rows: ~125 (grows as D0-7 audit completes). CI computes `% implemented`, `% tested`, `% documented` per ID and blocks GA unless all three = 100 % for every *must* row; rows marked *won't* require a signed waiver recorded in an ADR.

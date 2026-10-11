@@ -26,9 +26,12 @@ Each row carries:
 * `source`: the file and control or class name it came from.
 * `plan`: the matching row of the [parity matrix](../plan/02-parity-matrix.md), e.g. `PAR-FP-007`.
 * `owner`: the workstream that delivers it ([coordination](../coordination/README.md)).
-* `triage`: `true` when no rule matched. `plan` and `owner` are then the area default and need a
+* `basis`: `rule`, or the product-owner decision that set `plan`, `owner` and `status`
+  (`DECISIONS` in the script).
+* `triage`: `true` when no rule or decision matched. `plan` and `owner` are then the area default and need a
   human decision.
-* `status`: `not-started`. Rows can only become `implemented` with a test id and a handbook page
+* `status`: `not-started`, `deferred` (after 1.0) or `wont` (waived in
+  [ADR-0008](../plan/adr/0008-parity-out-of-scope.md)). Rows can only become `implemented` with a test id and a handbook page
   ([ADR-0007](../plan/adr/0007-docs-as-code.md)).
 * `test`: the placeholder automated test id, `T-MP-…`.
 * `handbook`: `TBD` until the handbook page exists.
@@ -54,11 +57,22 @@ matrix, the script stops with an error.
 
 ## Freezing
 
-The list is frozen when a human signs off on the triage rows: either map them to a plan row or
-mark them out of scope with an ADR. Until then, treat `parity.yaml` as a draft. After the freeze,
-status, test and handbook progress move to a hand-maintained overlay keyed by `id`. The generated
-inventory stays read-only, so re-running against a newer Mission Planner shows only real upstream
-changes.
+**Frozen on 2026-10-11.** The product owner decided the 15 rows no rule could map:
+* The DATA, PLAN, SETUP and CONFIG menu entries are workspaces (XC-007). HELP is the new row
+  XC-008.
+* CoT output to TAK/ATAK is in scope as the new row CON-010.
+* "grab threads.txt" is served by the MAVFTP browser (CT-011). The SITL "Wipe" option belongs
+  to SA-001.
+* Swarm control is deferred to after 1.0 as the new row FD-024 (phase *later*). That covers 8
+  rows: the three swarm tools, "Follow the leader" (Mission Planner's swarm follow-path) and the
+  four swarm SITL launchers.
+* MicroDrone (vendor serial output) and structtest (debug benchmark) are waived in ADR-0008.
+
+These decisions live in `DECISIONS` in the script, so re-runs keep them. If a decided row
+disappears upstream, the script stops. A re-run against a newer Mission Planner that finds new
+items marks them `triage: true`, and they need a decision before the list is frozen again.
+Progress on status, test and handbook will move to a hand-maintained overlay keyed by `id`, so the
+generated inventory stays read-only.
 
 Some plan rows have no Mission Planner item. Some are DrorControl additions (e.g. accessibility,
 audit log, emergency kill). Others are behaviours that have no single control to point at
