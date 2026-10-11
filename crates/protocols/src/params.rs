@@ -593,6 +593,8 @@ mod tests {
         assert_eq!(mavproxy["FS_THR_ENABLE"], 3.0);
         let qgc = parse_param_file("# Onboard parameters\n1\t1\tRTL_ALT\t300\t4\n").unwrap();
         assert_eq!(qgc["RTL_ALT"], 300.0);
+        let crlf = parse_param_file("RTL_ALT,300\r\nFS_THR_ENABLE,3\r\n").unwrap();
+        assert_eq!(crlf["FS_THR_ENABLE"], 3.0);
         let e = parse_param_file("RTL_ALT,300\nBAD NAME!,1\n").unwrap_err();
         assert_eq!(e.line, 2);
         assert!(parse_param_file("RTL_ALT,nan").is_err());
