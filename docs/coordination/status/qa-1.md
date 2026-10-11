@@ -1,10 +1,10 @@
 ---
 agent: qa-1
-role: workstream-agent
+role: SITL harness
 workstream: WS-QA
-state: idle
-task: T0-11
-updated: 2026-10-11T07:03:14Z
+state: active
+task: T0-14
+updated: 2026-10-11T08:10:04Z
 ---
 
 ## Current focus
@@ -22,3 +22,5 @@ updated: 2026-10-11T07:03:14Z
 - 2026-10-11T06:57:30Z — adding user-supplied real log + param fixtures to the test corpus
 
 - 2026-10-11T07:03:14Z — T0-11 corpus started with owner-provided log + params
+
+- 2026-10-11T08:10:04Z — SITL harness + scenario runner + link-chaos proxy
