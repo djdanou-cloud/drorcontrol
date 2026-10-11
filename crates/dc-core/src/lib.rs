@@ -48,13 +48,22 @@ use protocols::mission::{
 };
 /// Mission types for [`Core::upload_mission`] and [`Core::download_mission`].
 pub use protocols::mission::{Mismatch, MissionItem, TransferStatus};
-use protocols::params::{DownloadConfig, DownloadStatus, Param, ParamDownload};
+pub use protocols::params::snapshot::ParamSnapshot;
+use protocols::params::{DownloadConfig, DownloadStatus, ParamDownload};
+/// Parameter values, reports and saved baselines for parameter write/rollback clients.
+pub use protocols::params::{Param, SetStatus};
 use tokio::sync::broadcast;
 
 pub use vehicle::{
     Extended, Firmware, FirmwareSource, Fleet, LandedState, StatusText, VehicleState, VtolState,
 };
 pub use vehicle::{NavHealth, NavThresholds, PositionTrust};
+
+mod parameters;
+pub use parameters::{
+    PARAM_HEARTBEAT_MAX_AGE, ParamOperationError, ParamReport, ParamRisk, ParamWriteResult,
+    parameter_risk,
+};
 
 /// How to reach a vehicle. Parsed from strings such as `tcp:127.0.0.1:5760`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -430,6 +439,7 @@ pub struct Core {
     audit: Option<std::sync::mpsc::Sender<(SystemTime, AuditEvent)>>,
     /// Last navigation trust per vehicle, to alert on changes.
     nav_trust: Arc<std::sync::Mutex<HashMap<u8, PositionTrust>>>,
+    parameters: Arc<parameters::ParameterState>,
 }
 
 impl Core {
@@ -463,6 +473,7 @@ impl Core {
             policy,
             audit,
             nav_trust: Arc::default(),
+            parameters: Arc::default(),
         };
 
         // Recorder: lossless, on a blocking thread so disk latency never touches routing.
@@ -619,6 +630,7 @@ impl Core {
         let Ok(msg) = frame.decode() else { return };
         let (sysid, compid) = (frame.sysid(), frame.compid());
         let now = Instant::now();
+        self.observe_parameter_safety(sysid, compid, &msg, now);
         let first_heartbeat = matches!(msg, Message::Heartbeat(ref h) if h.r#type != MavType::GCS.0)
             && self
                 .fleet
@@ -915,7 +927,7 @@ impl Core {
     /// trusted, from the autopilot's own EKF report.
     pub fn nav_health(&self, sysid: u8) -> NavHealth {
         match self.fleet().get(sysid) {
-            Some(v) => vehicle::nav::assess(v, &self.cfg.nav, Instant::now()),
+            Some(v) => vehicle::nav::assess(v, &self.nav_thresholds(sysid), Instant::now()),
             None => NavHealth {
                 trust: PositionTrust::Unknown,
                 reasons: vec!["vehicle not seen"],
@@ -929,7 +941,7 @@ impl Core {
         let Some(health) = self
             .fleet()
             .get(sysid)
-            .map(|v| vehicle::nav::assess(v, &self.cfg.nav, now))
+            .map(|v| vehicle::nav::assess(v, &self.nav_thresholds(sysid), now))
         else {
             return;
         };
@@ -1024,7 +1036,11 @@ impl Core {
                 }
             }
             match dl.status() {
-                DownloadStatus::Complete => return Ok(dl.params()),
+                DownloadStatus::Complete => {
+                    let params = dl.params();
+                    progress(params.len(), usize::from(dl.announced_count().unwrap_or(0)));
+                    return Ok(params);
+                }
                 DownloadStatus::Failed => break,
                 DownloadStatus::Running { received, total } => {
                     if (received, total) != last {

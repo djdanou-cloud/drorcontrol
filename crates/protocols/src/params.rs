@@ -231,6 +231,11 @@ impl ParamDownload {
     pub fn params(&self) -> BTreeMap<String, Param> {
         self.by_index.values().cloned().collect()
     }
+
+    /// Count announced by the component, for validating a complete pre-write snapshot.
+    pub fn announced_count(&self) -> Option<u16> {
+        self.total
+    }
 }
 
 /// Outcome of a parameter write.

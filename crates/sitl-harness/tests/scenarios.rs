@@ -102,6 +102,88 @@ async fn parameter_download_is_complete() {
     assert_eq!(params["FRAME_CLASS"].value, 1.0, "quad, from copter.parm");
 }
 
+/// T0-18 / H5: persist baseline, set a non-dangerous parameter, explicitly read it back,
+/// and restore it through the same verified path with real 30 % bidirectional frame loss.
+#[tokio::test(flavor = "multi_thread")]
+async fn parameter_write_and_rollback_are_verified_through_30_percent_loss() {
+    use dc_core::ParamSnapshot;
+    use std::collections::BTreeMap;
+    use std::sync::atomic::Ordering;
+
+    let Some(cfg) = SitlConfig::copter_or_skip() else {
+        return;
+    };
+    let sitl = Sitl::start(&cfg).unwrap();
+    let chaos = ChaosProxy::start(
+        sitl.addr(),
+        ChaosConfig {
+            drop: 0.30,
+            seed: 0xD0C_2018,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let mut config = CoreConfig::default();
+    // The disarmed heartbeat must stay fresh during writes even on a lossy link. Ask the
+    // simulator for 5 Hz heartbeats (supported by pinned GCS_Common.cpp's message map),
+    // rather than relaxing the production 1.5 s freshness rule to make this test pass.
+    config.stream_rates.push((0, 5.0));
+    let core = Core::start(config).await.unwrap();
+    core.connect(&LinkSpec::Tcp(chaos.addr())).await.unwrap();
+    assert_eq!(
+        core.wait_for_vehicle(Duration::from_secs(60)).await,
+        Some(1)
+    );
+    for _ in 0..3 {
+        core.request_streams(1, 1).await;
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!(
+        "dc-sitl-param-write-{}-{stamp}",
+        std::process::id()
+    ));
+    std::fs::create_dir(&dir).unwrap();
+    let baseline_path = dir.join("original.snapshot");
+    let recovery_path = dir.join("rollback.snapshot");
+    // Copter 4.7.1 renamed WPNAV_SPEED (cm/s) to WP_SPD (m/s); see AC_WPNav.cpp and
+    // the WP_ group in ArduCopter/Parameters.cpp. Change only this simulator's setting.
+    let report = core
+        .write_params(
+            (1, 1),
+            BTreeMap::from([("WP_SPD".into(), 6.5)]),
+            &baseline_path,
+        )
+        .await
+        .unwrap();
+    assert!(report.verified(), "{report:?}");
+    assert_eq!(
+        report.results.len(),
+        1,
+        "the test must actually change a parameter"
+    );
+    let original =
+        ParamSnapshot::from_text(&std::fs::read_to_string(&baseline_path).unwrap()).unwrap();
+    assert_ne!(original.params()["WP_SPD"].value, 6.5);
+    assert_eq!(report.results[0].name, "WP_SPD");
+    let restored = core
+        .rollback_params(&baseline_path, &["WP_SPD".into()], &recovery_path)
+        .await
+        .unwrap();
+    assert!(restored.verified(), "{restored:?}");
+    assert!(
+        matches!(restored.results[0].status, dc_core::SetStatus::Verified(p) if p.value == original.params()["WP_SPD"].value)
+    );
+    let dropped = chaos.stats().dropped.load(Ordering::Relaxed);
+    assert!(dropped > 100, "the link really dropped frames: {dropped}");
+    eprintln!("WP_SPD set and rollback verified through 30 % loss; {dropped} frames dropped");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// Plan 08 §2: "full download with 30 % loss (must complete)".
 #[tokio::test(flavor = "multi_thread")]
 async fn parameter_download_completes_through_30_percent_loss() {
