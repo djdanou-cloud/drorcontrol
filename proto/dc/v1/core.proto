@@ -129,7 +129,19 @@ message Event {
     uint32 vehicle_seen = 3; // system id
     VehicleLinkEvent vehicle_link = 4;
     RecorderEvent recorder = 5;
+    CommandEvent command = 6;
   }
+}
+
+// A vehicle command changed state (plan 08 §4.2, ADR-0009). Commands are submitted through the
+// core's CommandPolicy; this API only reports them.
+message CommandEvent {
+  uint64 id = 1;
+  uint32 sysid = 2;
+  string state = 3;     // Pending, InProgress, Acknowledged, Verified, Accepted, Rejected(n), Expired, Cancelled, Superseded
+  bool final = 4;       // no more transmissions or changes
+  uint32 attempts = 5;
+  string summary = 6;   // operator-facing line, e.g. "RTL: SENT — NOT CONFIRMED (link LOST 7.2 s), attempt 3, 22 s left"
 }
 
 // Heartbeat link state of a vehicle changed (plan 08 §4.3).

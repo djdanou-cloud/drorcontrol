@@ -11,6 +11,13 @@
 //! Liveness: a watchdog classifies every vehicle as [`VehicleLink::Connected`], `Stale` or
 //! `Lost` from its heartbeat age (plan 08 §4.3) and raises [`CoreEvent::VehicleLink`] on
 //! every transition. TCP client links reconnect by themselves (`link-net`).
+//!
+//! Commands: every vehicle command goes through [`protocols::command::CommandPolicy`]
+//! (plan 08 §4, ADR-0009): [`Core::request_command`] → confirmation card →
+//! [`Core::submit_command`]. The core retransmits until acknowledged or verified, floods every
+//! link while the vehicle's link is not CONNECTED, never sends after the command's lifetime,
+//! reports [`CoreEvent::Command`] on every change and appends each step to a hash-chained
+//! audit log ([`CoreConfig::audit_log`]).
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -20,7 +27,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use arc_swap::ArcSwap;
 use link_core::{LinkId, LinkIds};
@@ -29,6 +36,11 @@ use mav_router::{HubHandle, HubOutput, LinkPolicy, RouterConfig, spawn_hub};
 use mavlink_codec::enums::{MavAutopilot, MavCmd, MavState, MavType};
 use mavlink_codec::messages::{CommandLong, Heartbeat};
 use mavlink_codec::{Frame, Header, Message, Version, encode};
+use protocols::audit::{self, AuditLog};
+use protocols::command::{
+    Approval, AuditEvent, Command, CommandId, CommandPolicy, CommandStatus, LinkInfo, LinkState,
+    PolicyConfig, Refusal, Request, Target, VehicleFacts,
+};
 use protocols::params::{DownloadConfig, DownloadStatus, Param, ParamDownload};
 use tokio::sync::broadcast;
 
@@ -154,6 +166,11 @@ pub struct CoreConfig {
     pub link_stale: Duration,
     /// No heartbeat for this long: [`VehicleLink::Lost`] (default 5 s).
     pub link_lost: Duration,
+    /// Command policy tuning (token lifetime, command lifetimes, retransmission).
+    pub policy: PolicyConfig,
+    /// Append the hash-chained command audit log here. An existing file is verified and
+    /// continued; a broken chain refuses to start (tamper evidence).
+    pub audit_log: Option<PathBuf>,
 }
 
 impl CoreConfig {
@@ -195,6 +212,8 @@ impl Default for CoreConfig {
             stream_rates: vec![(30, 10.0), (33, 5.0), (74, 5.0), (1, 2.0), (24, 2.0)],
             link_stale: Duration::from_millis(1500),
             link_lost: Duration::from_secs(5),
+            policy: PolicyConfig::default(),
+            audit_log: None,
         }
     }
 }
@@ -232,6 +251,9 @@ pub enum CoreEvent {
         /// What happened.
         detail: String,
     },
+    /// A command changed state (plan 08 §4.2, ADR-0009). `status.summary()` is the
+    /// operator-facing line.
+    Command(Box<CommandStatus>),
     /// A link went up/down.
     Link {
         /// Link id.
@@ -283,6 +305,54 @@ impl fmt::Display for ParamError {
 
 impl std::error::Error for ParamError {}
 
+/// Open (or verify and continue) the audit log and write records on a dedicated thread, so
+/// disk latency never blocks command delivery.
+fn start_audit_writer(
+    path: &std::path::Path,
+    events: broadcast::Sender<CoreEvent>,
+) -> io::Result<std::sync::mpsc::Sender<(SystemTime, AuditEvent)>> {
+    let last = match std::fs::File::open(path) {
+        Ok(f) => audit::last_hash(io::BufReader::new(f)).map_err(|b| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "audit log {} is broken at line {} ({}); move it aside to start a new one",
+                    path.display(),
+                    b.line,
+                    b.reason
+                ),
+            )
+        })?,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => audit::GENESIS.to_string(),
+        Err(e) => return Err(e),
+    };
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    let path = path.to_path_buf();
+    let (tx, rx) = std::sync::mpsc::channel::<(SystemTime, AuditEvent)>();
+    std::thread::Builder::new()
+        .name("audit-log".into())
+        .spawn(move || {
+            let mut log = AuditLog::resume(file, last);
+            for (wall, e) in rx {
+                let us = recorder::unix_micros(wall);
+                if let Err(err) = log.append(us, &e) {
+                    let _ = events.send(CoreEvent::Recorder {
+                        stopped: true,
+                        detail: format!(
+                            "audit log {}: {err}; command auditing stopped",
+                            path.display()
+                        ),
+                    });
+                    return;
+                }
+            }
+        })?;
+    Ok(tx)
+}
+
 /// The headless core. Cheap to clone; all clones share state.
 #[derive(Clone)]
 pub struct Core {
@@ -293,6 +363,8 @@ pub struct Core {
     fleet: Arc<ArcSwap<Fleet>>,
     incoming: broadcast::Sender<Arc<Incoming>>,
     events: broadcast::Sender<CoreEvent>,
+    policy: Arc<std::sync::Mutex<CommandPolicy>>,
+    audit: Option<std::sync::mpsc::Sender<(SystemTime, AuditEvent)>>,
 }
 
 impl Core {
@@ -308,6 +380,13 @@ impl Core {
         let (hub, outputs) = spawn_hub(router, LinkPolicy::relay_all());
         let (incoming, _) = broadcast::channel(4096);
         let (events, _) = broadcast::channel(1024);
+        let audit = match &cfg.audit_log {
+            Some(path) => Some(start_audit_writer(path, events.clone())?),
+            None => None,
+        };
+        let policy = Arc::new(std::sync::Mutex::new(CommandPolicy::new(
+            cfg.policy.clone(),
+        )));
         let core = Core {
             cfg: Arc::new(cfg),
             hub,
@@ -316,6 +395,8 @@ impl Core {
             fleet: Arc::new(ArcSwap::from_pointee(Fleet::new())),
             incoming,
             events,
+            policy,
+            audit,
         };
 
         // Recorder: lossless, on a blocking thread so disk latency never touches routing.
@@ -412,6 +493,21 @@ impl Core {
             }
         });
 
+        // Command delivery (ADR-0009): retransmit, flood, expire; 50 ms resolution.
+        let c = core.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_millis(50));
+            loop {
+                tick.tick().await;
+                let now = Instant::now();
+                let (out, changed) = {
+                    let mut p = c.policy();
+                    p.poll(now, |sysid| c.link_info(sysid, now))
+                };
+                c.deliver(out, changed).await;
+            }
+        });
+
         // GCS heartbeat, 1 Hz: tells vehicles a GCS is present (GCS failsafe).
         let c = core.clone();
         tokio::spawn(async move {
@@ -450,6 +546,22 @@ impl Core {
             text = f.apply(sysid, compid, &msg, now);
             f
         });
+        // Commands: acknowledgements and state-based verification.
+        let changed = match &msg {
+            Message::CommandAck(ack) => {
+                let facts = self.facts(sysid);
+                self.policy()
+                    .on_ack(Target { sysid, compid }, ack, &facts, now)
+            }
+            Message::Heartbeat(_) if compid == vehicle::AUTOPILOT_COMPID => {
+                let facts = self.facts(sysid);
+                self.policy().on_state(sysid, &facts, now)
+            }
+            _ => Vec::new(),
+        };
+        if !changed.is_empty() {
+            self.deliver(Vec::new(), changed).await;
+        }
         if first_heartbeat && compid == vehicle::AUTOPILOT_COMPID {
             let _ = self.events.send(CoreEvent::VehicleSeen { sysid });
             self.request_streams(sysid, compid).await;
@@ -465,6 +577,131 @@ impl Core {
     /// Configuration in use.
     pub fn config(&self) -> &CoreConfig {
         &self.cfg
+    }
+
+    fn policy(&self) -> std::sync::MutexGuard<'_, CommandPolicy> {
+        // A panic while holding the lock cannot leave the policy half-updated in a way that
+        // matters more than losing command control, so keep going.
+        self.policy.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Last-known vehicle state, as the command policy sees it.
+    pub fn facts(&self, sysid: u8) -> VehicleFacts {
+        let fleet = self.fleet();
+        let hb = fleet.get(sysid).and_then(|v| v.heartbeat.as_ref());
+        VehicleFacts {
+            armed: hb.map(|h| h.value.armed()),
+            custom_mode: hb.map(|h| h.value.custom_mode),
+        }
+    }
+
+    /// Link state and heartbeat age of `sysid` for the command policy. A vehicle never heard
+    /// is LOST with no heartbeat; commands are still allowed (ADR-0009).
+    pub fn link_info(&self, sysid: u8, now: Instant) -> LinkInfo {
+        let fleet = self.fleet();
+        let v = fleet.get(sysid).filter(|v| v.heartbeat.is_some());
+        let state = match v.map(|v| vehicle_link(v, now, &self.cfg)) {
+            Some(VehicleLink::Connected) => LinkState::Connected,
+            Some(VehicleLink::Stale) => LinkState::Stale,
+            Some(VehicleLink::Lost) | None => LinkState::Lost,
+        };
+        let heartbeat_age = v.and_then(|v| v.heartbeat.as_ref()).map(|h| h.age(now));
+        LinkInfo {
+            state,
+            heartbeat_age,
+        }
+    }
+
+    fn target(sysid: u8) -> Target {
+        Target {
+            sysid,
+            compid: vehicle::AUTOPILOT_COMPID,
+        }
+    }
+
+    /// Name shown in confirmation cards and required as the class D typed phrase.
+    pub fn set_vehicle_name(&self, sysid: u8, name: &str) {
+        self.policy().set_vehicle_name(sysid, name);
+    }
+
+    /// Step 1 of a command: validate, check lockouts, and for class C/D get the confirmation
+    /// card and token. Never refused because of the link (ADR-0009).
+    pub async fn request_command(&self, sysid: u8, command: Command) -> Result<Request, Refusal> {
+        let now = Instant::now();
+        let (facts, link) = (self.facts(sysid), self.link_info(sysid, now));
+        let r = self
+            .policy()
+            .request(Self::target(sysid), command, &facts, link, now);
+        self.deliver(Vec::new(), Vec::new()).await;
+        r
+    }
+
+    /// Step 2: submit with the operator's approval; transmission starts at once.
+    pub async fn submit_command(
+        &self,
+        sysid: u8,
+        command: Command,
+        approval: Approval,
+    ) -> Result<CommandId, Refusal> {
+        let now = Instant::now();
+        let (facts, link) = (self.facts(sysid), self.link_info(sysid, now));
+        let r = self
+            .policy()
+            .submit(Self::target(sysid), command, approval, &facts, link, now);
+        match r {
+            Ok((id, out, changed)) => {
+                self.deliver(out, changed).await;
+                Ok(id)
+            }
+            Err(e) => {
+                self.deliver(Vec::new(), Vec::new()).await;
+                Err(e)
+            }
+        }
+    }
+
+    /// Stop retransmitting `id`. The vehicle may already have acted on it.
+    pub async fn cancel_command(&self, id: CommandId) -> bool {
+        let s = self.policy().cancel(id, Instant::now());
+        let found = s.is_some();
+        self.deliver(Vec::new(), s.into_iter().collect()).await;
+        found
+    }
+
+    /// Current status of `id`.
+    pub fn command_status(&self, id: CommandId) -> Option<CommandStatus> {
+        self.policy().status(id, Instant::now())
+    }
+
+    /// Transmit, publish status changes and write audit records.
+    async fn deliver(&self, out: Vec<protocols::command::Outgoing>, changed: Vec<CommandStatus>) {
+        for o in out {
+            let seq = self.seq.fetch_add(1, Ordering::Relaxed);
+            let header = Header {
+                seq,
+                sysid: self.cfg.sysid,
+                compid: self.cfg.compid,
+            };
+            if let Ok(frame) = encode(Version::V2, header, &o.msg) {
+                if o.flood {
+                    self.hub.send_all(frame).await;
+                } else {
+                    self.hub.send(frame).await;
+                }
+            }
+        }
+        for s in changed {
+            let _ = self.events.send(CoreEvent::Command(Box::new(s)));
+        }
+        let events = self.policy().drain_audit();
+        if let Some(tx) = &self.audit {
+            // Instant -> wall clock for the record.
+            let (now_i, now_w) = (Instant::now(), SystemTime::now());
+            for e in events {
+                let wall = now_w - now_i.saturating_duration_since(e.at);
+                let _ = tx.send((wall, e));
+            }
+        }
     }
 
     /// Open a link.

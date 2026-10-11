@@ -89,14 +89,21 @@ enum Control {
 pub struct HubHandle {
     /// Give this to every link.
     pub events: mpsc::Sender<LinkEvent>,
-    local: mpsc::Sender<Frame>,
+    local: mpsc::Sender<(Frame, bool)>,
     control: mpsc::Sender<Control>,
 }
 
 impl HubHandle {
     /// Send a frame we originate (routed by target like any other frame).
     pub async fn send(&self, frame: Frame) -> bool {
-        self.local.send(frame).await.is_ok()
+        self.local.send((frame, false)).await.is_ok()
+    }
+
+    /// Send a frame we originate on every link, ignoring learned routes: used for commands
+    /// while a vehicle's link is not CONNECTED, so any path that still works carries it
+    /// (ADR-0009).
+    pub async fn send_all(&self, frame: Frame) -> bool {
+        self.local.send((frame, true)).await.is_ok()
     }
 
     /// Change a link's policy (links start with the hub's default policy).
@@ -126,7 +133,7 @@ pub struct HubOutputs {
 /// Start the hub on the current tokio runtime. `default_policy` applies to new links.
 pub fn spawn_hub(cfg: RouterConfig, default_policy: LinkPolicy) -> (HubHandle, HubOutputs) {
     let (ev_tx, mut ev_rx) = mpsc::channel::<LinkEvent>(1024);
-    let (local_tx, mut local_rx) = mpsc::channel::<Frame>(1024);
+    let (local_tx, mut local_rx) = mpsc::channel::<(Frame, bool)>(1024);
     let (ctl_tx, mut ctl_rx) = mpsc::channel::<Control>(16);
     let (app_tx, app_rx) = mpsc::channel(APP_QUEUE);
     let (links_tx, links_rx) = mpsc::channel(LINK_QUEUE);
@@ -178,10 +185,15 @@ pub fn spawn_hub(cfg: RouterConfig, default_policy: LinkPolicy) -> (HubHandle, H
                     }
                 }
                 f = local_rx.recv() => {
-                    let Some(frame) = f else { break };
+                    let Some((frame, all)) = f else { break };
                     let _ = tap_tx.send(Tapped { time: SystemTime::now(), frame: frame.clone() });
                     let d = router.decide(None, &frame, Instant::now());
-                    forward(&links, &d.forward, &frame);
+                    if all {
+                        let every: Vec<LinkId> = links.keys().copied().collect();
+                        forward(&links, &every, &frame);
+                    } else {
+                        forward(&links, &d.forward, &frame);
+                    }
                 }
                 c = ctl_rx.recv() => match c {
                     Some(Control::SetPolicy(link, p)) => router.add_link(link, p),

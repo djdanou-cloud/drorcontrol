@@ -248,3 +248,49 @@ async fn link_down_survives_a_full_frame_queue() {
         other => panic!("expected link-down notice, got {other:?}"),
     }
 }
+
+/// ADR-0009: while a vehicle's link is not CONNECTED, commands go out on every link, even when
+/// a route to the vehicle is known.
+#[tokio::test]
+async fn send_all_floods_every_link_despite_a_known_route() {
+    use link_core::{LinkEvent, LinkHandle, LinkId};
+    use std::time::SystemTime;
+
+    let (hub, _out) = spawn_hub(RouterConfig::default(), LinkPolicy::relay_all());
+    let (a, mut a_rx) = LinkHandle::new(LinkId(1), "radio A");
+    let (b, mut b_rx) = LinkHandle::new(LinkId(2), "radio B");
+    hub.events.send(LinkEvent::Added(a)).await.unwrap();
+    hub.events.send(LinkEvent::Added(b)).await.unwrap();
+    // Vehicle 1 is heard on link A only: its route is A.
+    hub.events
+        .send(LinkEvent::Frame {
+            link: LinkId(1),
+            frame: heartbeat(1),
+            rx_time: SystemTime::now(),
+        })
+        .await
+        .unwrap();
+    // The heartbeat itself is relayed to the other link (relay_all).
+    assert_eq!(
+        timeout(T, b_rx.recv()).await.unwrap().unwrap(),
+        heartbeat(1)
+    );
+    let cmd = command((255, 190), (1, 1));
+
+    assert!(hub.send(cmd.clone()).await);
+    assert_eq!(timeout(T, a_rx.recv()).await.unwrap().unwrap(), cmd);
+    assert!(
+        timeout(Duration::from_millis(200), b_rx.recv())
+            .await
+            .is_err(),
+        "routed: link A only"
+    );
+
+    assert!(hub.send_all(cmd.clone()).await);
+    assert_eq!(timeout(T, a_rx.recv()).await.unwrap().unwrap(), cmd);
+    assert_eq!(
+        timeout(T, b_rx.recv()).await.unwrap().unwrap(),
+        cmd,
+        "flooded: link B too"
+    );
+}

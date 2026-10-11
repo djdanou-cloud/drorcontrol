@@ -248,6 +248,14 @@ impl CoreApi for CoreService {
                     Ok(CoreEvent::Recorder { stopped, detail }) => {
                         Kind::Recorder(pb::RecorderEvent { stopped, detail })
                     }
+                    Ok(CoreEvent::Command(st)) => Kind::Command(pb::CommandEvent {
+                        id: st.id.0,
+                        sysid: u32::from(st.target.sysid),
+                        state: format!("{:?}", st.state),
+                        r#final: st.state.is_final(),
+                        attempts: st.attempts,
+                        summary: st.summary(),
+                    }),
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 };
