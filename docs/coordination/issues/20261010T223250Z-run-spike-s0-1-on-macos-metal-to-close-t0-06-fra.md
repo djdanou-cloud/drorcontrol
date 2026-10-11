@@ -19,3 +19,8 @@ Someone with a Mac runs the commands in ui/spikes/s0-1-bridge/RESULTS.md ("Not y
 
 ## Updates
 * 2026-10-11 (core-1): step-by-step procedure in `docs/dev/mac-test-runbook.md`.
+* 2026-10-11 (mactest-1): run on an M1 MacBook Air (macOS 27.0.1, Qt 6.11.2, 60 Hz Retina).
+  0 frames > 25 ms at 0 / 200 k / 400 k msg/s; frame p99 17.79 / 19.49 / 18.94 ms, so the strict
+  16.7 ms bound is missed even at idle. Numbers in `ui/spikes/s0-1-bridge/RESULTS.md`. Left open:
+  the criterion needs restating in ADR-0001 (handoff to architect), and Intel / 120 Hz / Low
+  Power Mode runs are still missing.

@@ -42,8 +42,31 @@ through a cxx-qt bridge keeps rendering every frame, with UI-thread cost indepen
 5. cxx-qt 0.10 + Qt 6.4: `#[qobject] #[qml_element] #[qproperty] #[qinvokable]` built first time with a
    pure-Cargo build (`QMAKE=qmake6`); cold release build ~2.5 min.
 
-## Not yet measured (needs a Mac — see issue)
-Metal (Qt RHI) on Apple Silicon and Intel, ProMotion/120 Hz, Low Power Mode, energy impact. Run:
+## M1 Mac run (2026-10-11, mactest-1)
+* MacBook Air M1 (8 cores), macOS 27.0.1, AC power, Low Power Mode off; built-in Retina display
+  2880×1800 at 60 Hz. Qt 6.11.2 (Homebrew), release build, Qt's default scene-graph backend
+  (Metal on macOS; the report does not record the graphics API). Run from the logged-in
+  desktop session; 20 s measured per rate (1201 frames).
+
+| Offered msg/s | Achieved (median) | Frame interval p50 / p99 / max (ms) | Frames > 25 ms | tick() p50 / p99 (µs) | Snapshot load p50 / p99 (µs) |
+|--:|--:|--|--:|--|--|
+| 0 (idle) | 0 | 16.67 / 17.79 / 18.75 | 0 | 9.5 / 14.1 | 6.8 / 11.1 |
+| **200 000** | **199 968** | **16.69 / 19.49 / 22.04** | **0** | 3782 / 5404 | **4.1 / 19.5** |
+| 400 000 | 399 865 | 16.67 / 18.94 / 19.40 | 0 | 2024 / 2890 | 1.5 / 5.5 |
+
+* **No dropped frames at any rate** (0 frames > 25 ms), and ingest keeps up to 400 k msg/s.
+* **The strict "p99 ≤ 16.7 ms" bound is missed again, including at idle** (17.79 ms). As in
+  finding 4, a 60 Hz loop's ordinary jitter puts p99 just above one refresh period, so the
+  criterion as written cannot be met by any app; it needs restating (e.g. "0 frames > 25 ms and
+  p99 ≤ 1.5 refresh periods"). That is a decision for ADR-0001, not made here.
+* **Per-frame UI cost is about 4× the Linux figure** under load (tick p50 3.8 ms at 200 k vs
+  0.88 ms), while the snapshot read stays at a few µs. This strengthens finding 3: instruments
+  must be scene-graph / QRhi items, not QML property bindings.
+* tick() is lower at 400 k than at 200 k (2.0 vs 3.8 ms p50). Not investigated; one run each.
+
+## Not yet measured
+Intel Mac, ProMotion/120 Hz (this Mac has no ProMotion display), Low Power Mode, energy impact.
+Run (from a terminal in a logged-in desktop session; over SSH Qt finds no screen):
 ```bash
 export QMAKE=$(which qmake)   # Qt 6.5+ recommended on macOS
 cargo build --release --manifest-path ui/spikes/s0-1-bridge/Cargo.toml

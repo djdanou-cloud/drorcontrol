@@ -72,6 +72,9 @@ and the code are newer. Where either disagrees with an owner instruction, the ow
 | GStreamer installs from apt (`libgstreamer1.0-dev` + plugins) | The video spike builds and runs locally (software decode only). |
 | Local ArduPilot SITL: `scripts/build_sitl.sh` → `.sitl/ardupilot-Copter-4.7.1/` (gitignored, about 5 min) | `DC_SITL_REQUIRED=1 cargo test -p sitl-harness --test scenarios` runs all scenarios (9, including the longer parameter write/rollback test). Stop docs serving on port 8000 or use port 18000: SITL instance 224 uses port 8000. The pinned ArduPilot source in `.sitl/` is the reference for ArduPilot behaviour: read it instead of guessing. |
 | macOS pseudo-terminals cannot be opened by path through `serialport` (it sets the baud rate with `IOSSIOSPEED`) | Serial tests use `TTYPort::pair()` and the injectable `Opener` (`link-serial`). |
+| Mac SDK mismatch (seen on macOS 27 with Xcode 26.x, 2026-10-11) | Homebrew Qt's `qt.toolchain.cmake` and the default `xcrun --show-sdk-path` pick the Command Line Tools SDK, whose `.tbd` stubs Xcode's linker rejects ("unknown architecture"). CMake: pass `-DCMAKE_OSX_SYSROOT=$(xcrun --sdk macosx --show-sdk-path)` (`ui/spikes/s0-3-map/build.sh` cannot pass it yet). Plain `cc`/waf (SITL): `export SDKROOT=$(xcrun --sdk macosx --show-sdk-path)`. |
+| GUI spikes need a desktop session | Over SSH Qt prints "Cannot create window: no screens available" and GStreamer's `gst_macos_main` hangs. Run them from a terminal in a logged-in desktop session. Running one user's app in another user's desktop (`launchctl asuser`) crashed in AppKit. |
+| SITL instance 124 → TCP 7000 | One full-suite run on a Mac lost a SITL at start-up on instance 124 (port 7000, used by macOS AirPlay Receiver); the rerun passed 9/9. Suspected, not confirmed. |
 | `coord.py` | Quote glob paths (`'crates/x/**'`). Log types are only `progress handoff question decision-request blocker conflict fyi done`. |
 
 ## 4. Phase 0 status (backlog T0-01…T0-16)
@@ -83,10 +86,10 @@ and the code are newer. Where either disagrees with an owner instruction, the ow
 | T0-03 router, links, tlog | done | `mav-router`, `link-*`, `recorder` |
 | T0-04 core daemon, gRPC, FFI, CLI | done | `dc-core`, `api`, `core-ffi`, `dc-cli` |
 | T0-05 macOS serial | **code done; hardware matrix pending** | Mac runbook T0-05; `crates/platform-macos/HARDWARE_MATRIX.md` |
-| T0-06 spike S0-1 bridge | **Linux done; Metal run pending** | `ui/spikes/s0-1-bridge/RESULTS.md` (p99 17.7 ms without a GPU) |
-| T0-07 spike S0-3 map | **harness ready; CI start-up fix unverified; Mac run pending** | `ui/spikes/s0-3-map/`; re-run workflow `spike-map` |
+| T0-06 spike S0-1 bridge | **M1 run done; strict p99 bound missed** | M1: 0 dropped frames, p99 19.5 ms at 200 k (17.8 ms idle). Criterion needs restating in ADR-0001; Low Power Mode / 120 Hz / Intel not run |
+| T0-07 spike S0-3 map | **M1 run done at 2880×1800: Metal, fps, vsync, feel pass; GPU ≈ 42 % fails** | `ui/spikes/s0-3-map/RESULTS.md`; 5K run and ADR-0003 go/no-go pending |
 | T0-08 spike S0-4 logs | done | `crates/logs` |
-| T0-09 spike S0-5 video | **harness ready; M1 run pending** | `ui/spikes/s0-5-video/RESULTS.md`; separate `spike-video` workflow gives indicative numbers when the spike or its workflow changes, or on manual dispatch |
+| T0-09 spike S0-5 video | **M1 run done: hardware, zero-copy, CPU 2.2 % pass; file-mode p99 405 ms fails (likely timing artefact)** | `ui/spikes/s0-5-video/RESULTS.md`; separate `spike-video` workflow gives indicative numbers when the spike or its workflow changes, or on manual dispatch |
 | T0-10 macOS package | done on CI | First launch on a team Mac is a manual check (runbook) |
 | T0-11 parity freeze | done | `parity.yaml`, `docs/parity/` |
 | T0-12 design tokens | done | `ui/tokens/` (owner decisions applied) |
@@ -112,7 +115,7 @@ and the code are newer. Where either disagrees with an owner instruction, the ow
 
 | Item | Where | Needed from |
 |------|-------|-------------|
-| Mac session: T0-05, T0-06, T0-07, T0-09, T0-10 first launch | Mac runbook | Owner (hardware) |
+| Mac session, remaining: T0-05 hardware matrix, T0-07 at 5K, T0-09 live RTSP, T0-10 first launch (M1 results of 2026-10-11 are in the spike RESULTS.md files) | Mac runbook | Owner (hardware) |
 | Per-hazard rating review; interpretations I1–I3; acceptance of the H14 residual risk | `docs/safety/hazards.md` §3, §7 | Flight Operations & Systems Safety Lead |
 | Licence of the vendored MAVLink XML and the generated code | `issues/20261010T213905Z-…` | Owner / legal |
 | MapLibre Native third-party licence inventory before shipping | `ui/spikes/s0-3-map/RESULTS.md` | Owner / legal |
