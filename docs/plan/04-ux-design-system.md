@@ -4,13 +4,13 @@ Design thesis: **a glass cockpit, not a dashboard.** One glance answers *Is it s
 
 ## 1. Design tokens
 
-All visual constants are tokens (JSON → generated QML singleton + CSS vars for docs). No literal colours in components.
+All visual constants are tokens (JSON → generated QML singleton + CSS vars for docs). No literal colours in components. Source and contrast checks: [`ui/tokens/`](../../ui/tokens/README.md).
 
 ### 1.1 Brand palette (identity)
 | Token | Hex | Use in GCS |
 |-------|-----|-----------|
 | `brand.carbon` | `#212121` | Night/Standard canvas |
-| `brand.graphite` | `#424242` | Panels, cards, raised surfaces |
+| `brand.graphite` | `#424242` | Brand material colour. GCS panels use the darker `#333333` (decision 2026-10-11): warning red on graphite is only 2.83:1, on `#333333` it is 3.56:1 |
 | `brand.smoke` | `#FAFAFA` | Primary text on dark; Daylight canvas |
 | `brand.azure` | `#009CFF` | Selection, primary action, focus, active vehicle, own-ship symbology |
 | `brand.pizazz` | `#FF9400` | **Caution** (amber) — also CTA highlight |
@@ -23,20 +23,20 @@ Avionics colour semantics follow **MIL-STD-1472 / SAE ARP4102-style conventions*
 | Role | Standard/Night-day token | Daylight token | Rule |
 |------|--------------------------|----------------|------|
 | `state.warning` | `#FF3B30` | `#C4001A` | Immediate action; always paired with shape + text + (optional) audio |
-| `state.caution` | `#FF9400` (= `brand.pizazz`) | `#B35F00` | Brand orange doubles as caution amber |
+| `state.caution` | `#FF9400` (= `brand.pizazz`) | `#A85900` | Brand orange doubles as caution amber |
 | `state.normal` | `#2ECC71` | `#0B7A3B` | Healthy/engaged only — not used for "just because" decoration |
 | `state.advisory` | `#22D3EE` | `#006C85` | Informational |
 | `state.guidance` | `#E040FB` | `#8E24AA` | Active target/commanded path (flight-director style) |
 | `sky` / `ground` | `#0B5FA5` → `#009CFF` gradient / `#6B4A2B` → `#3B2A18` | brighter high-contrast pair | PFD horizon (azure echoes brand) |
 
-**Never colour-only.** Every state also has a shape/label/position change (colour-blind safe; verified with deuteranopia/protanopia simulation in CI screenshots). Contrast: text ≥ 7:1 (AAA) for telemetry, ≥ 4.5:1 elsewhere, computed automatically from tokens in a unit test.
+**Never colour-only.** Every state also has a shape/label/position change (colour-blind safe; verified with deuteranopia/protanopia simulation in CI screenshots). Contrast: text ≥ 7:1 (AAA) for telemetry, ≥ 4.5:1 elsewhere, meaningful graphics ≥ 3:1, computed automatically from tokens in a unit test. Exception (decision 2026-10-11): Night-Ops telemetry keeps `#FF4D4D` for dark adaptation, 6.4:1 on black.
 
 ### 1.3 Themes (ambient lighting palettes)
 | Theme | Intent | Canvas | Text | Accent | Notes |
 |-------|--------|--------|------|--------|-------|
-| **Standard** | Indoor/dusk, brand look | `#212121` | `#FAFAFA` | `#009CFF` | Default |
+| **Standard** | Indoor/dusk, brand look | `#212121` (panels `#333333`) | `#FAFAFA` | `#009CFF` | Default |
 | **Daylight (Full Sunlight)** | Direct sun on a laptop/tablet | `#FAFAFA` panels, pure-white text boxes inverted to black text; maps desaturated high-contrast | `#101010` | `#0066B3` | ≥ 7:1 everywhere; matte (no translucency/blur); thicker strokes (+25 %) and larger minimum text (+2 pt) |
-| **Night-Ops (Red/NVG-safe)** | Preserve dark adaptation and NVG compatibility | `#000000` | `#B30000`–`#FF4D4D` red monochrome | red tints only | **No blue/green/white emitters**; brightness slider down to 1 %; all warnings differentiated by shape/flash/audio (since colour is mono); map swaps to red-on-black style |
+| **Night-Ops (Red/NVG-safe)** | Preserve dark adaptation and NVG compatibility | `#000000` | `#B30000`–`#FF4D4D` red monochrome | red tints only | **No blue/green/white emitters**; telemetry text `#FF4D4D` (6.4:1, accepted exception to 7:1); brightness slider down to 1 %; all warnings differentiated by shape/flash/audio (since colour is mono); map swaps to red-on-black style |
 | **High-Contrast / A11y** | Accessibility | black/white | | | Maps to macOS "Increase Contrast" |
 
 Themes switch at runtime without restart; “Auto” can follow OS appearance and (optionally) ambient light sensor / sunrise-sunset at the vehicle position.

@@ -22,7 +22,7 @@ When generating UI components, design tokens, layouts, or state logic for DrorCo
   - Central visual cone must remain clear for spatial orientation; never block the vehicle marker or immediate flight trajectory with heavy static panels.
 - **Layer 1 (Tactical Overlays & HUD):**
   - Floating, dockable panels with multi-display support and saved workspaces (*Fly, Plan, Setup, Tune, Analyze, Sim*).
-  - **Standard theme:** semi-translucent glass is permitted (token `surface.glass`: graphite `#424242` at ~85 % alpha, 1 px hairline border at ~8 % white; blur is optional and **off by default on battery / Low Power Mode**, since it is GPU-costly).
+  - **Standard theme:** semi-translucent glass is permitted (token `surfaceGlass`: panel grey `#333333` at 85 % alpha, 1 px hairline border at ~8 % white; blur is optional and **off by default on battery / Low Power Mode**, since it is GPU-costly).
   - **Daylight theme:** matte and opaque only — no translucency or blur. **Night-Ops theme:** opaque, red-monochrome, no blur.
   - Edge-anchored or collapsible to maximize situational awareness.
 - **Layer 2 (Critical Status Ribbon — pinned top center):**
@@ -39,7 +39,7 @@ Status colors carry safety-critical meaning (MIL-STD-1472 / ARP4102-style). They
 | Level | Token | Standard / Night-Ops-aware hex | Daylight hex | Semantic meaning | Example triggers |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Warning (immediate action)** | `state.warning` | `#FF3B30` | `#C4001A` | Imminent danger or loss of control authority | Failsafe active, terrain alert, EKF fail, link LOST, battery critical, fence breach |
-| **Caution (awareness / future action)** | `state.caution` | `#FF9400` (= brand Pizazz) | `#B35F00` | Degraded performance or redundancy | Battery low (stage 1), link DEGRADED, GPS 3D non-RTK, HDOP above threshold, high vibration |
+| **Caution (awareness / future action)** | `state.caution` | `#FF9400` (= brand Pizazz) | `#A85900` | Degraded performance or redundancy | Battery low (stage 1), link DEGRADED, GPS 3D non-RTK, HDOP above threshold, high vibration |
 | **Advisory (information)** | `state.advisory` | `#22D3EE` | `#006C85` | Informational, not requiring action | Pre-arm info, mode-change notice, SIM/REPLAY badges |
 | **Normal (healthy / safe)** | `state.normal` | `#2ECC71` | `#0B7A3B` | System nominal, ready | RTK Fixed, pre-arm checks pass, link CONNECTED |
 | **Guidance (commanded)** | `state.guidance` | `#E040FB` | `#8E24AA` | Active target / commanded path | Active waypoint vector, target altitude/airspeed bugs |
@@ -51,7 +51,7 @@ Notes:
 - **Night-Ops** is red-monochrome (no blue/green/white emitters): differentiate states by shape, flash pattern and audio, not hue.
 - **Stale data:** value > 1 s old dims, > 3 s shows amber dashes `---`, > 10 s red `X` over the instrument. Never show a stale number as live.
 
-**Base surfaces (Standard theme — DrorAero brand):** canvas Carbon `#212121`, raised surfaces Matte Graphite `#424242`, text White Smoke `#FAFAFA`, primary accent/selection Bright Azure `#009CFF`, interactive micro-states Vaporwave `#22D3EE`, separators Sonic Silver `#757575`. Daylight canvas `#FAFAFA` with `#101010` text (≥ 7:1). Night-Ops canvas `#000000` with red text. Pure black otherwise appears only in raw video letterboxing. Telemetry text ≥ 7:1 (WCAG AAA); other text ≥ 4.5:1 — asserted by an automated token-contrast test.
+**Base surfaces (Standard theme — DrorAero brand):** canvas Carbon `#212121`, panels `#333333` (darker than brand Matte Graphite `#424242` so state colours keep ≥ 3:1), text White Smoke `#FAFAFA`, primary accent/selection Bright Azure `#009CFF`, interactive micro-states Vaporwave `#22D3EE`, separators Sonic Silver `#757575`. Daylight canvas `#FAFAFA` with `#101010` text (≥ 7:1). Night-Ops canvas `#000000` with red text `#FF4D4D` (6.4:1, the accepted exception to 7:1). Pure black otherwise appears only in raw video letterboxing. Telemetry text ≥ 7:1 (WCAG AAA); other text ≥ 4.5:1; meaningful graphics ≥ 3:1 — asserted by an automated token-contrast test (`crates/design-tokens`). Use the generated tokens (`ui/tokens/`), never these hex values directly.
 
 Typography: Urbane (headlines/UI; Inter fallback), **Space Grotesk Bold ALL CAPS** for section titles, and a tabular monospaced face (JetBrains Mono or IBM Plex Mono) for all telemetry numerals.
 

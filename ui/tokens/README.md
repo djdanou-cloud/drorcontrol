@@ -22,10 +22,10 @@ macOS Increase Contrast). Every theme defines the same tokens; a test enforces i
 
 ## Colour roles
 
-* `text`, `textTelemetry`: primary text and live readouts, at least 7:1 on every background,
+* `text`, `textTelemetry`: primary text and live readouts, at least 7:1 on every background (Night-Ops: 6.2:1, by decision),
   including glass over a white map tile.
 * `textMuted`: units and secondary labels. `accentText`: azure text on panels, where brand azure
-  is too dark.
+  is too dark (4.33:1 on #333333).
 * `state.*`: reserved safety colours (warning, caution, advisory, normal, guidance, standby).
   They are used for icons, frames, chips and short labels on the canvas, never for decoration.
   On panels, a state is shown as a filled chip with `stateInk.*` text.
@@ -39,19 +39,19 @@ macOS Increase Contrast). Every theme defines the same tokens; a test enforces i
 `cargo test -p design-tokens -- --nocapture` prints the full table. An exemption must name a
 reason and an issue, and a test fails as soon as an exemption is no longer needed.
 
-### Open decisions (product owner)
+### Decisions (product owner, 2026-10-11)
 
-1. **Night-Ops telemetry contrast.** The plan's brightest Night-Ops red, #FF4D4D, reaches
-   6.42:1 on black, so 7:1 is impossible inside the plan. Either keep it (exempted) or allow
-   #FF5E5E (7.0:1, slightly more green/blue light).
-2. **Warning red and standby grey on graphite panels** are below 3:1 (2.83 and 2.18). Fix options:
-   darker panels (#333333 lifts red to 3.56:1) or a carbon keyline around state marks. For now
-   panels show states as filled chips, which pass.
-3. **Deviations from the plan's hex values**, listed in `tokens.json` → `deviations`:
-   - Daylight caution #B35F00 → #A85900. The plan value is 4.42:1 on the Daylight canvas,
-     below the 4.5:1 text minimum.
-   - Standard glass opacity 0.90. At 0.85, telemetry text over a white map tile drops to 6.2:1.
-   - New roles the plan does not specify: `accentText` and `textMuted`.
+* **Night-Ops** keeps #FF4D4D: dark adaptation comes first. Telemetry is 6.42:1 on black and
+  6.24:1 on Night-Ops panels; the exemption records this.
+* **Standard panels are #333333**, darker than brand graphite #424242. Warning red on panels goes
+  from 2.83:1 to 3.56:1, and glass is back to the plan's 85 % (telemetry over a white map tile:
+  7.49:1).
+* **Daylight caution is #A85900** (4.91:1). Plan 04 is updated to match.
+
+Still open: standby grey #757575 on the #333333 panels is 2.74:1, below 3:1. It is exempted
+because standby always comes with a text label. The alternative is #808080 (3.2:1). Also
+`accentText` #4DB8FF and `textMuted` #B0B0B0 are roles the plan does not name (see
+`deviations`).
 
 Not yet covered: PFD symbology over the sky/ground gradient. It relies on the `pfd.halo` outline
 and needs a rendered-image check. Fonts are referenced by name only; bundling waits on the

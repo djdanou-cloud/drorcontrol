@@ -32,8 +32,8 @@
 
 :root, [data-theme="standard"] {
   --dc-color-canvas: #212121;
-  --dc-color-surface: #424242;
-  --dc-color-surface-glass: rgba(66, 66, 66, 0.9);
+  --dc-color-surface: #333333;
+  --dc-color-surface-glass: rgba(51, 51, 51, 0.85);
   --dc-color-border: rgba(255, 255, 255, 0.08);
   --dc-color-separator: #757575;
   --dc-color-text: #FAFAFA;

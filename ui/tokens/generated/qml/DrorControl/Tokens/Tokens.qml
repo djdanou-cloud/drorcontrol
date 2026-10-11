@@ -11,8 +11,8 @@ QtObject {
     readonly property var _themes: ({
         "standard": {
             "canvas": "#212121",
-            "surface": "#424242",
-            "surfaceGlass": "#E6424242",
+            "surface": "#333333",
+            "surfaceGlass": "#D9333333",
             "border": "#14FFFFFF",
             "separator": "#757575",
             "text": "#FAFAFA",

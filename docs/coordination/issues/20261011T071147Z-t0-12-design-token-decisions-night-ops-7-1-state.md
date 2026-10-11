@@ -38,3 +38,9 @@ is 6.2:1), and two new roles, `accentText` #4DB8FF and `textMuted` #B0B0B0.
    removed or made permanent.
 
 ## Updates
+
+- 2026-10-11 (ux-1): Product owner decided: keep Night-Ops #FF4D4D (exemption made permanent),
+  Standard panels #333333 (warning red 3.56:1 on panels; glass back to 85 %, telemetry 7.49:1
+  over white), accept Daylight caution #A85900. Plan 04 and the UI skill are updated. Remaining:
+  standby #757575 on #333333 is 2.74:1 (exempted; option #808080 = 3.2:1).
+
