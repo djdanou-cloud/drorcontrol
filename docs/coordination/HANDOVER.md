@@ -86,7 +86,7 @@ and the code are newer. Where either disagrees with an owner instruction, the ow
 | T0-06 spike S0-1 bridge | **Linux done; Metal run pending** | `ui/spikes/s0-1-bridge/RESULTS.md` (p99 17.7 ms without a GPU) |
 | T0-07 spike S0-3 map | **harness ready; CI start-up fix unverified; Mac run pending** | `ui/spikes/s0-3-map/`; re-run workflow `spike-map` |
 | T0-08 spike S0-4 logs | done | `crates/logs` |
-| T0-09 spike S0-5 video | **harness ready; M1 run pending** | `ui/spikes/s0-5-video/RESULTS.md`; CI job "video spike S0-5" gives indicative numbers |
+| T0-09 spike S0-5 video | **harness ready; M1 run pending** | `ui/spikes/s0-5-video/RESULTS.md`; separate `spike-video` workflow gives indicative numbers when the spike or its workflow changes, or on manual dispatch |
 | T0-10 macOS package | done on CI | First launch on a team Mac is a manual check (runbook) |
 | T0-11 parity freeze | done | `parity.yaml`, `docs/parity/` |
 | T0-12 design tokens | done | `ui/tokens/` (owner decisions applied) |
@@ -134,8 +134,11 @@ The backlog rows were added in [`backlog.md`](backlog.md), T0-17 onwards.
 3. **T0-19 — class C confirmation for an in-flight mission upload** (plan 08 §4.1, ADR-0011
    I3). It is refused today. This changes the command pipeline, so it needs owner/safety-lead
    approval first.
-4. **T0-20 — save CI minutes:** run the video-spike job only when `ui/spikes/s0-5-video/**`
-   or its workflow changes, as `spike-map` already does.
+4. **T0-20 — implemented locally (devops-2):** the video-spike job moved from `ci.yml` to
+   `.github/workflows/spike-video.yml`. Pushes to `main` and pull requests run it only when
+   `ui/spikes/s0-5-video/**` or the new workflow changes; manual dispatch remains available.
+   Actionlint 1.7.12 and 12 local trigger scenarios passed; the job steps and other CI jobs
+   are unchanged. GitHub execution remains unverified until the owner authorizes a push.
 5. Phase 1, once the Mac results are in: plan 07 roadmap; the Qt shell can start after the
    T0-06 / T0-07 verdicts (ADR-0001 / ADR-0003).
 
