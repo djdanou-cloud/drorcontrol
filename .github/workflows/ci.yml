@@ -202,3 +202,42 @@ jobs:
           "$MNT/DrorControl.app/Contents/MacOS/dc-cli" --version
           test -f "$MNT/FIRST-LAUNCH.txt"
           hdiutil detach "$MNT"
+
+  video-spike-macos:
+    # Spike S0-5 (T0-09): proves the harness builds on macOS and records a first VideoToolbox
+    # reading on a CI runner (a VM: numbers are indicative; the pass/fail run is on a real Mac,
+    # see the Mac test runbook). Fails only if the harness cannot build or run.
+    name: video spike S0-5 (macOS, informational)
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ui/spikes/s0-5-video
+
+      - name: Install GStreamer
+        run: brew install gstreamer pkgconf
+
+      - name: Build harness
+        run: cargo build --release --manifest-path ui/spikes/s0-5-video/Cargo.toml
+
+      - name: Encode a 1080p30 sample, measure decode
+        run: |
+          B=ui/spikes/s0-5-video/target/release/spike-s0-5-video
+          $B make-sample sample.mkv 20
+          $B run sample.mkv --seconds 12 --warmup 3 --report s05-macos-ci.json
+          for d in vtdec_hw vtdec avdec_h264; do
+            $B run sample.mkv --seconds 8 --warmup 2 --decoder $d --report s05-macos-ci-$d.json || echo "$d: not usable here"
+          done
+          { echo '### Spike S0-5 on the CI runner (indicative)'; echo '```'; cat s05-macos-ci*.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spike-s0-5-macos-ci
+          path: s05-macos-ci*.json
+          retention-days: 30

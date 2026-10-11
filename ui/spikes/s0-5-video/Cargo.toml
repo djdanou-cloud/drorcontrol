@@ -1,0 +1,14 @@
+[package]
+name = "spike-s0-5-video"
+description = "Spike S0-5: 1080p30 H.264 hardware decode latency and CPU (plan 01 §6, T0-09)."
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Standalone workspace: needs GStreamer >= 1.24 (brew install gstreamer, or the distro's
+# libgstreamer1.0-dev + plugins), which the main CI matrix does not install.
+[workspace]
+
+[dependencies]
+gstreamer = "0.25"
+cpu-time = "1.0"
