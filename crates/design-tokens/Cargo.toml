@@ -1,0 +1,13 @@
+[package]
+name = "design-tokens"
+description = "DrorControl design tokens (ui/tokens/tokens.json): typed access for GPU-drawn instruments and the WCAG contrast checks."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde_json = "1.0.152"
+
+[lints]
+workspace = true

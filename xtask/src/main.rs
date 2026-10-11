@@ -155,6 +155,10 @@ fn repo_check(root: &Path) -> TaskResult {
         root,
         Command::new(&python).args(["scripts/sync_skill.py", "--check"]),
     )?;
+    run(
+        root,
+        Command::new(&python).args(["scripts/gen_tokens.py", "--check"]),
+    )?;
 
     let output = Command::new("git")
         .current_dir(root)
