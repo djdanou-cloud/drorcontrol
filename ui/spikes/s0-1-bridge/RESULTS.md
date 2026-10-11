@@ -64,8 +64,18 @@ through a cxx-qt bridge keeps rendering every frame, with UI-thread cost indepen
   must be scene-graph / QRhi items, not QML property bindings.
 * tick() is lower at 400 k than at 200 k (2.0 vs 3.8 ms p50). Not investigated; one run each.
 
+### Low Power Mode (same Mac, same day; LPM on for the runs only)
+
+| Offered msg/s | Achieved | Frame interval p50 / p99 / max (ms) | Frames > 25 ms | tick() p50 / p99 (µs) |
+|--:|--:|--|--:|--|
+| 0 | 0 | 16.67 / 18.76 / 20.14 | 0 | 10.1 / 14.5 |
+| 200 000 | 200 044 | 16.67 / 20.36 / 33.68 | **1** (of 1201) | 3864 / 5648 |
+| 400 000 | 400 045 | 16.66 / 19.14 / 20.66 | 0 | 2026 / 2852 |
+
+About 1 ms worse p99 than at normal power, and one 33.7 ms frame at 200 k. One run per rate.
+
 ## Not yet measured
-Intel Mac, ProMotion/120 Hz (this Mac has no ProMotion display), Low Power Mode, energy impact.
+Intel Mac, ProMotion/120 Hz (this Mac has no ProMotion display), energy impact.
 Run (from a terminal in a logged-in desktop session; over SSH Qt finds no screen):
 ```bash
 export QMAKE=$(which qmake)   # Qt 6.5+ recommended on macOS

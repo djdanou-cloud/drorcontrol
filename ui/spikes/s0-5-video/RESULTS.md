@@ -3,9 +3,11 @@
 **Question (plan 01 §6, §9):** does the platform's hardware decoder keep 1080p30 H.264 decode at
 ≤ 8 ms per frame and the process at ≤ 5 % CPU on an M1, so video never delays the operator?
 
-**Status:** first real-Mac run done on an M1 (2026-10-11): **hardware decode, zero-copy handle
-and CPU pass; decode p99 fails (405 ms) in file mode, very likely because of how file mode is
-timed** (see below). The deciding live RTSP run is still to do. CI's macOS runner records
+**Status:** real-Mac runs done on an M1 (2026-10-11), including live RTSP. **Hardware decode and
+the zero-copy handle pass; decode latency fails (p99 113 ms live) and CPU is just over (6.4 %).**
+The latency is frames held by the hardware decoder path, one per frame of decode buffer the
+stream allows (`max_dec_frame_buffering`): 103 ms with 3, 36 ms with 1 (see below). Meeting
+≤ 8 ms needs a decode path that outputs each frame at once. CI's macOS runner records
 indicative numbers (job "video spike S0-5").
 
 ## Method
@@ -37,20 +39,36 @@ indicative numbers (job "video spike S0-5").
 | macOS CI runner, fixed harness | see the CI job summary | — | — | — | indicative |
 | M1 MacBook Air, file, synced (2026-10-11) | `vtdec_hw`, system-memory caps | 341.2 / 404.9 | **2.2** | **yes** (`GstCoreVideoMeta`) | Hardware, zero-copy and CPU pass; latency fails, very likely a file-mode artefact (below) |
 | same Mac, file, synced | `avdec_h264` (software) | 9.85 / 14.45 | 99.7 | no | Software misses both targets |
-| **M1 Mac, live RTSP (unsynced)** | `vtdec_hw` | pending | pending | pending | **decides T0-09** |
+| M1 Mac, live RTSP (unsynced), localhost relay | `vtdec_hw` | **103.0 / 112.8** | 6.38 | yes | **Fails** latency and CPU; ≈ 3 frames held (below) |
+| same, live RTSP | `avdec_h264` (software) | 9.6 / 14.7 | 99.7 | no | Software misses both targets |
+| same, live RTSP, clip re-encoded with 1 reference frame | `vtdec_hw` | **36.2 / 46.2** | 6.59 | yes | ≈ 1 frame held: latency follows the decode buffer |
 
 ### M1 Mac run (2026-10-11, mactest-1)
 * MacBook Air M1 (8 cores), macOS 27.0.1, AC power, GStreamer 1.28.8 (Homebrew). Clip from
   `make-sample` (x264enc, 90 s). 60 s measured per run, 1800 frames, 29.99 fps, 0 unmatched.
 * `vtdec_hw` output NV12 with `GstCoreVideoMetaAPI` attached, so the `CVPixelBuffer` handle is
   there for a Metal import.
-* **Why the hardware latency is probably not decode time.** The GL path is gone (system-memory
-  caps), yet p50 is still in the range of the first CI run (365 ms), and on the M1 the software
-  decoder took 10–14 ms on the same clip. In file mode the sink is synced to the clock, but
-  the demuxer feeds the decoder as fast as queues allow, and latency is timed from decoder
-  input. A decoder that holds more frames internally (VideoToolbox) then shows the wait for the
-  clock: ≈ 10 frames × 33 ms ≈ 341 ms matches p50. **Not verified.** Two ways to settle it: the live RTSP run (unsynced,
-  the case the GCS runs) or a file run with the sink unsynced and input paced at 30 fps.
+* **File mode overstates the latency.** With the sink synced to the clock, frames also wait for
+  their display time inside the decoder's queue: 341 ms p50 in file mode vs 103 ms live.
+* **Live RTSP setup:** mediamtx 1.21.2 relay on 127.0.0.1:8554 (RTSP over TCP only), `ffmpeg -re
+  -c copy` publishing the clip in real time, spike `run rtsp://127.0.0.1:8554/cam`. 1800 frames,
+  29.99 fps, 0 unmatched. CPU now includes `rtspsrc` and depayloading.
+* **The hardware decoder path holds as many frames as the stream's decode buffer allows.** The
+  `make-sample` clip (x264, default 3 reference frames) signals `max_num_reorder_frames = 0`
+  but `max_dec_frame_buffering = 3`. Re-encoding the same clip with ffmpeg/libx264 and
+  identical settings except the reference count gave:
+
+  | Reference frames | `max_dec_frame_buffering` | `vtdec_hw` p50 / p99 (ms) |
+  |--:|--:|--|
+  | 3 (control; matches the `make-sample` clip) | 3 | 103.0 / 112.7 |
+  | 1 | 1 | 36.2 / 46.2 |
+
+  So latency ≈ buffer × 33 ms + ~3 ms: the decode itself takes a few ms, and the frames are
+  held by GStreamer's `vtdec` or VideoToolbox even though the stream says no reordering is
+  needed. Which of the two holds them was not determined. A real camera's buffer setting will
+  decide its latency on this path; even with 1 frame it is 46 ms p99.
+* **Next step (not done):** a decode path that emits each frame as soon as it is decoded, e.g.
+  VideoToolbox directly, or `vtdec` told to trust `max_num_reorder_frames`. Then re-measure.
 * Run note: GStreamer's macOS start-up (`gst_macos_main`) waits for `NSApplication`, which
   never starts without a desktop session, so over SSH even `gst-inspect-1.0 --version` hangs.
   Run from a terminal in a logged-in desktop session.

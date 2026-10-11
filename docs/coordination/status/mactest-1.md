@@ -2,9 +2,9 @@
 agent: mactest-1
 role: Mac test session (runbook)
 workstream: WS-QA
-state: active
+state: idle
 task: T0-09
-updated: 2026-10-11T20:27:33Z
+updated: 2026-10-11T20:28:18Z
 ---
 
 ## Current focus
@@ -20,3 +20,5 @@ updated: 2026-10-11T20:27:33Z
 - 2026-10-11T19:34:10Z — M1 results recorded; remaining Mac work listed in HANDOVER section 6
 
 - 2026-10-11T20:27:33Z — recording M1 round 2: LPM, live RTSP, ref test, first launch
+
+- 2026-10-11T20:28:18Z — M1 rounds 1-2 recorded; remaining Mac work in HANDOVER section 6
