@@ -126,6 +126,12 @@ The backlog rows were added in [`backlog.md`](backlog.md), T0-17 onwards.
    and records the indicative Metal frame timing in `ui/spikes/s0-3-map/RESULTS.md`. If it
    still fails, read the log and fix it.
 2. **T0-18 — H5 safe parameter changes:**
+   * Offline groundwork implemented locally by `core-2`: complete target-bound snapshots,
+     exact-value serialization with corruption checks, validated batch previews, comparison
+     reports and rollback previews limited to edited parameters. See
+     [`../dev/parameter-changes.md`](../dev/parameter-changes.md).
+     Ten offline tests pass. No core write API or vehicle-write policy is enabled.
+     The owner was asked for the armed-state rule; that decision remains pending.
    * `ParamWrite` with read-back, exposed through `dc-core`;
    * a snapshot before any write, so the change can be rolled back;
    * failsafe and fence parameters marked dangerous;

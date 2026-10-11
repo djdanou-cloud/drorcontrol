@@ -16,6 +16,9 @@ use mavlink_codec::Message;
 use mavlink_codec::enums::MavParamType;
 use mavlink_codec::messages::{ParamRequestList, ParamRequestRead, ParamSet, ParamValue};
 
+/// Offline snapshots and parameter-change previews (no vehicle I/O or write authority).
+pub mod snapshot;
+
 /// One parameter.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Param {
