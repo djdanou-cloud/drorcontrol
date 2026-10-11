@@ -11,7 +11,7 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 
-use dc_core::{Core, CoreEvent, VehicleState};
+use dc_core::{Core, CoreEvent, VehicleLink, VehicleState};
 use tokio_stream::Stream;
 use tonic::{Request, Response, Status};
 
@@ -228,6 +228,26 @@ impl CoreApi for CoreService {
                         detail,
                     }),
                     Ok(CoreEvent::VehicleSeen { sysid }) => Kind::VehicleSeen(u32::from(sysid)),
+                    Ok(CoreEvent::VehicleLink {
+                        sysid,
+                        state,
+                        heartbeat_age,
+                    }) => {
+                        use pb::vehicle_link_event::State;
+                        Kind::VehicleLink(pb::VehicleLinkEvent {
+                            sysid: u32::from(sysid),
+                            state: match state {
+                                VehicleLink::Connected => State::Connected,
+                                VehicleLink::Stale => State::Stale,
+                                VehicleLink::Lost => State::Lost,
+                            } as i32,
+                            heartbeat_age_ms: heartbeat_age.as_millis().min(u32::MAX as u128)
+                                as u32,
+                        })
+                    }
+                    Ok(CoreEvent::Recorder { stopped, detail }) => {
+                        Kind::Recorder(pb::RecorderEvent { stopped, detail })
+                    }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 };

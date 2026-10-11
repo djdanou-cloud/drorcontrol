@@ -117,7 +117,7 @@ async fn routes_between_udp_vehicle_tcp_tool_and_app() {
     let mut tool = TcpStream::connect(tcp_addr).await.unwrap();
     let mut tool_rx = FrameParser::new();
     let tool_link = loop {
-        match timeout(T, out.app.recv()).await.unwrap().unwrap() {
+        match timeout(T, out.links.recv()).await.unwrap().unwrap() {
             HubOutput::LinkAdded { link, name } if name.starts_with("tcp-server") => break link,
             _ => continue,
         }
@@ -194,4 +194,57 @@ async fn routes_between_udp_vehicle_tcp_tool_and_app() {
         .map(|r| r.unwrap().frame)
         .collect();
     assert_eq!(replay, expected);
+}
+
+/// Audit finding: link notifications used to share the frame queue and were dropped when a
+/// telemetry burst filled it, so a "link down" could be lost. They now have their own queue.
+#[tokio::test]
+async fn link_down_survives_a_full_frame_queue() {
+    use link_core::{LinkEvent, LinkHandle, LinkId};
+    use mav_router::hub::APP_QUEUE;
+    use std::time::SystemTime;
+
+    let (hub, mut out) = spawn_hub(RouterConfig::default(), LinkPolicy::relay_all());
+    let (handle, _outbound) = LinkHandle::new(LinkId(7), "radio");
+    hub.events.send(LinkEvent::Added(handle)).await.unwrap();
+    // Flood more frames than the application queue holds; nobody drains `out.app`.
+    for i in 0..APP_QUEUE + 500 {
+        let ev = LinkEvent::Frame {
+            link: LinkId(7),
+            frame: heartbeat(1 + (i % 2) as u8),
+            rx_time: SystemTime::now(),
+        };
+        hub.events.send(ev).await.unwrap();
+    }
+    hub.events
+        .send(LinkEvent::Status {
+            link: LinkId(7),
+            up: false,
+            detail: "radio lost".into(),
+        })
+        .await
+        .unwrap();
+
+    let snap = hub.snapshot().await.unwrap();
+    assert!(
+        snap.app_dropped > 0,
+        "the frame queue overflowed (router also drops duplicates)"
+    );
+    assert_eq!(snap.links_dropped, 0);
+    assert!(matches!(
+        timeout(T, out.links.recv()).await.unwrap(),
+        Some(HubOutput::LinkAdded {
+            link: LinkId(7),
+            ..
+        })
+    ));
+    match timeout(T, out.links.recv()).await.unwrap() {
+        Some(HubOutput::LinkStatus { link, up, detail }) => {
+            assert_eq!(
+                (link, up, detail.as_str()),
+                (LinkId(7), false, "radio lost")
+            )
+        }
+        other => panic!("expected link-down notice, got {other:?}"),
+    }
 }

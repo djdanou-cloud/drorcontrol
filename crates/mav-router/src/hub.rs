@@ -13,8 +13,12 @@ use crate::router::{LinkPolicy, Router, RouterConfig, RouterStats};
 /// Queue depth towards the application. If the application falls this far behind,
 /// frames are dropped and counted rather than stalling routing.
 pub const APP_QUEUE: usize = 4096;
+/// Queue depth for link notifications. They have their own queue so a burst of telemetry
+/// filling [`APP_QUEUE`] can never push out a "link down".
+pub const LINK_QUEUE: usize = 1024;
 
-/// What the hub tells the application.
+/// What the hub tells the application: frames on [`HubOutputs::app`], everything else on
+/// [`HubOutputs::links`].
 // Frames are kept inline (~290 bytes) on purpose: boxing would cost a heap
 // allocation per frame on the hot path.
 #[allow(clippy::large_enum_variant)]
@@ -50,7 +54,8 @@ pub enum HubOutput {
 }
 
 /// A copy of every frame crossing the hub, in order, for the `.tlog` recorder.
-/// Unbounded on purpose: recording must be lossless (the recorder reports backlog).
+/// Unbounded on purpose: recording must be lossless. The consumer watches the backlog
+/// (`UnboundedReceiver::len`) and reports it (dc-core raises `CoreEvent::Recorder`).
 #[derive(Debug, Clone)]
 pub struct Tapped {
     /// Host time (receipt, or send time for local frames).
@@ -70,6 +75,8 @@ pub struct HubSnapshot {
     pub stats: RouterStats,
     /// Frames dropped because the application queue was full.
     pub app_dropped: u64,
+    /// Link notifications dropped because the application never drained [`HubOutputs::links`].
+    pub links_dropped: u64,
 }
 
 enum Control {
@@ -107,8 +114,11 @@ impl HubHandle {
 
 /// Receivers the application keeps.
 pub struct HubOutputs {
-    /// Local deliveries and link notifications.
+    /// Local deliveries ([`HubOutput::Frame`] only).
     pub app: mpsc::Receiver<HubOutput>,
+    /// Link notifications ([`HubOutput::LinkAdded`], [`HubOutput::LinkRemoved`],
+    /// [`HubOutput::LinkStatus`]), never crowded out by frames. Read it with priority.
+    pub links: mpsc::Receiver<HubOutput>,
     /// Every frame, for recording.
     pub tap: mpsc::UnboundedReceiver<Tapped>,
 }
@@ -119,12 +129,19 @@ pub fn spawn_hub(cfg: RouterConfig, default_policy: LinkPolicy) -> (HubHandle, H
     let (local_tx, mut local_rx) = mpsc::channel::<Frame>(1024);
     let (ctl_tx, mut ctl_rx) = mpsc::channel::<Control>(16);
     let (app_tx, app_rx) = mpsc::channel(APP_QUEUE);
+    let (links_tx, links_rx) = mpsc::channel(LINK_QUEUE);
     let (tap_tx, tap_rx) = mpsc::unbounded_channel();
 
     tokio::spawn(async move {
         let mut router = Router::new(cfg);
         let mut links: BTreeMap<LinkId, LinkHandle> = BTreeMap::new();
         let mut app_dropped = 0u64;
+        let mut links_dropped = 0u64;
+        let note = |n: HubOutput, dropped: &mut u64| {
+            if links_tx.try_send(n).is_err() {
+                *dropped += 1;
+            }
+        };
         let forward = |links: &BTreeMap<LinkId, LinkHandle>, to: &[LinkId], frame: &Frame| {
             for l in to {
                 if let Some(h) = links.get(l) {
@@ -139,17 +156,16 @@ pub fn spawn_hub(cfg: RouterConfig, default_policy: LinkPolicy) -> (HubHandle, H
                     match ev {
                         LinkEvent::Added(h) => {
                             router.add_link(h.id, default_policy.clone());
-                            let note = HubOutput::LinkAdded { link: h.id, name: h.name.clone() };
+                            note(HubOutput::LinkAdded { link: h.id, name: h.name.clone() }, &mut links_dropped);
                             links.insert(h.id, h);
-                            let _ = app_tx.try_send(note);
                         }
                         LinkEvent::Removed(id) => {
                             router.remove_link(id);
                             links.remove(&id);
-                            let _ = app_tx.try_send(HubOutput::LinkRemoved(id));
+                            note(HubOutput::LinkRemoved(id), &mut links_dropped);
                         }
                         LinkEvent::Status { link, up, detail } => {
-                            let _ = app_tx.try_send(HubOutput::LinkStatus { link, up, detail });
+                            note(HubOutput::LinkStatus { link, up, detail }, &mut links_dropped);
                         }
                         LinkEvent::Frame { link, frame, rx_time } => {
                             let _ = tap_tx.send(Tapped { time: rx_time, frame: frame.clone() });
@@ -175,6 +191,7 @@ pub fn spawn_hub(cfg: RouterConfig, default_policy: LinkPolicy) -> (HubHandle, H
                             routes: router.routes(Instant::now()),
                             stats: router.stats().clone(),
                             app_dropped,
+                            links_dropped,
                         });
                     }
                     None => {}
@@ -191,6 +208,7 @@ pub fn spawn_hub(cfg: RouterConfig, default_policy: LinkPolicy) -> (HubHandle, H
         },
         HubOutputs {
             app: app_rx,
+            links: links_rx,
             tap: tap_rx,
         },
     )

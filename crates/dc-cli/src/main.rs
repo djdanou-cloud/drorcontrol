@@ -184,6 +184,29 @@ fn main() -> ExitCode {
     }
 }
 
+/// Ctrl-C, or SIGTERM (service managers, `kill`) on Unix.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        match signal(SignalKind::terminate()) {
+            Ok(mut term) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = term.recv() => {}
+                }
+            }
+            Err(_) => {
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
 async fn start(cli: &Cli, link: &LinkSpec) -> Result<Core, String> {
     let cfg = CoreConfig {
         sysid: cli.sysid,
@@ -259,10 +282,12 @@ async fn run(cli: Cli) -> Result<(), String> {
                     .await
                     .map_err(|e| format!("cannot open {link}: {e}"))?;
             }
-            eprintln!("dc-core API on {listen} (Ctrl-C to stop)");
+            eprintln!("dc-core API on {listen} (Ctrl-C or SIGTERM to stop)");
+            // Returning lets main drop the runtime, which flushes and closes the .tlog and
+            // the links.
             tokio::select! {
                 r = api::serve(core, *listen) => r.map_err(|e| format!("gRPC server: {e}")),
-                _ = tokio::signal::ctrl_c() => Ok(()),
+                _ = shutdown_signal() => Ok(()),
             }
         }
         Cmd::Remote { grpc, what } => remote(grpc, what).await,
@@ -287,6 +312,12 @@ async fn run(cli: Cli) -> Result<(), String> {
                         Ok(CoreEvent::StatusText { sysid, text }) => println!("[{sysid}] sev{} {}", text.severity, text.text),
                         Ok(CoreEvent::Link { link, up, detail }) => println!("{link} {}: {detail}", if up { "up" } else { "down" }),
                         Ok(CoreEvent::VehicleSeen { sysid }) => println!("vehicle {sysid} detected"),
+                        Ok(CoreEvent::VehicleLink { sysid, state, heartbeat_age }) => {
+                            println!("vehicle {sysid} link {state} (last heartbeat {:.1} s ago)", heartbeat_age.as_secs_f32())
+                        }
+                        Ok(CoreEvent::Recorder { stopped, detail }) => {
+                            eprintln!("tlog {}: {detail}", if stopped { "STOPPED" } else { "warning" })
+                        }
                         Err(_) => {}
                     },
                 }

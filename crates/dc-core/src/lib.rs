@@ -7,6 +7,10 @@
 //!
 //! Threading: link I/O and routing run on tokio tasks; vehicle state is published as an
 //! immutable snapshot (`arc-swap`), so readers (the UI at frame rate) never block ingest.
+//!
+//! Liveness: a watchdog classifies every vehicle as [`VehicleLink::Connected`], `Stale` or
+//! `Lost` from its heartbeat age (plan 08 §4.3) and raises [`CoreEvent::VehicleLink`] on
+//! every transition. TCP client links reconnect by themselves (`link-net`).
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -94,6 +98,44 @@ impl fmt::Display for LinkSpec {
     }
 }
 
+/// Heartbeat-based link state of one vehicle (plan 08 §4.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VehicleLink {
+    /// Heartbeat younger than [`CoreConfig::link_stale`].
+    Connected,
+    /// No heartbeat for `link_stale`..`link_lost`: instruments dim, values show their age.
+    Stale,
+    /// No heartbeat for longer than [`CoreConfig::link_lost`]: values are invalid.
+    Lost,
+}
+
+impl fmt::Display for VehicleLink {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            VehicleLink::Connected => "CONNECTED",
+            VehicleLink::Stale => "STALE",
+            VehicleLink::Lost => "LOST",
+        })
+    }
+}
+
+/// Allowed range for [`CoreConfig::link_stale`] ("within safe bounds", plan 08 §4.3).
+pub const LINK_STALE_RANGE: (Duration, Duration) =
+    (Duration::from_millis(200), Duration::from_secs(5));
+/// Upper bound for [`CoreConfig::link_lost`]; it must also exceed `link_stale`.
+pub const LINK_LOST_MAX: Duration = Duration::from_secs(30);
+/// Frames waiting for the `.tlog` writer before [`CoreEvent::Recorder`] warns (~15 MB).
+pub const RECORDER_BACKLOG_WARN: usize = 50_000;
+
+/// Classify a vehicle by the age of its last autopilot heartbeat.
+pub fn vehicle_link(v: &VehicleState, now: Instant, cfg: &CoreConfig) -> VehicleLink {
+    match &v.heartbeat {
+        Some(hb) if hb.age(now) < cfg.link_stale => VehicleLink::Connected,
+        Some(hb) if hb.age(now) < cfg.link_lost => VehicleLink::Stale,
+        _ => VehicleLink::Lost,
+    }
+}
+
 /// Core configuration.
 #[derive(Debug, Clone)]
 pub struct CoreConfig {
@@ -105,6 +147,39 @@ pub struct CoreConfig {
     pub tlog: Option<PathBuf>,
     /// Telemetry requested from each new vehicle: `(message id, rate Hz)`.
     pub stream_rates: Vec<(u32, f32)>,
+    /// No heartbeat for this long: [`VehicleLink::Stale`] (default 1.5 s).
+    pub link_stale: Duration,
+    /// No heartbeat for this long: [`VehicleLink::Lost`] (default 5 s).
+    pub link_lost: Duration,
+}
+
+impl CoreConfig {
+    /// Reject settings outside safe bounds.
+    pub fn validate(&self) -> Result<(), String> {
+        let (lo, hi) = LINK_STALE_RANGE;
+        if !(lo..=hi).contains(&self.link_stale) {
+            return Err(format!(
+                "link_stale {:?} outside {lo:?}..={hi:?}",
+                self.link_stale
+            ));
+        }
+        if self.link_lost <= self.link_stale || self.link_lost > LINK_LOST_MAX {
+            return Err(format!(
+                "link_lost {:?} must be > link_stale and <= {LINK_LOST_MAX:?}",
+                self.link_lost
+            ));
+        }
+        if let Some((id, hz)) = self
+            .stream_rates
+            .iter()
+            .find(|(_, hz)| !(hz.is_finite() && *hz > 0.0))
+        {
+            return Err(format!(
+                "stream rate for message {id}: {hz} Hz is not a positive rate"
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl Default for CoreConfig {
@@ -115,6 +190,8 @@ impl Default for CoreConfig {
             tlog: None,
             // ATTITUDE, GLOBAL_POSITION_INT, VFR_HUD, SYS_STATUS, GPS_RAW_INT
             stream_rates: vec![(30, 10.0), (33, 5.0), (74, 5.0), (1, 2.0), (24, 2.0)],
+            link_stale: Duration::from_millis(1500),
+            link_lost: Duration::from_secs(5),
         }
     }
 }
@@ -133,6 +210,24 @@ pub enum CoreEvent {
         sysid: u8,
         /// Text and severity.
         text: StatusText,
+    },
+    /// A vehicle's heartbeat link changed state (plan 08 §4.3). Raised on every
+    /// transition, including back to `Connected`.
+    VehicleLink {
+        /// System id.
+        sysid: u8,
+        /// New state.
+        state: VehicleLink,
+        /// Age of the last heartbeat when the change was detected.
+        heartbeat_age: Duration,
+    },
+    /// The `.tlog` recorder has a problem: a write failed (recording stopped) or it is
+    /// falling behind.
+    Recorder {
+        /// True if recording stopped.
+        stopped: bool,
+        /// What happened.
+        detail: String,
     },
     /// A link went up/down.
     Link {
@@ -200,6 +295,8 @@ pub struct Core {
 impl Core {
     /// Start the core on the current tokio runtime.
     pub async fn start(cfg: CoreConfig) -> io::Result<Core> {
+        cfg.validate()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
         let router = RouterConfig {
             sysid: cfg.sysid,
             compid: cfg.compid,
@@ -222,35 +319,92 @@ impl Core {
         let mut tap = outputs.tap;
         if let Some(path) = core.cfg.tlog.clone() {
             let file = std::fs::File::create(&path)?;
+            let events = core.events.clone();
             tokio::task::spawn_blocking(move || {
+                let stop = |e: io::Error| {
+                    let _ = events.send(CoreEvent::Recorder {
+                        stopped: true,
+                        detail: format!("{}: {e}; recording stopped", path.display()),
+                    });
+                };
                 let mut w = recorder::TlogWriter::new(file);
                 let mut last_flush = Instant::now();
+                let mut warned = false;
                 while let Some(t) = tap.blocking_recv() {
-                    if w.write(t.time, &t.frame).is_err() {
-                        break;
+                    if let Err(e) = w.write(t.time, &t.frame) {
+                        return stop(e);
                     }
                     if last_flush.elapsed() >= Duration::from_secs(1) {
-                        let _ = w.flush();
+                        if let Err(e) = w.flush() {
+                            return stop(e);
+                        }
                         last_flush = Instant::now();
                     }
+                    let backlog = tap.len();
+                    if backlog > RECORDER_BACKLOG_WARN && !warned {
+                        warned = true;
+                        let _ = events.send(CoreEvent::Recorder {
+                            stopped: false,
+                            detail: format!("{backlog} frames waiting to be written (slow disk?)"),
+                        });
+                    } else if backlog < RECORDER_BACKLOG_WARN / 2 {
+                        warned = false;
+                    }
                 }
-                let _ = w.flush();
+                if let Err(e) = w.flush() {
+                    stop(e);
+                }
             });
         } else {
             tokio::spawn(async move { while tap.recv().await.is_some() {} });
         }
 
-        // Dispatcher: decode, update the fleet snapshot, publish to protocol drivers.
+        // Dispatcher: decode, update the fleet snapshot, publish to protocol drivers. Link
+        // notifications come first so a telemetry backlog never delays a "link down".
         let c = core.clone();
         let mut app = outputs.app;
+        let mut links = outputs.links;
         tokio::spawn(async move {
-            while let Some(out) = app.recv().await {
+            loop {
+                let out = tokio::select! {
+                    biased;
+                    Some(n) = links.recv() => n,
+                    Some(f) = app.recv() => f,
+                    else => break,
+                };
                 match out {
                     HubOutput::Frame { frame, .. } => c.dispatch(&frame).await,
                     HubOutput::LinkStatus { link, up, detail } => {
                         let _ = c.events.send(CoreEvent::Link { link, up, detail });
                     }
                     HubOutput::LinkAdded { .. } | HubOutput::LinkRemoved(_) => {}
+                }
+            }
+        });
+
+        // Link watchdog: heartbeat age -> CONNECTED / STALE / LOST, events on transitions.
+        let c = core.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_millis(100));
+            let mut last: BTreeMap<u8, VehicleLink> = BTreeMap::new();
+            loop {
+                tick.tick().await;
+                let now = Instant::now();
+                for v in c.fleet().vehicles().filter(|v| v.heartbeat.is_some()) {
+                    let state = vehicle_link(v, now, &c.cfg);
+                    if last
+                        .insert(v.sysid, state)
+                        .is_some_and(|prev| prev != state)
+                    {
+                        let heartbeat_age =
+                            v.heartbeat.as_ref().map(|h| h.age(now)).unwrap_or_default();
+                        let ev = CoreEvent::VehicleLink {
+                            sysid: v.sysid,
+                            state,
+                            heartbeat_age,
+                        };
+                        let _ = c.events.send(ev);
+                    }
                 }
             }
         });
@@ -356,6 +510,13 @@ impl Core {
     /// Latest vehicle state (wait-free snapshot).
     pub fn fleet(&self) -> Arc<Fleet> {
         self.fleet.load_full()
+    }
+
+    /// Heartbeat link state of `sysid` now, or `None` if it never sent an autopilot heartbeat.
+    pub fn vehicle_link(&self, sysid: u8) -> Option<VehicleLink> {
+        let fleet = self.fleet();
+        let v = fleet.get(sysid).filter(|v| v.heartbeat.is_some())?;
+        Some(vehicle_link(v, Instant::now(), &self.cfg))
     }
 
     /// Decoded messages as they arrive (for protocol drivers and tools).

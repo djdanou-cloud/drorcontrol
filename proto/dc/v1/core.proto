@@ -127,7 +127,28 @@ message Event {
     StatusTextEvent status_text = 1;
     LinkEvent link = 2;
     uint32 vehicle_seen = 3; // system id
+    VehicleLinkEvent vehicle_link = 4;
+    RecorderEvent recorder = 5;
   }
+}
+
+// Heartbeat link state of a vehicle changed (plan 08 §4.3).
+message VehicleLinkEvent {
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    CONNECTED = 1;  // heartbeat younger than the stale threshold (default 1.5 s)
+    STALE = 2;      // no heartbeat for stale..lost
+    LOST = 3;       // no heartbeat for longer than the lost threshold (default 5 s)
+  }
+  uint32 sysid = 1;
+  State state = 2;
+  uint32 heartbeat_age_ms = 3;
+}
+
+// The .tlog recorder stopped (write failed) or is falling behind.
+message RecorderEvent {
+  bool stopped = 1;
+  string detail = 2;
 }
 
 message StatusTextEvent {
