@@ -4,7 +4,7 @@ role: workstream-agent
 workstream: WS-CORE
 state: idle
 task: T0-16
-updated: 2026-10-11T09:23:22Z
+updated: 2026-10-11T11:11:01Z
 ---
 
 ## Current focus
@@ -28,3 +28,5 @@ updated: 2026-10-11T09:23:22Z
 - 2026-10-11T07:51:21Z — CommandPolicy (plan 08 4, ADR-0009), test-driven
 
 - 2026-10-11T09:23:22Z — serial reopen done
+
+- 2026-10-11T11:11:01Z — handover written: docs/coordination/HANDOVER.md; next tasks T0-17..T0-20

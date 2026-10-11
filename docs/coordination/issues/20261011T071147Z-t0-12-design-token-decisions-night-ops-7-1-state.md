@@ -1,12 +1,12 @@
 ---
 title: T0-12 design-token decisions: Night-Ops 7:1, state colours on panels, Daylight caution
 severity: S3
-state: open
+state: resolved
 owner: -
 reporter: ux-1
 needs_human: yes
 created: 2026-10-11T07:11:47Z
-updated: 2026-10-11T07:11:47Z
+updated: 2026-10-11T11:00:00Z
 ---
 
 ## Description
@@ -43,4 +43,6 @@ is 6.2:1), and two new roles, `accentText` #4DB8FF and `textMuted` #B0B0B0.
   Standard panels #333333 (warning red 3.56:1 on panels; glass back to 85 %, telemetry 7.49:1
   over white), accept Daylight caution #A85900. Plan 04 and the UI skill are updated. Remaining:
   standby #757575 on #333333 is 2.74:1 (exempted; option #808080 = 3.2:1).
-
+* 2026-10-11 (core-1, recorded at handover): resolved by the product owner. Night-Ops keeps
+  #FF4D4D (6.4:1, accepted residual risk, hazard log D6 / H17); panels #333333; Daylight
+  caution #A85900. Applied in commit 9de43e7.

@@ -4,6 +4,8 @@ Next-generation, cross-platform ArduPilot ground control station — native macO
 
 **Start here:** [`docs/plan/README.md`](docs/plan/README.md) — the master development plan (architecture, parity matrix, macOS layer, design system, analytics, documentation system, roadmap, V&V).
 
+**Taking over the work (agents and people):** [`docs/coordination/HANDOVER.md`](docs/coordination/HANDOVER.md) — current state, open decisions, next tasks. Safety: [`docs/safety/hazards.md`](docs/safety/hazards.md). Mac-only tests: [`docs/dev/mac-test-runbook.md`](docs/dev/mac-test-runbook.md).
+
 ## Quick start (developers)
 
 ```bash
@@ -39,7 +41,9 @@ python3 scripts/gen_adr_index.py         # after adding an ADR (CI checks the in
 | Path | Contents | Owner (see `docs/coordination/README.md` §4) |
 |------|----------|------------------------------------------|
 | `crates/` | Rust core crates (`dc-core`, codec, router, protocols, logs, platform …) | per workstream |
-| `ui/` | Qt 6 / QML shell | WS-UI / WS-GFX / WS-UX |
+| `ui/` | Qt 6 / QML shell; `ui/tokens/` design tokens; `ui/spikes/` Phase 0 spikes (S0-1 bridge, S0-3 map, S0-5 video) | WS-UI / WS-GFX / WS-UX |
+| `packaging/macos/` | Ad-hoc signed universal app, zip + dmg (ADR-0010) | WS-MACOS |
+| `docs/safety/` | Hazard log (MIL-STD-882E) | WS-SAFETY |
 | `xtask/` | Developer task runner (`cargo xtask`) | WS-DEVOPS |
 | `scripts/` | Coordination and generator scripts | WS-DEVOPS |
 | `docs/plan/` | Master development plan and seed ADRs | WS-ARCH |

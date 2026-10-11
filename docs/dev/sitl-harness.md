@@ -6,7 +6,7 @@
 |---|---|
 | `Sitl` | Starts the pinned `arducopter` (Copter-4.7.1) headless in a temp dir with a wiped EEPROM; reads the TCP port from SITL's own log; kills it on drop |
 | `chaos::ChaosProxy` | Frame-aware TCP proxy: drop, duplicate, corrupt, delay and jitter (reorders) per frame from a logged seed; `blackout` (radio fade) and `cut` (connection drop) |
-| `tests/scenarios.rs` | Connect + telemetry; full parameter download; download through 30 % frame loss both ways (must complete); fade → STALE → LOST → CONNECTED; reconnect after a cut |
+| `tests/scenarios.rs` | 8 scenarios: connect + telemetry (+ landed state ON_GROUND); full parameter download; download through 30 % frame loss both ways (must complete); fade → STALE → LOST → CONNECTED; reconnect after a cut; firmware banner + named single-action mode change verified (ADR-0011); GPS failure → position UNTRUSTED warning (H16); mission upload through 20 % loss verified by read-back (H4) |
 
 ## Running
 
@@ -27,5 +27,7 @@ caches the built binary keyed on `scripts/build_sitl.sh` and the tag.
   batches of 10 after 0.5 s of silence. Tuning the batch for lossy links is a follow-up.
 * The fade scenario found a watchdog defect (a LOST shorter than one 100 ms tick was not
   reported); fixed in dc-core with a regression test.
-* Not yet covered from plan 08 §2: mission, flight, failsafe, calibration, logs, robustness
-  suites; other vehicles; the YAML scenario DSL; nightly/weekly runs.
+* The navigation scenario waits for the EKF to converge (~40 s) and fails the GPS with
+  `SIM_GPS1_ENABLE=0` (`PARAM_SET`).
+* Not yet covered from plan 08 §2: flight, failsafe, calibration, logs and robustness
+  suites; mission fence/rally; other vehicles; the YAML scenario DSL; nightly/weekly runs.

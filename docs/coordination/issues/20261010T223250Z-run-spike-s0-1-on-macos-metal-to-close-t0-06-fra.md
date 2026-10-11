@@ -18,3 +18,4 @@ Spike S0-1 (ui/spikes/s0-1-bridge) ran on Linux with software OpenGL: 200k msg/s
 Someone with a Mac runs the commands in ui/spikes/s0-1-bridge/RESULTS.md ("Not yet measured") and appends the JSON numbers there. GitHub macOS runners may not expose a GPU, so a physical Mac is preferred.
 
 ## Updates
+* 2026-10-11 (core-1): step-by-step procedure in `docs/dev/mac-test-runbook.md`.

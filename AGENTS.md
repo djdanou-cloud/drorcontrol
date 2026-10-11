@@ -2,7 +2,7 @@
 
 DrorControl is a cross-platform (macOS-first) ArduPilot ground control station: Rust core + Qt 6/QML UI. The plan is in [`docs/plan/`](docs/plan/README.md).
 
-**Before doing anything, read [`docs/coordination/README.md`](docs/coordination/README.md)** (the coordination protocol) and [`docs/coordination/BOARD.md`](docs/coordination/BOARD.md) (live state).
+**Before doing anything, read [`docs/coordination/HANDOVER.md`](docs/coordination/HANDOVER.md)** (current state, owner's standing instructions, environment traps, next tasks), then [`docs/coordination/README.md`](docs/coordination/README.md) (the coordination protocol) and [`docs/coordination/BOARD.md`](docs/coordination/BOARD.md) (live state).
 
 Non-negotiables:
 - Work on `main`; small commits; `git pull --rebase origin main` before each push; **never force-push or rewrite history**.

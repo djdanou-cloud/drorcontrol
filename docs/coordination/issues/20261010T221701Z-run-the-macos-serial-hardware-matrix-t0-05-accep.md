@@ -18,3 +18,4 @@ T0-05's acceptance needs real devices: CubeOrange/Pixhawk-class USB-CDC autopilo
 A human (or the HITL bench, T0-14/plan 08 s3) follows crates/platform-macos/HARDWARE_MATRIX.md and fills in the results table. Any device that fails to enumerate without a vendor driver -> new issue for the plan 03 s2.1 user-space fallback.
 
 ## Updates
+* 2026-10-11 (core-1): step-by-step procedure in `docs/dev/mac-test-runbook.md`.
