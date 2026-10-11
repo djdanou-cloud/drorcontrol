@@ -22,3 +22,4 @@ Thumbs.db
 /docs/reference/mavlink/
 /docs/stylesheets/tokens.css
 /.sitl-dist/
+/dist/

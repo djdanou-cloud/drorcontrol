@@ -152,3 +152,53 @@ jobs:
           DC_SITL_BIN: ${{ github.workspace }}/.sitl-dist/arducopter
           DC_SITL_DEFAULTS: ${{ github.workspace }}/.sitl-dist/copter.parm
         run: cargo test -p sitl-harness --locked -- --nocapture
+
+  macos-package:
+    name: macOS package (universal, ad-hoc signed)
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build, sign, verify, package (ADR-0010)
+        run: packaging/macos/package.sh dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: drorcontrol-macos
+          path: |
+            dist/*.zip
+            dist/*.dmg
+            dist/SHA256SUMS
+          retention-days: 30
+
+  macos-package-launch-intel:
+    name: macOS package launches on Intel
+    needs: macos-package
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: drorcontrol-macos
+          path: dist
+
+      - name: Checksums, signature, launch (zip and dmg)
+        working-directory: dist
+        run: |
+          shasum -a 256 -c SHA256SUMS
+          ditto -x -k DrorControl-*.zip unzipped
+          APP=unzipped/DrorControl.app
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          test "$(uname -m)" = x86_64
+          "$APP/Contents/MacOS/dc-cli" --version
+          MNT=$(mktemp -d)
+          hdiutil attach -nobrowse -readonly -mountpoint "$MNT" DrorControl-*.dmg
+          "$MNT/DrorControl.app/Contents/MacOS/dc-cli" --version
+          test -f "$MNT/FIRST-LAUNCH.txt"
+          hdiutil detach "$MNT"
