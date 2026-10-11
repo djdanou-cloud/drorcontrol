@@ -10,5 +10,5 @@ publish = false
 [workspace]
 
 [dependencies]
-gstreamer = "0.25"
+gstreamer = { version = "0.25", features = ["v1_22"] }
 cpu-time = "1.0"

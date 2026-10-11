@@ -8,6 +8,7 @@
 //!     --warmup N     seconds ignored at the start (default 3)
 //!     --decoder NAME force a GStreamer decoder (default: first available, hardware first)
 //!     --report PATH  also write the JSON report here
+//!     --output any   let the decoder pick its output memory (default: system memory)
 //! ```
 //!
 //! Decode latency = time from a buffer entering the decoder to the decoded frame with the same
@@ -17,9 +18,15 @@
 //! 30 fps stream; an RTSP source runs unsynced, as the GCS will (plan 01 §6).
 //!
 //! Out of scope here: importing the decoded surface into the Qt scene graph and the telemetry
-//! overlay (measured with the Qt video item). The report records the decoder's output caps:
-//! `memory:GLMemory` / `memory:VAMemory` / `memory:DMABuf` etc. mean the frame never left GPU
-//! memory; plain `video/x-raw` means a copy to system memory.
+//! overlay (measured with the Qt video item). The report says whether a zero-copy handle is
+//! available: on macOS the decoded buffer carries its IOSurface-backed `CVPixelBuffer`
+//! (`GstCoreVideoMeta`), which the GCS imports into Metal with `CVMetalTextureCache`; elsewhere
+//! the caps name GPU memory (`memory:VAMemory`, `memory:DMABuf`, `memory:D3D11Memory`, …).
+//!
+//! The default output is system-memory caps: VideoToolbox still decodes into IOSurfaces and
+//! attaches the `CVPixelBuffer`, and no OpenGL is involved. (`--output any` lets `vtdec` choose
+//! `memory:GLMemory`, which on macOS needs a Cocoa run loop and an OpenGL context; the GCS
+//! renders with Metal, so that path is not the one to measure.)
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -51,7 +58,13 @@ const ENCODERS: &[(&str, &str)] = &[
 ];
 
 fn main() {
-    if let Err(e) = real_main() {
+    // On macOS GStreamer's GL and VideoToolbox elements expect an NSApplication on the main
+    // thread; gst_macos_main runs one and calls us on another thread.
+    #[cfg(target_os = "macos")]
+    let result = gst::macos_main(real_main);
+    #[cfg(not(target_os = "macos"))]
+    let result = real_main();
+    if let Err(e) = result {
         eprintln!("error: {e}");
         std::process::exit(1);
     }
@@ -87,6 +100,7 @@ fn real_main() -> Result<(), String> {
                 Duration::from_secs(num("--seconds", 60)?),
                 Duration::from_secs(num("--warmup", 3)?),
                 opt("--decoder"),
+                opt("--output").as_deref() == Some("any"),
             )?;
             println!("{report}");
             if let Some(path) = opt("--report") {
@@ -174,6 +188,8 @@ struct Probe {
     frames: u64,
     /// Decoded frames whose PTS never went in (decoder retimestamped): latency unknown.
     unmatched: u64,
+    /// Meta APIs on the first decoded buffer (e.g. `GstCoreVideoMetaAPI`).
+    metas: Option<Vec<String>>,
     measuring: bool,
 }
 
@@ -182,6 +198,7 @@ fn run(
     seconds: Duration,
     warmup: Duration,
     forced: Option<String>,
+    any_output: bool,
 ) -> Result<String, String> {
     let decoder = match forced {
         Some(d) if available(&d) => d,
@@ -207,8 +224,9 @@ fn run(
     } else {
         ""
     };
+    let output = if any_output { "" } else { " ! video/x-raw" };
     let desc = format!(
-        "{head} ! h264parse ! {decoder} name=dec{props} ! fakesink name=sink sync={sync}",
+        "{head} ! h264parse ! {decoder} name=dec{props}{output} ! fakesink name=sink sync={sync}",
         sync = !live
     );
     let el = gst::parse::launch(&desc).map_err(|e| format!("{e}: {desc}"))?;
@@ -234,8 +252,17 @@ fn run(
     src_pad.add_probe(gst::PadProbeType::BUFFER, move |_, info| {
         let now = Instant::now();
         let mut p = p_out.lock().unwrap();
-        let entered = info
-            .buffer()
+        let buffer = info.buffer();
+        if p.metas.is_none()
+            && let Some(b) = buffer
+        {
+            p.metas = Some(
+                b.iter_meta::<gst::Meta>()
+                    .map(|m| m.api().name().to_string())
+                    .collect(),
+            );
+        }
+        let entered = buffer
             .and_then(|b| b.pts())
             .and_then(|pts| p.pending.remove(&pts.nseconds()));
         if p.measuring {
@@ -287,13 +314,20 @@ fn run(
     };
     let cpu_pct = 100.0 * cpu.as_secs_f64() / wall.as_secs_f64();
     let hardware = !SOFTWARE.contains(&decoder.as_str());
-    let gpu_memory = caps.contains("memory:") && !caps.contains("memory:SystemMemory");
+    let metas = p.metas.clone().unwrap_or_default();
+    let zero_copy = (caps.contains("memory:") && !caps.contains("memory:SystemMemory"))
+        || metas.iter().any(|m| m.contains("CoreVideo"));
+    let metas_json = metas
+        .iter()
+        .map(|m| format!("\"{m}\""))
+        .collect::<Vec<_>>()
+        .join(",");
     let pass_decode = pct(0.99) <= 8.0;
     let pass_cpu = cpu_pct <= 5.0;
     Ok(format!(
         concat!(
             "{{\"spike\":\"S0-5\",\"source\":\"{}\",\"live\":{},\"decoder\":\"{}{}\",",
-            "\"hardware\":{},\"gpu_memory\":{},\"caps\":\"{}\",",
+            "\"hardware\":{},\"output\":\"{}\",\"zero_copy_handle\":{},\"metas\":[{}],\"caps\":\"{}\",",
             "\"os\":\"{}\",\"arch\":\"{}\",\"cores\":{},\"gstreamer\":\"{}\",",
             "\"measured_s\":{:.1},\"frames\":{},\"fps\":{:.2},\"unmatched\":{},",
             "\"decode_ms\":{{\"p50\":{:.2},\"p95\":{:.2},\"p99\":{:.2},\"max\":{:.2}}},",
@@ -305,7 +339,13 @@ fn run(
         decoder,
         props,
         hardware,
-        gpu_memory,
+        if any_output {
+            "any"
+        } else {
+            "system-memory caps"
+        },
+        zero_copy,
+        metas_json,
         caps.replace('"', "'"),
         std::env::consts::OS,
         std::env::consts::ARCH,

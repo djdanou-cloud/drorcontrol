@@ -234,6 +234,8 @@ jobs:
           for d in vtdec_hw vtdec avdec_h264; do
             $B run sample.mkv --seconds 8 --warmup 2 --decoder $d --report s05-macos-ci-$d.json || echo "$d: not usable here"
           done
+          # The GL-memory path (needs a Cocoa run loop; not what the Metal GCS uses), for comparison.
+          $B run sample.mkv --seconds 8 --warmup 2 --decoder vtdec_hw --output any --report s05-macos-ci-vtdec_hw-gl.json || true
           { echo '### Spike S0-5 on the CI runner (indicative)'; echo '```'; cat s05-macos-ci*.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
