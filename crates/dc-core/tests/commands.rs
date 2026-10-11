@@ -395,3 +395,18 @@ async fn unconfirmed_mode_change_alerts_the_pilot() {
     assert_eq!(v.lock().unwrap().mode, 4, "the vehicle never changed mode");
     let _ = stop.send(true);
 }
+
+/// Plan 08 §4.1: a mission upload in flight is class C; until that confirmation exists for
+/// missions the core refuses it while the vehicle is armed.
+#[tokio::test(flavor = "multi_thread")]
+async fn mission_upload_is_refused_while_armed() {
+    let (core, v, stop) = setup(CoreConfig::default()).await;
+    v.lock().unwrap().armed = true;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let err = core
+        .upload_mission((1, 1), Vec::new())
+        .await
+        .expect_err("refused while armed");
+    assert!(matches!(err, Refusal::Precondition(_)), "{err:?}");
+    let _ = stop.send(true);
+}

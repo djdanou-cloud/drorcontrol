@@ -43,6 +43,11 @@ pub use protocols::command::{
     Refusal, Request, VehicleFacts,
 };
 use protocols::command::{AuditEvent, CommandPolicy, LinkInfo, LinkState, Target};
+use protocols::mission::{
+    self, MISSION_TYPE_MISSION, MissionDownload, MissionUpload, TransferConfig,
+};
+/// Mission types for [`Core::upload_mission`] and [`Core::download_mission`].
+pub use protocols::mission::{Mismatch, MissionItem, TransferStatus};
 use protocols::params::{DownloadConfig, DownloadStatus, Param, ParamDownload};
 use tokio::sync::broadcast;
 
@@ -301,6 +306,26 @@ pub enum CoreEvent {
         /// Detail.
         detail: String,
     },
+}
+
+/// Outcome of [`Core::upload_mission`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct MissionReport {
+    /// The upload transfer itself (its final ACK can be lost even when the mission arrived).
+    pub upload: TransferStatus,
+    /// The read-back download.
+    pub readback: TransferStatus,
+    /// The mission as the vehicle holds it (item 0 is its home).
+    pub on_vehicle: Vec<MissionItem>,
+    /// Differences between the draft and the vehicle (item 0, home, not compared).
+    pub mismatches: Vec<Mismatch>,
+}
+
+impl MissionReport {
+    /// The vehicle holds exactly the uploaded mission.
+    pub fn verified(&self) -> bool {
+        self.readback == TransferStatus::Done && self.mismatches.is_empty()
+    }
 }
 
 /// A decoded frame as seen by protocol drivers.
@@ -1013,6 +1038,105 @@ impl Core {
             missing: dl.missing(),
             partial: dl.params().len(),
         })
+    }
+
+    /// Download the mission from `target`.
+    pub async fn download_mission(&self, target: (u8, u8)) -> (TransferStatus, Vec<MissionItem>) {
+        let (mut dl, first) = MissionDownload::start(
+            target,
+            MISSION_TYPE_MISSION,
+            TransferConfig::default(),
+            Instant::now(),
+        );
+        self.drive(
+            target,
+            &mut dl,
+            first,
+            MissionDownload::on_message,
+            MissionDownload::poll,
+            MissionDownload::status,
+        )
+        .await;
+        (dl.status().clone(), dl.items().to_vec())
+    }
+
+    /// Upload `items` to `target`, then download the mission again and compare (hazard H4).
+    /// Only [`MissionReport::verified`] means the vehicle holds exactly this mission.
+    ///
+    /// Refused while the vehicle is armed or its armed state is unknown: an upload in flight
+    /// is a class C two-stage action (plan 08 §4.1) and that confirmation is not built for
+    /// missions yet.
+    pub async fn upload_mission(
+        &self,
+        target: (u8, u8),
+        items: Vec<MissionItem>,
+    ) -> Result<MissionReport, Refusal> {
+        if self.facts(target.0).armed != Some(false) {
+            return Err(Refusal::Precondition(
+                "mission upload needs the vehicle known to be disarmed (in-flight upload needs \
+                 the two-stage confirmation, not built yet)"
+                    .into(),
+            ));
+        }
+        let (mut up, first) = MissionUpload::start(
+            target,
+            items.clone(),
+            MISSION_TYPE_MISSION,
+            TransferConfig::default(),
+            Instant::now(),
+        );
+        self.drive(
+            target,
+            &mut up,
+            first,
+            MissionUpload::on_message,
+            MissionUpload::poll,
+            MissionUpload::status,
+        )
+        .await;
+        // Read back whatever the upload said: a lost final ACK or a partial write shows here.
+        let (readback, on_vehicle) = self.download_mission(target).await;
+        let mismatches = if readback == TransferStatus::Done {
+            mission::verify(&items, &on_vehicle, true)
+        } else {
+            Vec::new()
+        };
+        Ok(MissionReport {
+            upload: up.status().clone(),
+            readback,
+            on_vehicle,
+            mismatches,
+        })
+    }
+
+    /// Run a mission state machine until it finishes.
+    async fn drive<M>(
+        &self,
+        target: (u8, u8),
+        machine: &mut M,
+        first: Message,
+        on_message: fn(&mut M, &Message, Instant) -> Vec<Message>,
+        poll: fn(&mut M, Instant) -> Vec<Message>,
+        status: fn(&M) -> &TransferStatus,
+    ) {
+        let mut rx = self.incoming.subscribe();
+        self.send(&first).await;
+        let mut tick = tokio::time::interval(Duration::from_millis(50));
+        while matches!(status(machine), TransferStatus::InProgress { .. }) {
+            let out = tokio::select! {
+                m = rx.recv() => match m {
+                    Ok(inc) if inc.sysid == target.0 && inc.compid == target.1 => {
+                        on_message(machine, &inc.msg, Instant::now())
+                    }
+                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => Vec::new(),
+                    Err(broadcast::error::RecvError::Closed) => return,
+                },
+                _ = tick.tick() => poll(machine, Instant::now()),
+            };
+            for m in out {
+                self.send(&m).await;
+            }
+        }
     }
 }
 

@@ -372,3 +372,84 @@ async fn gps_loss_makes_the_position_untrusted() {
     eprintln!("{warning} after {:.1} s", t1.elapsed().as_secs_f32());
     assert_eq!(core.nav_health(1).trust, PositionTrust::Untrusted);
 }
+
+/// Hazard H4: a mission uploaded through a lossy link (20 % drop each way) is read back and
+/// verified item by item on a real ArduCopter.
+#[tokio::test(flavor = "multi_thread")]
+async fn mission_upload_is_verified_by_read_back_through_loss() {
+    use dc_core::{MissionItem, TransferStatus};
+    let Some(cfg) = SitlConfig::copter_or_skip() else {
+        return;
+    };
+    let sitl = Sitl::start(&cfg).unwrap();
+    let chaos = ChaosProxy::start(
+        sitl.addr(),
+        ChaosConfig {
+            drop: 0.20,
+            jitter: Duration::from_millis(20),
+            seed: 0x4D15,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let core = core_on(chaos.addr()).await;
+    assert_eq!(
+        core.wait_for_vehicle(Duration::from_secs(60)).await,
+        Some(1)
+    );
+    // Wait for a heartbeat that says disarmed (uploads are refused otherwise).
+    tokio::time::timeout(Duration::from_secs(20), async {
+        while core.facts(1).armed != Some(false) {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("disarmed");
+    let wp = |lat: f64, lon: f64, alt: f32| MissionItem {
+        frame: 6,
+        command: 16,
+        params: [0.0; 4],
+        x: (lat * 1e7) as i32,
+        y: (lon * 1e7) as i32,
+        z: alt,
+        autocontinue: true,
+    };
+    let home = core.fleet().get(1).and_then(|v| v.position.clone());
+    let (lat0, lon0) = home.map_or((-35.363, 149.165), |p| (p.value.lat_deg, p.value.lon_deg));
+    let mut mission = vec![wp(lat0, lon0, 0.0)];
+    mission.push(MissionItem {
+        command: 22,
+        ..wp(0.0, 0.0, 20.0)
+    });
+    for i in 0..10 {
+        mission.push(wp(
+            lat0 + 0.0005 * f64::from(i),
+            lon0 + 0.0003,
+            25.0 + i as f32,
+        ));
+    }
+    mission.push(MissionItem {
+        command: 19,
+        params: [10.0, 0.0, 0.0, 0.0],
+        ..wp(lat0, lon0, 30.0)
+    });
+    mission.push(MissionItem {
+        command: 20,
+        frame: 2,
+        ..wp(0.0, 0.0, 0.0)
+    });
+    let t0 = Instant::now();
+    let report = core.upload_mission((1, 1), mission.clone()).await.unwrap();
+    eprintln!(
+        "{} items: upload {:?}, read-back {:?}, {} mismatches, {:.1} s",
+        mission.len(),
+        report.upload,
+        report.readback,
+        report.mismatches.len(),
+        t0.elapsed().as_secs_f32()
+    );
+    assert_eq!(report.readback, TransferStatus::Done);
+    assert!(report.verified(), "{:?}", report.mismatches);
+    assert_eq!(report.on_vehicle.len(), mission.len());
+}
