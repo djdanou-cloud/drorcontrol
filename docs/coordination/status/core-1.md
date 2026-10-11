@@ -2,9 +2,9 @@
 agent: core-1
 role: workstream-agent
 workstream: WS-CORE
-state: idle
-task: AUDIT-1
-updated: 2026-10-11T07:33:52Z
+state: active
+task: T0-16
+updated: 2026-10-11T07:51:21Z
 ---
 
 ## Current focus
@@ -24,3 +24,5 @@ updated: 2026-10-11T07:33:52Z
 - 2026-10-11T07:28:13Z — verifying external audit claims against the Rust core; fixing real findings outside the command path
 
 - 2026-10-11T07:33:52Z — audit check done
+
+- 2026-10-11T07:51:21Z — CommandPolicy (plan 08 4, ADR-0009), test-driven
