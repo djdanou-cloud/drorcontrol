@@ -1,0 +1,59 @@
+# Spike S0-3 (T0-07): build MapLibre Native (Metal) with Qt Quick and record indicative frame
+# timing on a macOS runner (a VM: the go/no-go numbers come from a real Mac, see the Mac test
+# runbook). Separate from ci.yml because building MapLibre from source takes a long time.
+name: spike-map
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ui/spikes/s0-3-map/**"
+      - ".github/workflows/spike-map.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: spike-map-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  map-spike-macos:
+    name: map spike S0-3 (macOS, Metal, informational)
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 2G
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.11.2
+          cache: true
+
+      - name: Install build tools
+        run: brew install ninja ccache
+
+      - uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: spike-map-ccache-${{ hashFiles('ui/spikes/s0-3-map/build.sh') }}-${{ github.run_id }}
+          restore-keys: spike-map-ccache-${{ hashFiles('ui/spikes/s0-3-map/build.sh') }}-
+
+      - name: Build QMapLibre (Metal) and the harness
+        run: ui/spikes/s0-3-map/build.sh
+
+      - name: Fly the route (2 x 20 s), record frame timing
+        run: |
+          B=$(ls -d ui/spikes/s0-3-map/build/spike-s0-3-map* | head -1)
+          [[ -d "$B" ]] && B="$B/Contents/MacOS/spike-s0-3-map"
+          "$B" --seconds-per-pass 20 --warmup 8 --report s03-macos-ci.json
+          { echo '### Spike S0-3 on the CI runner (indicative)'; echo '```'; cat s03-macos-ci.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: spike-s0-3-macos-ci
+          path: s03-macos-ci.json
+          retention-days: 30
