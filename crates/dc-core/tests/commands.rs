@@ -127,7 +127,7 @@ fn tmp(name: &str) -> std::path::PathBuf {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn arm_is_confirmed_sent_acked_and_verified_and_audited() {
+async fn arm_is_one_action_disarm_is_confirmed_and_both_are_audited() {
     let log = tmp("audit-arm");
     let _ = std::fs::remove_file(&log);
     let (core, v, stop) = setup(CoreConfig {
@@ -138,24 +138,13 @@ async fn arm_is_confirmed_sent_acked_and_verified_and_audited() {
     core.set_vehicle_name(1, "WHOOP-3");
     let mut events = core.events();
 
-    // Class C without the card: refused, nothing sent.
-    assert_eq!(
-        core.submit_command(1, Command::Arm, Approval::None)
-            .await
-            .unwrap_err(),
-        Refusal::ConfirmationRequired
-    );
-
-    let Request::Confirm(card) = core.request_command(1, Command::Arm).await.unwrap() else {
-        panic!("ARM is class C")
-    };
-    assert!(
-        card.summary.contains("WHOOP-3") && card.summary.contains("disarmed"),
-        "{}",
-        card.summary
-    );
+    // ARM is a single action (ADR-0011): no card, sent at once.
+    assert!(matches!(
+        core.request_command(1, Command::Arm).await.unwrap(),
+        Request::Ready { .. }
+    ));
     let id = core
-        .submit_command(1, Command::Arm, Approval::Confirmed(card.token))
+        .submit_command(1, Command::Arm, Approval::None)
         .await
         .unwrap();
     let states = until_final(&mut events, Duration::from_secs(5)).await;
@@ -173,18 +162,60 @@ async fn arm_is_confirmed_sent_acked_and_verified_and_audited() {
         assert_eq!((arms[0].param1, arms[0].confirmation), (1.0, 0));
     }
 
+    // DISARM is two-stage: without the card it is refused and nothing is sent.
+    assert_eq!(
+        core.submit_command(1, Command::Disarm, Approval::None)
+            .await
+            .unwrap_err(),
+        Refusal::ConfirmationRequired
+    );
+    assert_eq!(
+        v.lock()
+            .unwrap()
+            .received
+            .iter()
+            .filter(|c| c.command == 400)
+            .count(),
+        1
+    );
+    let Request::Confirm(card) = core.request_command(1, Command::Disarm).await.unwrap() else {
+        panic!("DISARM is class C")
+    };
+    assert!(
+        card.summary.contains("WHOOP-3") && card.summary.contains("ARMED"),
+        "{}",
+        card.summary
+    );
+    let id = core
+        .submit_command(1, Command::Disarm, Approval::Confirmed(card.token))
+        .await
+        .unwrap();
+    let states = until_final(&mut events, Duration::from_secs(5)).await;
+    assert_eq!(
+        *states.last().unwrap(),
+        CommandState::Verified,
+        "{states:?}"
+    );
+    assert_eq!(
+        core.command_status(id).unwrap().summary(),
+        "DISARM: VERIFIED"
+    );
+    assert!(!v.lock().unwrap().armed);
+
     // Audit log: complete and chained.
     tokio::time::sleep(Duration::from_millis(100)).await;
     let text = std::fs::read_to_string(&log).unwrap();
     let (n, _) = audit::verify(text.as_bytes()).expect("valid chain");
     assert!(n >= 5, "{text}");
     for want in [
-        "refused ARM: needs confirmation",
-        "confirmation issued for ARM",
+        "request ARM (class B)",
         "accepted ARM",
         "sent ARM attempt 1",
         "ack ARM: accepted",
         "ARM: Verified",
+        "refused DISARM: needs confirmation",
+        "confirmation issued for DISARM",
+        "DISARM: Verified",
     ] {
         assert!(text.contains(want), "audit log lacks {want:?}:\n{text}");
     }
@@ -259,20 +290,15 @@ async fn lost_link_still_sends_retries_and_expires() {
     let rtl = Command::Rtl {
         expect_mode: Some(6),
     };
-    let Request::Confirm(card) = core
-        .request_command(1, rtl.clone())
-        .await
-        .expect("never refused for link state")
-    else {
-        panic!()
-    };
-    assert!(
-        card.summary.contains("link LOST") && card.summary.contains("may not arrive"),
-        "{}",
-        card.summary
-    );
+    // RTL is a single action and is never refused for link state.
+    assert!(matches!(
+        core.request_command(1, rtl.clone())
+            .await
+            .expect("never refused for link state"),
+        Request::Ready { .. }
+    ));
     let t0 = std::time::Instant::now();
-    core.submit_command(1, rtl, Approval::Confirmed(card.token))
+    core.submit_command(1, rtl, Approval::None)
         .await
         .expect("never refused for link state");
 

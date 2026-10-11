@@ -111,6 +111,10 @@ fn link_thresholds_are_bounded() {
     assert!(bad(|c| c.link_lost = Duration::from_secs(120)));
     assert!(bad(|c| c.stream_rates = vec![(30, 0.0)]));
     assert!(bad(|c| c.stream_rates = vec![(30, f32::NAN)]));
+    // ADR-0011: mode changes expire within 2–3 s.
+    assert_eq!(ok.policy.lifetime_mode, Duration::from_secs(3));
+    assert!(bad(|c| c.policy.lifetime_mode = Duration::from_millis(3001)));
+    assert!(bad(|c| c.policy.lifetime_mode = Duration::from_millis(1999)));
 }
 
 #[tokio::test]

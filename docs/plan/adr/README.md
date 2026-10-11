@@ -5,7 +5,7 @@
 Process and template: see [`../06-documentation-system.md`](../06-documentation-system.md) §4.2 and
 [`0000-template.md`](0000-template.md). Accepted ADRs are immutable; supersede instead of editing.
 
-10 ADRs: 6 proposed, 3 accepted, 1 superseded.
+11 ADRs: 6 proposed, 4 accepted, 1 superseded.
 
 | ADR | Title | Status | Date |
 |-----|-------|--------|------|
@@ -19,3 +19,4 @@ Process and template: see [`../06-documentation-system.md`](../06-documentation-
 | [0008](0008-parity-out-of-scope.md) | Mission Planner items outside the parity scope | accepted | 2026-10-11 |
 | [0009](0009-link-state-never-blocks-commands.md) | Link state never blocks commands | accepted | 2026-10-11 |
 | [0010](0010-internal-distribution-without-apple-credentials.md) | Internal distribution without Apple developer credentials | accepted | 2026-10-11 |
+| [0011](0011-operational-profile-and-command-classes.md) | Operational profile and command classes (single-action flight controls) | accepted | 2026-10-11 |

@@ -74,9 +74,13 @@ nav:
       - plan/adr/0007-docs-as-code.md
       - plan/adr/0008-parity-out-of-scope.md
       - plan/adr/0009-link-state-never-blocks-commands.md
+      - plan/adr/0010-internal-distribution-without-apple-credentials.md
+      - plan/adr/0011-operational-profile-and-command-classes.md
       - plan/adr/0000-template.md
   - Reference:
       - MAVLink: reference/mavlink/index.md
+  - Safety:
+      - Hazard log: safety/hazards.md
   - Quality:
       - SITL harness: dev/sitl-harness.md
       - Parity inventory: parity/README.md

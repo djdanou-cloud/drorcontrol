@@ -1,6 +1,6 @@
 //! `CommandPolicy`: the core-side gate and delivery engine for vehicle commands (sans-I/O).
 //!
-//! Implements plan 08 §4 and ADR-0009:
+//! Implements plan 08 §4, ADR-0009 and ADR-0011:
 //!
 //! * **Classes A–D** ([`Class`]) with the confirmation each needs. Class C needs a single-use
 //!   [`Confirmation`] token issued by [`CommandPolicy::request`], valid for
@@ -13,7 +13,8 @@
 //! * **Link state never refuses a command** (ADR-0009). It changes delivery: the command is
 //!   retransmitted until `COMMAND_ACK` or the expected state is seen, flooded over every link
 //!   when the link is not CONNECTED, and never sent after its lifetime
-//!   ([`PolicyConfig::lifetime_nav`] for RTL/Land, [`PolicyConfig::lifetime`] otherwise).
+//!   ([`PolicyConfig::lifetime_nav`] for RTL/Land, [`PolicyConfig::lifetime_mode`] for mode
+//!   changes, [`PolicyConfig::lifetime`] otherwise).
 //!   A newer command in the same [`Group`] supersedes it; the operator can cancel it.
 //!   `COMMAND_ACK` has no request id, so after superseding a command with the same `MAV_CMD`
 //!   (DISARM after ARM) ACKs are ambiguous for [`PolicyConfig::retry_max`] and are ignored;
@@ -50,31 +51,33 @@ const MOTOR_TEST_THROTTLE_PERCENT: f32 = 0.0;
 /// Commands the policy knows (safe command set v1, plan 07 + plan 08 §4.1).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
-    /// Arm. Class C.
+    /// Arm. Class B (ADR-0011).
     Arm,
     /// Arm bypassing pre-arm checks (`force`). Class D: it disables safety checks.
     ForceArm,
-    /// Disarm. Class C (in flight it stops the motors).
+    /// Disarm. Class C: in flight it stops the motors (terminal). The GCS cannot yet tell
+    /// landed from flying, so it is always two-stage.
     Disarm,
-    /// Emergency motor kill: force-disarm even in flight. Class D.
+    /// Emergency motor termination: force-disarm even in flight. Class C (two-stage /
+    /// slide, no typed text: ADR-0011).
     ForceDisarm,
-    /// Change flight mode (ArduPilot `custom_mode` number). Class C until mode metadata can
-    /// tell benign modes (Loiter, class B) from autonomous ones.
+    /// Change flight mode (ArduPilot `custom_mode` number). Class B: single action, the
+    /// primary arrest manoeuvre (ADR-0011); lifetime [`PolicyConfig::lifetime_mode`].
     SetMode {
         /// Target `custom_mode`.
         custom_mode: u32,
     },
-    /// Return to launch. Class C, fast path (plan 08 §4.1).
+    /// Return to launch. Class B (ADR-0011).
     Rtl {
         /// Mode number that proves RTL engaged (from mode metadata), if known.
         expect_mode: Option<u32>,
     },
-    /// Land here. Class C, fast path.
+    /// Land here. Class B (ADR-0011).
     Land {
         /// Mode number that proves LAND engaged, if known.
         expect_mode: Option<u32>,
     },
-    /// Take off to `alt_m` (relative). Class C.
+    /// Take off to `alt_m` (relative). Class B (ADR-0011).
     Takeoff {
         /// Altitude above home, m (0 < alt ≤ [`MAX_TAKEOFF_ALT_M`]).
         alt_m: f32,
@@ -88,7 +91,7 @@ pub enum Command {
         /// Altitude above home, m.
         alt_m: f32,
     },
-    /// Spin one motor for a bench test. Class C; only when known disarmed and with
+    /// Spin one motor for a bench test. Class B; only when known disarmed and with
     /// props-off attestation.
     MotorTest {
         /// Motor number, 1-based.
@@ -100,7 +103,7 @@ pub enum Command {
         /// Operator attested that the propellers are removed.
         props_removed: bool,
     },
-    /// Reboot the autopilot. Class C; not while armed.
+    /// Reboot the autopilot. Class C (terminal); never while armed (ADR-0011).
     Reboot,
     /// Reset all parameters to factory defaults. Class C; not while armed.
     ParamReset,
@@ -143,11 +146,25 @@ pub enum Group {
 
 impl Command {
     /// Plan 08 §4.1 class.
+    ///
+    /// Operational profile (ADR-0011, product owner 2026-10-11): flight controls are single
+    /// action (class B) because confirmation latency is itself a flight hazard; two-stage
+    /// confirmation is reserved for irreversible terminal actions (in-flight disarm,
+    /// autopilot reboot, emergency motor termination). Force-arm and parameter reset are
+    /// ground-only actions and keep their confirmation pending owner review.
     pub fn class(&self) -> Class {
         match self {
-            Command::ForceArm | Command::ForceDisarm => Class::D,
-            Command::Reposition { .. } => Class::B,
-            _ => Class::C,
+            Command::ForceArm => Class::D,
+            Command::Disarm | Command::ForceDisarm | Command::Reboot | Command::ParamReset => {
+                Class::C
+            }
+            Command::Arm
+            | Command::SetMode { .. }
+            | Command::Rtl { .. }
+            | Command::Land { .. }
+            | Command::Takeoff { .. }
+            | Command::Reposition { .. }
+            | Command::MotorTest { .. } => Class::B,
         }
     }
 
@@ -216,6 +233,7 @@ impl Command {
     pub fn lifetime(&self, cfg: &PolicyConfig) -> Duration {
         match self {
             Command::Rtl { .. } | Command::Land { .. } => cfg.lifetime_nav,
+            Command::SetMode { .. } => cfg.lifetime_mode,
             _ => cfg.lifetime,
         }
     }
@@ -467,6 +485,10 @@ pub struct PolicyConfig {
     pub token_ttl: Duration,
     /// Command lifetime for RTL and Land.
     pub lifetime_nav: Duration,
+    /// Command lifetime for mode changes (ADR-0011: 2–3 s). A mode switch never waits in a
+    /// queue to execute when the aircraft is in a different flight state; unanswered, it
+    /// expires and the operator is alerted.
+    pub lifetime_mode: Duration,
     /// Command lifetime for everything else.
     pub lifetime: Duration,
     /// Retransmit interval while CONNECTED (no ACK yet).
@@ -482,6 +504,7 @@ impl Default for PolicyConfig {
         PolicyConfig {
             token_ttl: Duration::from_secs(5),
             lifetime_nav: Duration::from_secs(30),
+            lifetime_mode: Duration::from_secs(3),
             lifetime: Duration::from_secs(10),
             retry_connected: Duration::from_secs(1),
             retry_degraded: Duration::from_millis(500),

@@ -50,7 +50,21 @@ fn rtl() -> Command {
     }
 }
 
-/// Request + submit a class C command with its token.
+/// Request + submit, confirming through the card when the class needs it (C only here).
+fn send_full(
+    p: &mut CommandPolicy,
+    cmd: Command,
+    facts: &VehicleFacts,
+    link: LinkInfo,
+    now: Instant,
+) -> (CommandId, Vec<Outgoing>, Vec<CommandStatus>) {
+    let approval = match p.request(T, cmd.clone(), facts, link, now).unwrap() {
+        Request::Ready { .. } => Approval::None,
+        Request::Confirm(c) => Approval::Confirmed(c.token),
+    };
+    p.submit(T, cmd, approval, facts, link, now).unwrap()
+}
+
 fn send_c(
     p: &mut CommandPolicy,
     cmd: Command,
@@ -58,12 +72,7 @@ fn send_c(
     link: LinkInfo,
     now: Instant,
 ) -> (CommandId, Vec<Outgoing>) {
-    let Request::Confirm(c) = p.request(T, cmd.clone(), facts, link, now).unwrap() else {
-        panic!("class C needs confirmation")
-    };
-    let (id, out, _) = p
-        .submit(T, cmd, Approval::Confirmed(c.token), facts, link, now)
-        .unwrap();
+    let (id, out, _) = send_full(p, cmd, facts, link, now);
     (id, out)
 }
 
@@ -77,28 +86,36 @@ fn long(m: &Message) -> &mavlink_codec::messages::CommandLong {
 // ---- classes and confirmation ------------------------------------------------------------
 
 #[test]
-fn classes_follow_plan_08() {
-    assert_eq!(
+fn classes_follow_the_operational_profile() {
+    // ADR-0011: flight controls are single action; two-stage only for terminal actions.
+    for c in [
+        Command::Arm,
+        rtl(),
+        Command::Land { expect_mode: None },
+        Command::SetMode { custom_mode: 5 },
+        Command::Takeoff { alt_m: 10.0 },
         Command::Reposition {
             lat_deg: 1.0,
             lon_deg: 2.0,
-            alt_m: 30.0
-        }
-        .class(),
-        Class::B
-    );
+            alt_m: 30.0,
+        },
+        Command::MotorTest {
+            motor: 1,
+            throttle_pct: 5.0,
+            duration_s: 2.0,
+            props_removed: true,
+        },
+    ] {
+        assert_eq!(c.class(), Class::B, "{c:?}");
+    }
     for c in [
-        Command::Arm,
         Command::Disarm,
-        rtl(),
-        Command::Land { expect_mode: None },
-        Command::SetMode { custom_mode: 3 },
+        Command::ForceDisarm,
         Command::Reboot,
         Command::ParamReset,
     ] {
         assert_eq!(c.class(), Class::C, "{c:?}");
     }
-    assert_eq!(Command::ForceDisarm.class(), Class::D);
     assert_eq!(Command::ForceArm.class(), Class::D);
 }
 
@@ -108,14 +125,14 @@ fn class_c_is_refused_without_a_valid_token() {
     let mut p = CommandPolicy::new(PolicyConfig::default());
     let f = disarmed();
     assert_eq!(
-        p.submit(T, Command::Arm, Approval::None, &f, connected(), now)
+        p.submit(T, Command::Reboot, Approval::None, &f, connected(), now)
             .unwrap_err(),
         Refusal::ConfirmationRequired
     );
     assert!(matches!(
         p.submit(
             T,
-            Command::Arm,
+            Command::Reboot,
             Approval::Confirmed(Token(999)),
             &f,
             connected(),
@@ -125,13 +142,13 @@ fn class_c_is_refused_without_a_valid_token() {
     ));
 
     // Valid once.
-    let Request::Confirm(c) = p.request(T, Command::Arm, &f, connected(), now).unwrap() else {
+    let Request::Confirm(c) = p.request(T, Command::Reboot, &f, connected(), now).unwrap() else {
         panic!()
     };
     assert!(
         p.submit(
             T,
-            Command::Arm,
+            Command::Reboot,
             Approval::Confirmed(c.token),
             &f,
             connected(),
@@ -143,7 +160,7 @@ fn class_c_is_refused_without_a_valid_token() {
         matches!(
             p.submit(
                 T,
-                Command::Arm,
+                Command::Reboot,
                 Approval::Confirmed(c.token),
                 &f,
                 connected(),
@@ -155,14 +172,14 @@ fn class_c_is_refused_without_a_valid_token() {
     );
 
     // Expired after the 5 s card timeout.
-    let Request::Confirm(c) = p.request(T, Command::Arm, &f, connected(), now).unwrap() else {
+    let Request::Confirm(c) = p.request(T, Command::Reboot, &f, connected(), now).unwrap() else {
         panic!()
     };
     let late = now + Duration::from_secs(5);
     assert!(matches!(
         p.submit(
             T,
-            Command::Arm,
+            Command::Reboot,
             Approval::Confirmed(c.token),
             &f,
             connected(),
@@ -172,10 +189,7 @@ fn class_c_is_refused_without_a_valid_token() {
     ));
 
     // Bound to the vehicle and to the exact command.
-    let Request::Confirm(c) = p
-        .request(T, Command::SetMode { custom_mode: 4 }, &f, connected(), now)
-        .unwrap()
-    else {
+    let Request::Confirm(c) = p.request(T, Command::Disarm, &f, connected(), now).unwrap() else {
         panic!()
     };
     let other = Target {
@@ -185,7 +199,7 @@ fn class_c_is_refused_without_a_valid_token() {
     assert!(matches!(
         p.submit(
             other,
-            Command::SetMode { custom_mode: 4 },
+            Command::Disarm,
             Approval::Confirmed(c.token),
             &f,
             connected(),
@@ -193,16 +207,13 @@ fn class_c_is_refused_without_a_valid_token() {
         ),
         Err(Refusal::BadToken(_))
     ));
-    let Request::Confirm(c) = p
-        .request(T, Command::SetMode { custom_mode: 4 }, &f, connected(), now)
-        .unwrap()
-    else {
+    let Request::Confirm(c) = p.request(T, Command::Disarm, &f, connected(), now).unwrap() else {
         panic!()
     };
     assert!(matches!(
         p.submit(
             T,
-            Command::SetMode { custom_mode: 3 },
+            Command::ForceDisarm,
             Approval::Confirmed(c.token),
             &f,
             connected(),
@@ -217,10 +228,10 @@ fn class_d_needs_the_typed_phrase_and_a_reason() {
     let now = Instant::now();
     let mut p = CommandPolicy::new(PolicyConfig::default());
     p.set_vehicle_name(1, "WHOOP-3");
-    let f = armed();
+    let f = disarmed();
     let kill = |p: &mut CommandPolicy, text: &str, reason: &str| {
         let Request::Confirm(c) = p
-            .request(T, Command::ForceDisarm, &f, connected(), now)
+            .request(T, Command::ForceArm, &f, connected(), now)
             .unwrap()
         else {
             panic!()
@@ -229,7 +240,7 @@ fn class_d_needs_the_typed_phrase_and_a_reason() {
         assert_eq!(c.challenge.as_deref(), Some("WHOOP-3"));
         p.submit(
             T,
-            Command::ForceDisarm,
+            Command::ForceArm,
             Approval::Typed {
                 token: c.token,
                 text: text.into(),
@@ -252,7 +263,7 @@ fn class_d_needs_the_typed_phrase_and_a_reason() {
 
     // A plain class C confirmation is not enough for class D.
     let Request::Confirm(c) = p
-        .request(T, Command::ForceDisarm, &f, connected(), now)
+        .request(T, Command::ForceArm, &f, connected(), now)
         .unwrap()
     else {
         panic!()
@@ -260,7 +271,7 @@ fn class_d_needs_the_typed_phrase_and_a_reason() {
     assert_eq!(
         p.submit(
             T,
-            Command::ForceDisarm,
+            Command::ForceArm,
             Approval::Confirmed(c.token),
             &f,
             connected(),
@@ -377,9 +388,14 @@ fn vehicle_state_lockouts() {
     assert!(locked(&mut p, Command::Reboot, &armed()));
     assert!(!locked(&mut p, Command::ParamReset, &disarmed()));
 
+    // Single-action commands are checked again at submit.
+    assert!(matches!(
+        p.submit(T, mt(true), Approval::None, &armed(), connected(), now),
+        Err(Refusal::Precondition(_))
+    ));
     // State can change between card and confirm: checked again at submit.
     let Request::Confirm(c) = p
-        .request(T, mt(true), &disarmed(), connected(), now)
+        .request(T, Command::Reboot, &disarmed(), connected(), now)
         .unwrap()
     else {
         panic!()
@@ -387,7 +403,7 @@ fn vehicle_state_lockouts() {
     assert!(matches!(
         p.submit(
             T,
-            mt(true),
+            Command::Reboot,
             Approval::Confirmed(c.token),
             &armed(),
             connected(),
@@ -420,22 +436,17 @@ fn link_state_never_refuses_a_command() {
             Command::Disarm,
             Command::SetMode { custom_mode: 4 },
         ] {
-            let Request::Confirm(c) = p.request(T, cmd.clone(), &armed(), link, now).unwrap()
-            else {
-                panic!()
+            let approval = match p.request(T, cmd.clone(), &armed(), link, now).unwrap() {
+                Request::Ready { .. } => Approval::None,
+                Request::Confirm(c) => {
+                    if state != LinkState::Connected {
+                        assert!(c.summary.contains("may not arrive"), "{}", c.summary);
+                    }
+                    Approval::Confirmed(c.token)
+                }
             };
-            if state != LinkState::Connected {
-                assert!(c.summary.contains("may not arrive"), "{}", c.summary);
-            }
             let (_, out, _) = p
-                .submit(
-                    T,
-                    cmd.clone(),
-                    Approval::Confirmed(c.token),
-                    &armed(),
-                    link,
-                    now,
-                )
+                .submit(T, cmd.clone(), approval, &armed(), link, now)
                 .unwrap();
             assert_eq!(out.len(), 1, "{cmd:?} sent at once on a {state} link");
             assert_eq!(
@@ -587,32 +598,15 @@ fn newer_command_supersedes_and_cancel_stops() {
     let mut p = CommandPolicy::new(PolicyConfig::default());
     let (rtl_id, _) = send_c(&mut p, rtl(), &armed(), lost(), t0);
     let (arm_id, _) = send_c(&mut p, Command::Disarm, &armed(), lost(), t0);
-    let Request::Confirm(c) = p
-        .request(
-            T,
-            Command::Land {
-                expect_mode: Some(9),
-            },
-            &armed(),
-            lost(),
-            t0,
-        )
-        .unwrap()
-    else {
-        panic!()
-    };
-    let (land_id, _, changed) = p
-        .submit(
-            T,
-            Command::Land {
-                expect_mode: Some(9),
-            },
-            Approval::Confirmed(c.token),
-            &armed(),
-            lost(),
-            t0,
-        )
-        .unwrap();
+    let (land_id, _, changed) = send_full(
+        &mut p,
+        Command::Land {
+            expect_mode: Some(9),
+        },
+        &armed(),
+        lost(),
+        t0,
+    );
     assert_eq!(changed[0].id, rtl_id);
     assert_eq!(changed[0].state, CommandState::Superseded(land_id));
     assert!(
@@ -755,9 +749,9 @@ fn audit_chain_records_everything_and_detects_tampering() {
     assert!(
         p.submit(
             T,
-            Command::Arm,
+            Command::Disarm,
             Approval::None,
-            &disarmed(),
+            &armed(),
             connected(),
             t0
         )
@@ -771,7 +765,7 @@ fn audit_chain_records_everything_and_detects_tampering() {
     assert!(
         texts
             .iter()
-            .any(|t| t.starts_with("refused ARM: needs confirmation")),
+            .any(|t| t.starts_with("refused DISARM: needs confirmation")),
         "{texts:?}"
     );
     assert!(texts.iter().any(|t| t.starts_with("accepted ARM")));
@@ -853,5 +847,87 @@ fn late_ack_of_a_superseded_command_is_not_misattributed() {
         p.drain_audit()
             .iter()
             .any(|e| e.text.contains("ignored: may answer a superseded"))
+    );
+}
+
+/// ADR-0011: a mode change is one action (no card, no token), goes out at once, and is never
+/// sent after its 3 s lifetime: unanswered, it expires and the operator is alerted.
+#[test]
+fn mode_change_is_single_action_and_expires_after_three_seconds() {
+    let t0 = Instant::now();
+    let mut p = CommandPolicy::new(PolicyConfig::default());
+    let loiter = Command::SetMode { custom_mode: 5 };
+    assert_eq!(
+        p.request(T, loiter.clone(), &armed(), lost(), t0).unwrap(),
+        Request::Ready { class: Class::B }
+    );
+    let (id, out, _) = p
+        .submit(T, loiter, Approval::None, &armed(), lost(), t0)
+        .unwrap();
+    assert_eq!(out.len(), 1, "sent immediately");
+    let mut last_send = t0;
+    let mut expired = None;
+    let mut t = t0;
+    while t < t0 + Duration::from_secs(6) {
+        t += Duration::from_millis(5);
+        let (out, changed) = p.poll(t, |_| lost());
+        if !out.is_empty() {
+            last_send = t;
+        }
+        for c in changed {
+            if c.state == (CommandState::Expired { acked: false }) {
+                expired.get_or_insert(t);
+            }
+        }
+    }
+    assert!(
+        last_send < t0 + Duration::from_secs(3),
+        "no mode change after 3 s"
+    );
+    let e = expired.expect("expired");
+    assert!(e >= t0 + Duration::from_secs(3) && e < t0 + Duration::from_millis(3010));
+    assert!(
+        p.status(id, t)
+            .unwrap()
+            .summary()
+            .contains("NOT CONFIRMED — EXPIRED")
+    );
+}
+
+/// ADR-0011: emergency motor termination is two-stage (card/slide) without typed text, so it
+/// stays fast; it still cannot be sent without the card.
+#[test]
+fn emergency_termination_is_two_stage_without_typed_text() {
+    let now = Instant::now();
+    let mut p = CommandPolicy::new(PolicyConfig::default());
+    assert_eq!(
+        p.submit(
+            T,
+            Command::ForceDisarm,
+            Approval::None,
+            &armed(),
+            connected(),
+            now
+        )
+        .unwrap_err(),
+        Refusal::ConfirmationRequired
+    );
+    let Request::Confirm(c) = p
+        .request(T, Command::ForceDisarm, &armed(), connected(), now)
+        .unwrap()
+    else {
+        panic!("termination is two-stage")
+    };
+    assert_eq!((c.class, c.challenge.clone()), (Class::C, None));
+    assert!(
+        p.submit(
+            T,
+            Command::ForceDisarm,
+            Approval::Confirmed(c.token),
+            &armed(),
+            connected(),
+            now
+        )
+        .is_ok()
     );
 }

@@ -5,7 +5,7 @@ Scope note: this GCS is not a certified avionics product (it is not DO-178C-cert
 ## 1. Hazards driving requirements (excerpt)
 | ID | Hazard | Causes | Controls |
 |----|--------|--------|----------|
-| H1 | Unintended command (arm, kill, mode, motor test, param reset) | Mis-click, wrong vehicle, key shortcut, joystick button, script | Two-stage confirm, vehicle identity echo, no single-key hazards, plugin permissions |
+| H1 | Unintended terminal command (in-flight disarm, kill, reboot, force-arm) | Mis-click, wrong vehicle, key shortcut, joystick button, script | Two-stage confirm for terminal actions only (ADR-0011), vehicle identity echo, plugin permissions; accidental single-action flight commands are H14 in the hazard log |
 | H2 | Wrong vehicle commanded | Multi-vehicle, stale selection | Persistent colour+name banner; confirm dialog shows sysid/name/colour/position |
 | H3 | Stale data shown as live | Link loss, freeze, parser stall | Per-field age, invalidation flags, link state machine, watchdog |
 | H4 | Mission corrupt/partial upload | Packet loss, abort | Transactional transfer, readback verification, draft≠vehicle badge |
@@ -15,6 +15,9 @@ Scope note: this GCS is not a certified avionics product (it is not DO-178C-cert
 | H8 | GCS freeze / crash during flight | Bug, memory, GPU hang | Process separation (core daemon survives UI crash), watchdog, auto-reconnect, no loss of recorder |
 | H9 | Alert fatigue / missed alert | Too many annunciations | Priority model, rate limiting, audio+visual redundancy |
 | H10 | Compromised link/plugin | Spoofed MAVLink, malicious script | Signing, plugin sandbox & permissions, input validation |
+
+The full log for the operational profile (MIL-STD-882E; H1–H18, risk targets, safety
+requirements) is [`docs/safety/hazards.md`](../safety/hazards.md).
 
 ## 2. Automated SITL testing pipeline (headless, in CI)
 
@@ -89,17 +92,18 @@ flowchart TB
 | Class | Examples | Pattern |
 |-------|----------|---------|
 | **A – Benign / reversible** | change map layer, select vehicle, open dialogs | none |
-| **B – Operational** | change speed/alt, guided go-to, set current WP, switch to Loiter, camera trigger | Single deliberate action + visible pending→ACK; undo hint |
-| **C – Consequential (two-stage)** | **Arm**, **Disarm in flight**, **RTL**, **Land**, mode change to Auto/Guided/Acro, **mission upload** (when armed), **Motor test**, **Parameter reset / critical param write**, firmware flash, reboot autopilot | Stage 1: arm the control (slide-to-confirm or press-and-hold 0.8 s). Stage 2: confirmation card with vehicle identity (name/sysid/colour/mode/armed state), exact action, consequence, checks summary; explicit button (not default-focused); 5 s auto-cancel; Esc cancels |
-| **D – Hazardous** | **Emergency motor kill / force-disarm**, disable arming checks, disable failsafes, calibration overwrite | C + typed confirmation (vehicle name or word), longer hold (1.5 s), reason logged; kill can also use a configured *physical* key/button combo (two-key chord) for speed in emergencies |
+| **B – Flight control (single action)** | **every mode change** (any mode, incl. Auto/Guided/Acro, VTOL Q-modes), **RTL**, **Land**, **Arm**, **Takeoff**, guided go-to, change speed/alt, set current WP, camera trigger, **motor test** (bench; lockouts below) | One action — click, hotkey or hardware switch — sends the command **when the input event arrives**: no hold timer, no card, no animation gate. Visible pending → ACK → verified; a mode change that is not confirmed within its 2–3 s lifetime is dropped and the pilot alerted |
+| **C – Terminal (two-stage)** | **In-flight motor disarm**, **emergency motor termination** (force-disarm), **autopilot reboot**, parameter reset, firmware flash, mission upload while armed | Stage 1: slide (or press-and-hold). Stage 2: confirmation card with vehicle identity (name/sysid/colour/mode/armed state), exact action, consequence; explicit button (not default-focused); 5 s auto-cancel; Esc cancels. No typed text |
+| **D – Hazardous configuration** | Force-arm (bypass pre-arm checks), disable arming checks, disable failsafes, calibration overwrite | C + typed confirmation (vehicle name), reason logged |
 
-*Speed vs. safety:* RTL during a genuine emergency must be fast — so RTL stage 1 is a single prominent **press-and-hold (0.8 s) button**; stage 2 is an immediate ≤ 5 s “RTL — CONFIRM / CANCEL” card with default-armed **Confirm via Enter**. Total time-to-command ≤ 1.5 s, validated in usability tests.
+*Speed vs. safety* ([ADR-0011](adr/0011-operational-profile-and-command-classes.md), Flight Operations & Systems Safety Lead, 2026-10-11, superseding v1 of this table): for this profile (MIL-STD-882E, BVLOS maritime/remote, 1:1 professional crews) **delayed control is itself a Critical hazard**, so every flight control, above all mode changes as the primary arrest manoeuvre, is single action. Two-stage confirmation is reserved for actions that end the flight or cannot be undone. Emergency motor termination may also use a configured physical switch, routed through the same two-stage pipeline.
 
 ### 4.2 Command lifecycle (single pipeline for UI, joystick, scripts)
 ```mermaid
 stateDiagram-v2
   [*] --> Idle
-  Idle --> Armed: stage 1 (hold/slide)
+  Idle --> Sent: class A/B single action
+  Idle --> Armed: class C/D stage 1 (hold/slide)
   Armed --> Confirming: show identity card
   Confirming --> Idle: cancel / timeout 5s / vehicle changed
   Confirming --> Sent: confirm
@@ -114,10 +118,10 @@ stateDiagram-v2
   Timeout --> Idle
 ```
 * **Verification is state-based**, not ACK-based: “ARMED” is shown only when `HEARTBEAT.base_mode` confirms; otherwise show `ARM — NOT CONFIRMED`.
-* Interlocks are enforced in the **core** (not just the UI): `CommandPolicy` rejects class-C/D commands lacking a valid, recent, vehicle-bound confirmation token → scripts/plugins/gRPC clients cannot bypass; headless CI uses a test policy with explicit tokens.
-* Context lockouts: motor test only when disarmed and (copter) after prop-off attestation; param reset blocked while armed; mission upload while armed requires class-C and is blocked for non-Guided/Auto-compatible modes; firmware flash blocked if any link active to other vehicle.
+* Interlocks are enforced in the **core** (not just the UI): `CommandPolicy` sends class B at once and rejects class-C/D commands lacking a valid, recent, vehicle-bound confirmation token → scripts/plugins/gRPC clients cannot bypass; headless CI uses a test policy with explicit tokens.
+* Context lockouts: motor test only when known disarmed and after prop-off attestation (all vehicle types); param reset and autopilot reboot blocked while armed; mission upload while armed requires class-C and is blocked for non-Guided/Auto-compatible modes; firmware flash blocked if any link active to other vehicle.
 * **Audit log:** append-only (hash-chained) record of every command, confirmation, parameter write, and outcome with time, user profile, vehicle, link — exportable and included in flight reports.
-* **Joystick safety:** deadman button, neutral-on-start check, zero-stick on disconnect, controller-active indicator; joystick can never trigger class C/D without the same two-stage UI.
+* **Joystick safety:** deadman button, neutral-on-start check, zero-stick on disconnect, controller-active indicator; joystick/hardware switches fire class B (mode, RTL, Land) as single actions through the same pipeline and can never trigger class C/D without the same two-stage UI.
 
 ### 4.3 Degraded communications — explicit UI states
 | State | Definition (defaults) | UI | Behaviour |
@@ -128,7 +132,7 @@ stateDiagram-v2
 | **LOST** | No HEARTBEAT > 5 s | **Red** `LINK LOST` + audio + last-known position marker with age; instruments flagged invalid (X); map shows predicted position cone | Commands **still sent** (all links, retransmitted, bounded lifetime); what the vehicle will do (from `FS_GCS_*`) displayed; reconnect assistance |
 | **REPLAY** | Source is log | Blue/cyan `REPLAY` watermark | Command path hard-disabled |
 | **SIM** | SITL flag in vehicle/SYSID or user-set | `SIM` badge | Same code path, but clearly labelled |
-**Link state never blocks, delays or drops a confirmed command** ([ADR-0009](adr/0009-link-state-never-blocks-commands.md), product-owner decision 2026-10-11): heartbeat loss is not proof the uplink is down, and locking the operator out of recovery is the greater hazard. Link state informs (card, ribbon, failsafe preview) and adapts delivery (retransmit on every link until `COMMAND_ACK` or verified state); every command has a bounded lifetime (default 30 s RTL/Land, 10 s others), is superseded by a newer conflicting command, and is reported `SENT — NOT CONFIRMED` until verified or `EXPIRED`. Only REPLAY has no command path (no vehicle).
+**Link state never blocks, delays or drops a confirmed command** ([ADR-0009](adr/0009-link-state-never-blocks-commands.md), product-owner decision 2026-10-11): heartbeat loss is not proof the uplink is down, and locking the operator out of recovery is the greater hazard. Link state informs (card, ribbon, failsafe preview) and adapts delivery (retransmit on every link until `COMMAND_ACK` or verified state); every command has a bounded lifetime (default 30 s RTL/Land, 2–3 s mode change, 10 s others; ADR-0011), is superseded by a newer conflicting command, and is reported `SENT — NOT CONFIRMED` until verified or `EXPIRED`. Only REPLAY has no command path (no vehicle).
 
 Thresholds are user-configurable within safe bounds and stored per link profile; transitions are logged and announced. A **watchdog** on the UI frame loop and on the core’s ingest loop raises `GCS SOFTWARE FAULT` banner if either stalls > 500 ms (UI) / > 2 s (ingest).
 

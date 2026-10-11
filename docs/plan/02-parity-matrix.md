@@ -36,7 +36,7 @@ Legend — Phase: P1 HUD/map · P2 planning · P3 config/calibration · P4 analy
 | FD-007 | Status tab (all values) | all | Raw list | Searchable grid + pin to dashboard | 1 |
 | FD-008 | Live graphs ("tuning" plot, up to N series) | any | Laggy | GPU plot with LTTB ([05](05-telemetry-log-analytics.md)) | 1 |
 | FD-009 | Audio announcements (TTS) | events | Windows SAPI only | `AVSpeechSynthesizer` (mac), SAPI/OneCore (Win), speech-dispatcher (Linux); rule editor | 1 |
-| FD-010 | Arm / Disarm | `MAV_CMD_COMPONENT_ARM_DISARM`(400) | One click; no precheck | Two-stage with pre-arm checklist from `STATUSTEXT` / `SYS_STATUS` sensors | 1 |
+| FD-010 | Arm / Disarm | `MAV_CMD_COMPONENT_ARM_DISARM`(400) | One click; no precheck | Arm: single action with pre-arm checklist from `STATUSTEXT` / `SYS_STATUS` sensors beside the control; in-flight disarm two-stage (ADR-0011) | 1 |
 | FD-011 | Emergency motor kill | `MAV_CMD_COMPONENT_ARM_DISARM` param2 = 21196 (force) | Easy mis-click | Hold-to-confirm + typed vehicle ID, physical-key option | 1 |
 | FD-012 | Mode change | `MAV_CMD_DO_SET_MODE`(176) / `SET_MODE`(11) | Dropdown, no feedback | Mode ladder, confirm for hazardous modes, ACK + HEARTBEAT verification | 1 |
 | FD-013 | RTL / Land / Loiter / Auto start / Takeoff / Set WP / Change speed / Change alt | `DO_SET_MODE`, `NAV_TAKEOFF`(22), `MISSION_SET_CURRENT`(41), `DO_CHANGE_SPEED`(178), `DO_REPOSITION`(192) | Scattered | Context-sensitive Action bar per vehicle + mode | 1 |
@@ -86,7 +86,7 @@ Legend — Phase: P1 HUD/map · P2 planning · P3 config/calibration · P4 analy
 | IS-006 | Flight modes assignment (6 positions / channel) | `FLTMODE_CH`, `FLTMODE1-6` | Raw numbers | Live switch position indicator and mode names per vehicle | 3 |
 | IS-007 | Failsafe matrix (RC/throttle, battery low/critical, GCS link, EKF, fence, terrain, ADS-B, crash/vibration) | params `FS_*`, `BATT_FS_*`, `FENCE_*`, `FS_EKF_*`, `TERRAIN_*` | Spread across tabs; no consolidated view | **Single matrix**: trigger × action grid, simulated trigger preview, "what happens when…" narrative | 3 |
 | IS-008 | Servo output / function mapping | `SERVOn_FUNCTION`, `SERVO_OUTPUT_RAW`(36) | Opaque | Output rail diagram | 3 |
-| IS-009 | Motor test (all/individual, throttle %, duration), ESC calibration | `MAV_CMD_DO_MOTOR_TEST`(209), `DO_SET_MOTOR_*` | Dangerous | Prop-off interlock, two-stage confirm, order/direction verification wizard | 3 |
+| IS-009 | Motor test (all/individual, throttle %, duration), ESC calibration | `MAV_CMD_DO_MOTOR_TEST`(209), `DO_SET_MOTOR_*` | Dangerous | Prop-off attestation (all vehicle types) and disarmed lockout in the core, order/direction verification wizard (ADR-0011: single action once attested) | 3 |
 | IS-010 | Battery monitor setup & calibration (voltage/current multipliers, capacity) | `BATT_*` params, `BATTERY_STATUS` | Manual math | Guided measure-and-compute | 3 |
 | IS-011 | Rangefinder / optical flow / airspeed / compass priority / GPS config (incl. RTK/dual) | `DISTANCE_SENSOR`, `OPTICAL_FLOW`(100), `GPS2_RAW`(124), `GPS_RTK`(127) | Scattered | Sensor health board with live values | 3 |
 | IS-012 | RTK/NTRIP GPS correction injection | `GPS_RTCM_DATA`(233) fragmented, `GPS_INJECT_DATA`(123) legacy; NTRIP 1.0/2.0 TCP | Windows-only form, no reconnect | Robust NTRIP client: caster browse, mountpoint filter, auto-reconnect, GGA feedback, fix status | 4 |

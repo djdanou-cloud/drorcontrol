@@ -73,12 +73,13 @@ Typography: Urbane (headlines/UI; Inter fallback), **Space Grotesk Bold ALL CAPS
 
 Command classes and the lifecycle are defined in `docs/plan/08-safety-vv.md` §4; the core enforces them (`CommandPolicy`) — the UI cannot be the only guard.
 
-- **Zero Accidental Triggers:** Class C/D commands must **never** be bare single-click buttons or single-key shortcuts.
-  - **Arm:** slide-to-arm (stage 1) → confirmation card (stage 2) showing vehicle identity (name / sysid / color), mode, armed state and pre-arm summary; explicit button not default-focused; 5 s auto-cancel; Esc cancels.
-  - **Disarm in flight, Land, mode change to Auto/Guided/Acro, mission upload while armed, motor test, critical parameter write/reset, firmware flash, autopilot reboot:** Class C two-stage (press-and-hold ≈ 0.8 s or slide, then confirmation card).
-  - **RTL (emergency path):** stage 1 is a prominent **press-and-hold (0.8 s)** button; stage 2 is an immediate ≤ 5 s "RTL — CONFIRM / CANCEL" card. Total time-to-command ≤ 1.5 s (validated in usability tests).
-  - **Emergency motor kill / force-disarm, disabling arming checks or failsafes, calibration overwrite:** Class D — hold **1.5 s** plus typed confirmation (vehicle name or word); reason logged. A configured physical key chord may serve as the fast path.
-  - **Manual override / joystick:** deadman button, neutral-on-start check, zero-stick on disconnect, visible controller-active indicator; can never trigger Class C/D without the same two-stage UI.
+- **Operational profile (ADR-0011):** delayed control is a Critical hazard, so flight controls are **single action** and two-stage confirmation is reserved for terminal actions.
+  - **Class B — single action, zero latency:** **every mode change** (any mode, incl. Auto/Guided/Acro and VTOL Q-modes), **RTL**, **Land**, **Arm**, **Takeoff**, guided go-to, **motor test** (after the props-off attestation). One click, one hotkey or one hardware switch sends the command **on the input event**: no press-and-hold, no confirmation card, no slide, no animation or debounce delay before dispatch. Pending/ACK/verified feedback appears after sending, never before.
+  - **Mode-change expiry:** a mode change not verified within its 2–3 s lifetime is dropped by the core (`NOT CONFIRMED — EXPIRED`); the UI raises a pilot alert (visual + audio) and offers one-action re-issue.
+  - **Class C — two-stage (slide):** **in-flight motor disarm**, **emergency motor termination** (force-disarm), **autopilot reboot** (blocked while armed); also parameter reset, mission upload while armed, firmware flash (pending safety-lead review). Stage 1 slide (or press-and-hold), stage 2 confirmation card with vehicle identity (name / sysid / color), mode, armed state, consequence; explicit button not default-focused; 5 s auto-cancel; Esc cancels; **no typed text**. A configured physical switch for emergency termination goes through the same two-stage pipeline.
+  - **Class D — typed:** force-arm, disabling arming checks or failsafes, calibration overwrite: Class C plus typed vehicle name; reason logged.
+  - **Accidental-trigger controls for single actions:** persistent vehicle identity + current-mode banner; flight hotkeys active only while the flight view has keyboard focus and only for SOP-configured bindings; no Class C/D action is ever a single key or click.
+  - **Manual override / joystick:** deadman button, neutral-on-start check, zero-stick on disconnect, visible controller-active indicator; hardware mode/RTL/Land switches are single action; can never trigger Class C/D without the same two-stage UI.
 - **Visible command lifecycle:** `PENDING → ACK → VERIFIED` (state-based verification, e.g. "ARMED" only once `HEARTBEAT` confirms; otherwise `ARM — NOT CONFIRMED`).
 - **Pre-Arm Check Visualizer:**
   - Group pre-arm failures into clear, expandable badges (e.g., `Compass Inconsistent`, `GPS HDOP High`, `RC Not Calibrated`) placed beside the ARM control, each with a one-click deep link to the relevant setup drawer and help entry.
@@ -87,7 +88,7 @@ Command classes and the lifecycle are defined in `docs/plan/08-safety-vv.md` §4
     - *Manual / Stabilized:* Loiter, AltHold, Stabilize, PosHold.
     - *Autonomous / Guided:* Auto (Mission), Guided, Follow.
     - *Emergency:* RTL, SmartRTL, Land.
-  - Mode changes are verified against `HEARTBEAT`; hazardous modes need confirmation.
+  - Mode changes are single action on every component (mode list, hotkey, hardware switch, joystick) and verified against `HEARTBEAT`; badges are visual classification only, never a confirmation gate.
 - **Degraded comms:** explicit CONNECTED / DEGRADED / STALE / LOST / REPLAY / SIM states with banner and instrument invalidation (plan 08 §4.3). **Link state never blocks a command** (ADR-0009): show the state, heartbeat age and the vehicle's own failsafe action in the confirmation card, add no extra step, and show `SENT — NOT CONFIRMED` (retries, time left) until telemetry verifies or the command expires. Only REPLAY has no command path (no vehicle).
 
 ---

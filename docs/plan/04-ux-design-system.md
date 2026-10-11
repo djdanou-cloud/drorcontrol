@@ -115,7 +115,7 @@ Principle: **show the user what the autopilot sees**.
 * **Download UX:** progress with ETA, resume of missing indices, local cache keyed by (vehicle id, firmware git hash) so reconnect shows params instantly.
 
 ## 8. Interaction safety patterns (summary; full spec in [08](08-safety-vv.md))
-Slide-to-arm, hold-to-kill, two-stage confirm with vehicle identity echo, 5-second auto-cancel, consequences text, no hazardous action on single keystroke, visible *COMMAND PENDING → ACK → VERIFIED* states.
+Single-action flight controls (every mode change, RTL, Land, Arm: one click, hotkey or hardware switch, sent when the input event arrives); slide-to-confirm two-stage only for terminal actions (in-flight disarm, emergency motor termination, autopilot reboot) with vehicle identity echo, 5-second auto-cancel and consequences text; visible *COMMAND PENDING → ACK → VERIFIED* states; an unconfirmed mode change expires in 2–3 s and alerts the pilot ([ADR-0011](adr/0011-operational-profile-and-command-classes.md)).
 
 ## 9. Component library & UX process
 * **Storybook-equivalent** (`QtQuick` gallery app) renders every component in all 4 themes × 3 DPI × LTR/RTL; screenshots are golden-image tested.

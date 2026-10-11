@@ -139,6 +139,10 @@ pub const LINK_STALE_RANGE: (Duration, Duration) =
     (Duration::from_millis(200), Duration::from_secs(5));
 /// Upper bound for [`CoreConfig::link_lost`]; it must also exceed `link_stale`.
 pub const LINK_LOST_MAX: Duration = Duration::from_secs(30);
+/// Allowed mode-change lifetime (ADR-0011: strict 2–3 s; an unanswered mode change is dropped
+/// and the operator alerted, never left to execute late).
+pub const MODE_LIFETIME_RANGE: (Duration, Duration) =
+    (Duration::from_secs(2), Duration::from_secs(3));
 /// Frames waiting for the `.tlog` writer before [`CoreEvent::Recorder`] warns (~15 MB).
 pub const RECORDER_BACKLOG_WARN: usize = 50_000;
 
@@ -187,6 +191,13 @@ impl CoreConfig {
             return Err(format!(
                 "link_lost {:?} must be > link_stale and <= {LINK_LOST_MAX:?}",
                 self.link_lost
+            ));
+        }
+        let (lo, hi) = MODE_LIFETIME_RANGE;
+        if !(lo..=hi).contains(&self.policy.lifetime_mode) {
+            return Err(format!(
+                "policy.lifetime_mode {:?} outside {lo:?}..={hi:?} (ADR-0011)",
+                self.policy.lifetime_mode
             ));
         }
         if let Some((id, hz)) = self
