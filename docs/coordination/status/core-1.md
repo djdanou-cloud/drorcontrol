@@ -2,9 +2,9 @@
 agent: core-1
 role: workstream-agent
 workstream: WS-CORE
-state: active
+state: idle
 task: T0-16
-updated: 2026-10-11T07:51:21Z
+updated: 2026-10-11T09:23:22Z
 ---
 
 ## Current focus
@@ -26,3 +26,5 @@ updated: 2026-10-11T07:51:21Z
 - 2026-10-11T07:33:52Z — audit check done
 
 - 2026-10-11T07:51:21Z — CommandPolicy (plan 08 4, ADR-0009), test-driven
+
+- 2026-10-11T09:23:22Z — serial reopen done

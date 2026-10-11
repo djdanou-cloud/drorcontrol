@@ -7,6 +7,7 @@ macOS runners (arm64 + Intel) but those machines have no serial devices.
 ## Pass criteria (plan 03 §2, §9 S0-2)
 * Device enumerates as `/dev/cu.*` with USB identity; no third-party driver or KEXT installed.
 * Hotplug: `+` within 1 s of plug-in, `-` within 1 s of unplug; replug yields the same `device_key`.
+* Replug during a session: the open link reopens the same path by itself and telemetry resumes within 3 s (link-serial reopen, tested on Linux pseudo-terminals).
 * `--probe` finds the HEARTBEAT (autopilots) at the configured rate.
 * Full parameter download succeeds.
 * 30-minute soak at the highest supported rate: **0 CRC errors, 0 lost frames**.
@@ -18,6 +19,8 @@ $B ports                                   # 1. enumeration + board hint
 $B ports --watch 60                        # 2. unplug / replug twice while this runs
 $B ports --probe /dev/cu.usbmodemXXXX      # 3. autopilots only
 $B params --connect serial:/dev/cu.usbmodemXXXX:115200 --out /tmp/p.param   # 4.
+# 4b. Replug during a session: the link must come back by itself within ~3 s.
+$B telemetry --connect serial:/dev/cu.usbmodemXXXX:115200   # unplug 5 s, replug; telemetry resumes
 # 5. Soak: USB-UART adapters with a TX-RX jumper (loopback), or two adapters cross-wired.
 $B soak --tx /dev/cu.usbserial-XXXX --baud 921600 --seconds 1800
 $B soak --tx /dev/cu.usbserial-XXXX --baud 2000000 --seconds 1800   # if the chip supports it
