@@ -37,9 +37,14 @@ fn open(path: &str, baud: u32) -> io::Result<Box<dyn SerialPort>> {
 ///
 /// The first open must succeed (a wrong path is an error). After that the link is kept:
 /// when the device goes away (USB unplugged, autopilot reset) the link reports
-/// `Status { up: false }`, reopens `path` with back-off, and reports `Status { up: true }`
-/// when it is back. Frames queued while the port was closed are discarded, never sent late
-/// (the command pipeline retransmits within each command's lifetime, ADR-0009).
+/// `Status { up: false }`, reopens it with back-off, and reports `Status { up: true }` when
+/// it is back. Frames queued while the port was closed are discarded, never sent late (the
+/// command pipeline retransmits within each command's lifetime, ADR-0009).
+///
+/// A USB device can come back under another name (another USB port, or macOS renumbering).
+/// If `path` does not return, the link follows the device by its USB identity — vendor,
+/// product and serial number — but only when exactly one port carries it (see
+/// [`resolve_path`]).
 pub async fn spawn_serial(
     id: LinkId,
     path: &str,
@@ -47,19 +52,62 @@ pub async fn spawn_serial(
     events: mpsc::Sender<LinkEvent>,
 ) -> io::Result<LinkHandle> {
     let port = open(path, baud)?;
-    let reopen_path = path.to_string();
+    let original = path.to_string();
+    // Remember who the device is while it is present.
+    let key = discovery::list_ports()
+        .ok()
+        .and_then(|ports| ports.into_iter().find(|p| p.path == original))
+        .and_then(|p| stable_key(&p));
     Ok(spawn_reopening(
         id,
         format!("serial {path} @ {baud}"),
         port,
-        Box::new(move || open(&reopen_path, baud)),
+        Box::new(move || {
+            let target = match discovery::list_ports() {
+                Ok(ports) => resolve_path(&original, key.as_deref(), &ports)
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "device not present"))?,
+                // Listing failed: try the original path.
+                Err(_) => original.clone(),
+            };
+            open(&target, baud).map(|p| (p, target))
+        }),
         events,
     )
     .await)
 }
 
-/// Opens the device again after a failure (the same path, or a device found by hotplug).
-pub type Opener = Box<dyn FnMut() -> io::Result<Box<dyn SerialPort>> + Send>;
+/// Identity that survives re-enumeration: only `vid:pid:serial` (devices with a serial
+/// number). Without one, two identical adapters cannot be told apart, so there is none.
+fn stable_key(port: &discovery::PortInfo) -> Option<String> {
+    port.usb.as_ref()?.serial.as_ref()?;
+    Some(port.device_key())
+}
+
+/// Where to reopen a device last seen at `original` with identity `key`, given the ports
+/// present now. The original path wins if it is back. Otherwise the device is followed by
+/// `key`, but only if exactly one present port carries it: cheap adapters sometimes share a
+/// serial number, and attaching the vehicle link to the wrong radio is worse than waiting.
+pub fn resolve_path(
+    original: &str,
+    key: Option<&str>,
+    ports: &[discovery::PortInfo],
+) -> Option<String> {
+    if ports.iter().any(|p| p.path == original) {
+        return Some(original.to_string());
+    }
+    let key = key?;
+    let mut matches = ports
+        .iter()
+        .filter(|p| stable_key(p).as_deref() == Some(key));
+    match (matches.next(), matches.next()) {
+        (Some(p), None) => Some(p.path.clone()),
+        _ => None,
+    }
+}
+
+/// Opens the device again after a failure: the port and a description of what was opened
+/// (its path), shown in the link status.
+pub type Opener = Box<dyn FnMut() -> io::Result<(Box<dyn SerialPort>, String)> + Send>;
 
 /// Start a link over `first` that calls `reopen` (with back-off) whenever the port fails,
 /// as [`spawn_serial`] does with the port's path.
@@ -156,13 +204,13 @@ async fn supervise(
         };
         reopen = Some(opener);
         match result {
-            Ok(p) => {
+            Ok((p, opened)) => {
                 while outbound.try_recv().is_ok() {}
                 let _ = events
                     .send(LinkEvent::Status {
                         link: id,
                         up: true,
-                        detail: format!("reopened {name}"),
+                        detail: format!("reopened {name}: {opened}"),
                     })
                     .await;
                 last_detail.clear();
@@ -358,7 +406,7 @@ mod tests {
         let (plug, plugged) = std::sync::mpsc::channel::<TTYPort>();
         let plugged = std::sync::Mutex::new(plugged);
         let opener: Opener = Box::new(move || match plugged.lock().unwrap().try_recv() {
-            Ok(p) => Ok(Box::new(p) as Box<dyn SerialPort>),
+            Ok(p) => Ok((Box::new(p) as Box<dyn SerialPort>, "pty".to_string())),
             Err(_) => Err(io::Error::new(io::ErrorKind::NotFound, "no such device")),
         });
         let (mut far, near) = device();
@@ -417,5 +465,51 @@ mod tests {
                 break;
             }
         }
+    }
+
+    fn port(path: &str, serial: Option<&str>) -> discovery::PortInfo {
+        discovery::PortInfo {
+            path: path.into(),
+            usb: Some(discovery::UsbInfo {
+                vid: 0x0403,
+                pid: 0x6015,
+                serial: serial.map(Into::into),
+                manufacturer: None,
+                product: None,
+            }),
+            hint: None,
+        }
+    }
+
+    #[test]
+    fn follows_a_device_that_moved_only_when_unambiguous() {
+        let key = "0403:6015:RFD1";
+        let radio_back = [port("/dev/cu.usbserial-1", Some("RFD1"))];
+        let radio_moved = [port("/dev/cu.usbserial-7", Some("RFD1"))];
+        // The original path is back: use it.
+        assert_eq!(
+            resolve_path("/dev/cu.usbserial-1", Some(key), &radio_back).as_deref(),
+            Some("/dev/cu.usbserial-1")
+        );
+        // Same radio under another name: follow it.
+        assert_eq!(
+            resolve_path("/dev/cu.usbserial-1", Some(key), &radio_moved).as_deref(),
+            Some("/dev/cu.usbserial-7")
+        );
+        // Not present yet: wait.
+        assert_eq!(resolve_path("/dev/cu.usbserial-1", Some(key), &[]), None);
+        // A different radio appeared: never take it.
+        let other = [port("/dev/cu.usbserial-7", Some("RFD2"))];
+        assert_eq!(resolve_path("/dev/cu.usbserial-1", Some(key), &other), None);
+        // Two ports with the same identity (adapters sharing a serial): refuse to guess.
+        let twins = [
+            port("/dev/cu.usbserial-7", Some("RFD1")),
+            port("/dev/cu.usbserial-8", Some("RFD1")),
+        ];
+        assert_eq!(resolve_path("/dev/cu.usbserial-1", Some(key), &twins), None);
+        // No serial number when first seen: no identity, only the original path.
+        assert_eq!(stable_key(&port("/dev/cu.usbserial-1", None)), None);
+        let anon = [port("/dev/cu.usbserial-7", None)];
+        assert_eq!(resolve_path("/dev/cu.usbserial-1", None, &anon), None);
     }
 }

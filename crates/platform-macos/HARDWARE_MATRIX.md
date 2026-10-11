@@ -21,6 +21,8 @@ $B ports --probe /dev/cu.usbmodemXXXX      # 3. autopilots only
 $B params --connect serial:/dev/cu.usbmodemXXXX:115200 --out /tmp/p.param   # 4.
 # 4b. Replug during a session: the link must come back by itself within ~3 s.
 $B telemetry --connect serial:/dev/cu.usbmodemXXXX:115200   # unplug 5 s, replug; telemetry resumes
+# 4c. Same, but replug into a different USB port: a device with a USB serial number is
+#     followed to its new /dev/cu.* name (link status says so); one without is not.
 # 5. Soak: USB-UART adapters with a TX-RX jumper (loopback), or two adapters cross-wired.
 $B soak --tx /dev/cu.usbserial-XXXX --baud 921600 --seconds 1800
 $B soak --tx /dev/cu.usbserial-XXXX --baud 2000000 --seconds 1800   # if the chip supports it
