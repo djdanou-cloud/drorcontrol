@@ -443,6 +443,11 @@ enum LogCmd {
         /// Path to the .bin log.
         path: std::path::PathBuf,
     },
+    /// Autopilot performance: loop rate and overruns, processor load, memory, internal errors.
+    Perf {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+    },
     /// ESC telemetry while armed: RPM, error rate, temperature and current per ESC.
     Esc {
         /// Path to the .bin log.
@@ -1098,6 +1103,31 @@ fn print_log_notch(
             .map(|(k, v)| format!("{k} {}", *v as f32))
             .collect();
         println!("currently: {}", cur.join(", "));
+    }
+    Ok(())
+}
+
+fn print_log_perf(log: &logs::Log) -> Result<(), String> {
+    let p = logs::perf::perf(log).ok_or("no PM records")?;
+    println!(
+        "main loop {:.0} Hz; long loops (over 1.2 x the period) {:.2} %; longest {:.1} ms at {:.1} s ({} PM records; the boot record left out)",
+        p.loop_rate_hz,
+        p.long_loop_pct,
+        p.max_loop_ms,
+        p.max_loop_at_us as f64 / 1e6,
+        p.records
+    );
+    println!(
+        "processor load highest {:.1} %; least free memory {:.0} bytes",
+        p.max_load_pct, p.min_free_mem
+    );
+    if p.internal_errors > 0 {
+        println!(
+            "INTERNAL ERRORS: {} (mask {:#x}; AP_InternalError::error_t)",
+            p.internal_errors, p.internal_error_mask
+        );
+    } else {
+        println!("internal errors: none");
     }
     Ok(())
 }
@@ -2086,6 +2116,7 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                     Box::new(|| print_log_compass(&log, &0)),
                 ),
                 ("ESC telemetry", Box::new(|| print_log_esc(&log))),
+                ("Autopilot performance", Box::new(|| print_log_perf(&log))),
                 ("Wind", Box::new(|| print_log_wind(&log))),
                 ("GPS", Box::new(|| print_log_gps(&log))),
                 ("Altitude sources", Box::new(|| print_log_altitude(&log))),
@@ -2145,6 +2176,7 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
         LogCmd::Wind { path } => print_log_wind(&open(path)?)?,
         LogCmd::Altitude { path } => print_log_altitude(&open(path)?)?,
         LogCmd::Esc { path } => print_log_esc(&open(path)?)?,
+        LogCmd::Perf { path } => print_log_perf(&open(path)?)?,
         LogCmd::Gps { path } => print_log_gps(&open(path)?)?,
         LogCmd::Compass { path, instance } => print_log_compass(&open(path)?, instance)?,
         LogCmd::Battery { path, instance } => print_log_battery(&open(path)?, instance)?,

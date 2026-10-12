@@ -23,6 +23,7 @@ pub mod health;
 pub mod motors;
 pub mod notch;
 mod params;
+pub mod perf;
 pub mod rc;
 pub mod sensors;
 pub mod spectrum;
