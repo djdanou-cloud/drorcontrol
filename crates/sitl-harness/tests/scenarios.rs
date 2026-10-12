@@ -543,3 +543,160 @@ async fn mission_upload_is_verified_by_read_back_through_loss() {
     assert!(report.verified(), "{:?}", report.mismatches);
     assert_eq!(report.on_vehicle.len(), mission.len());
 }
+
+/// Wait until `pred` holds, polling every 100 ms; panics with `what` after `within`.
+async fn until(within: Duration, what: &str, mut pred: impl FnMut() -> bool) {
+    tokio::time::timeout(within, async {
+        while !pred() {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("{what} not within {within:?}"));
+}
+
+/// Submit a single-action (class B) command and wait for its final state.
+async fn command(core: &Core, cmd: dc_core::Command) -> dc_core::CommandStatus {
+    let id = core
+        .submit_command(1, cmd, dc_core::Approval::None)
+        .await
+        .expect("class B: no confirmation");
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let s = core.command_status(id).unwrap();
+            if s.state.is_final() {
+                return s;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("final within its lifetime")
+}
+
+/// Plan 08 §2 "Flight" and "Failsafe & lost link": a real flight through the command pipeline.
+/// GUIDED, arm and take off are single actions (ADR-0011) verified by the vehicle's state; a
+/// radio blackout makes the GCS show LOST while the vehicle's own GCS failsafe takes it home
+/// (RTL); when the link returns the GCS shows CONNECTED and the vehicle in RTL; it lands and
+/// disarms by itself.
+#[tokio::test(flavor = "multi_thread")]
+async fn flight_with_gcs_failsafe_on_link_loss() {
+    use dc_core::{Command, CommandState, PositionTrust};
+    use mavlink_codec::Message;
+    use mavlink_codec::messages::ParamSet;
+    let Some(cfg) = SitlConfig::copter_or_skip() else {
+        return;
+    };
+    let sitl = Sitl::start(&cfg).unwrap();
+    let chaos = ChaosProxy::start(sitl.addr(), ChaosConfig::default())
+        .await
+        .unwrap();
+    let core = core_on(chaos.addr()).await;
+    assert_eq!(
+        core.wait_for_vehicle(Duration::from_secs(60)).await,
+        Some(1)
+    );
+    until(Duration::from_secs(90), "position good (EKF)", || {
+        core.nav_health(1).trust == PositionTrust::Good
+    })
+    .await;
+    until(Duration::from_secs(20), "firmware banner", || {
+        core.fleet()
+            .get(1)
+            .and_then(|v| v.confirmed_firmware())
+            .is_some()
+    })
+    .await;
+
+    // Pre-flight setup an operator would do: GCS failsafe on (RTL), 5 s timeout (default).
+    // A raw PARAM_SET as test configuration: the product's guarded write path refuses
+    // failsafe parameters by design (T0-18).
+    let mut param_id = [0u8; 16];
+    param_id[..13].copy_from_slice(b"FS_GCS_ENABLE");
+    core.send(&Message::ParamSet(ParamSet {
+        target_system: 1,
+        target_component: 1,
+        param_id,
+        param_value: 1.0,
+        param_type: 2,
+    }))
+    .await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let guided = dc_core::Firmware::Copter.mode_number("GUIDED").unwrap();
+    let rtl = dc_core::Firmware::Copter.mode_number("RTL").unwrap();
+    let s = command(
+        &core,
+        Command::SetMode {
+            custom_mode: guided,
+        },
+    )
+    .await;
+    assert_eq!(s.state, CommandState::Verified, "{}", s.summary());
+
+    // Pre-arm checks can take a few seconds after the EKF converges; arming is retried as an
+    // operator would, each attempt a single action.
+    let t0 = Instant::now();
+    loop {
+        let s = command(&core, Command::Arm).await;
+        if s.state == CommandState::Verified {
+            break;
+        }
+        assert!(
+            t0.elapsed() < Duration::from_secs(60),
+            "never armed: {}",
+            s.summary()
+        );
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+    let s = command(&core, Command::Takeoff { alt_m: 15.0 }).await;
+    assert!(
+        matches!(s.state, CommandState::Verified | CommandState::Accepted),
+        "{}",
+        s.summary()
+    );
+    let alt = || {
+        core.fleet()
+            .get(1)
+            .and_then(|v| v.position.clone())
+            .map_or(0.0, |p| p.value.alt_rel_m)
+    };
+    until(Duration::from_secs(60), "climb to 12 m", || alt() > 12.0).await;
+    eprintln!("airborne at {:.1} m", alt());
+
+    // Radio blackout, both ways, longer than FS_GCS_TIMEOUT.
+    chaos.blackout(true);
+    wait_link(&core, VehicleLink::Lost, Duration::from_secs(10)).await;
+    tokio::time::sleep(Duration::from_secs(8)).await;
+    chaos.blackout(false);
+    wait_link(&core, VehicleLink::Connected, Duration::from_secs(10)).await;
+    until(
+        Duration::from_secs(5),
+        "mode RTL shown after the link returns",
+        || core.fleet().get(1).and_then(|v| v.mode_name()) == Some("RTL"),
+    )
+    .await;
+    eprintln!("link back: vehicle in RTL at {:.1} m", alt());
+    assert_eq!(
+        core.fleet()
+            .get(1)
+            .unwrap()
+            .heartbeat
+            .as_ref()
+            .unwrap()
+            .value
+            .custom_mode,
+        rtl
+    );
+
+    // RTL lands at home and disarms by itself.
+    until(Duration::from_secs(120), "landed and disarmed", || {
+        core.facts(1).armed == Some(false)
+    })
+    .await;
+    assert_eq!(
+        core.facts(1).landed_state.map(|(s, _)| s),
+        Some(1),
+        "ON_GROUND"
+    );
+}

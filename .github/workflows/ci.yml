@@ -146,7 +146,7 @@ jobs:
           cp ".sitl/ardupilot-$SITL_TAG/build/sitl/bin/arducopter" .sitl-dist/
           cp ".sitl/ardupilot-$SITL_TAG/Tools/autotest/default_params/copter.parm" .sitl-dist/
 
-      - name: Scenarios (connect, parameters, 30 % loss, fade, reconnect)
+      - name: Scenarios (all; listed in docs/dev/sitl-harness.md)
         env:
           DC_SITL_REQUIRED: "1"
           DC_SITL_BIN: ${{ github.workspace }}/.sitl-dist/arducopter

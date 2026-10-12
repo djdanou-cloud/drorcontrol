@@ -6,7 +6,7 @@
 |---|---|
 | `Sitl` | Starts the pinned `arducopter` (Copter-4.7.1) headless in a temp dir with a wiped EEPROM; reads the TCP port from SITL's own log; kills it on drop |
 | `chaos::ChaosProxy` | Frame-aware TCP proxy: drop, duplicate, corrupt, delay and jitter (reorders) per frame from a logged seed; `blackout` (radio fade) and `cut` (connection drop) |
-| `tests/scenarios.rs` | 8 scenarios: connect + telemetry (+ landed state ON_GROUND); full parameter download; download through 30 % frame loss both ways (must complete); fade → STALE → LOST → CONNECTED; reconnect after a cut; firmware banner + named single-action mode change verified (ADR-0011); GPS failure → position UNTRUSTED warning (H16); mission upload through 20 % loss verified by read-back (H4) |
+| `tests/scenarios.rs` | 10 scenarios (incl. core-2's parameter write/rollback): connect + telemetry (+ landed state ON_GROUND); full parameter download; download through 30 % frame loss both ways (must complete); fade → STALE → LOST → CONNECTED; reconnect after a cut; firmware banner + named single-action mode change verified (ADR-0011); GPS failure → position UNTRUSTED warning (H16); mission upload through 20 % loss verified by read-back (H4); a real flight: GUIDED, arm and take off as single actions, a radio blackout during which the GCS shows LOST and the vehicle's own GCS failsafe flies RTL, then CONNECTED with the mode shown as RTL, landing and auto-disarm |
 
 ## Running
 
@@ -29,5 +29,7 @@ caches the built binary keyed on `scripts/build_sitl.sh` and the tag.
   reported); fixed in dc-core with a regression test.
 * The navigation scenario waits for the EKF to converge (~40 s) and fails the GPS with
   `SIM_GPS1_ENABLE=0` (`PARAM_SET`).
-* Not yet covered from plan 08 §2: flight, failsafe, calibration, logs and robustness
-  suites; mission fence/rally; other vehicles; the YAML scenario DSL; nightly/weekly runs.
+* The flight scenario sets `FS_GCS_ENABLE=1` with a raw `PARAM_SET` (test configuration;
+  the product's guarded write path refuses failsafe parameters by design) and takes ~90 s.
+* Not yet covered from plan 08 §2: AUTO mission flight, other failsafes (RC, battery, EKF,
+  fence), calibration, logs and robustness suites; mission fence/rally; other vehicles; the YAML scenario DSL; nightly/weekly runs.
