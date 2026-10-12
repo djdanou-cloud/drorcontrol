@@ -1165,6 +1165,9 @@ async fn auto_mission_flight_reports_progress_to_landing() {
         baro.max_abs_m < 3.0 && gps_alt.max_abs_m < 5.0,
         "{baro:?} {gps_alt:?}"
     );
+    let div = logs::gps::gps_vs_ekf(&log).expect("GPS and POS in flight");
+    eprintln!("gps vs ekf: {div:?}");
+    assert!(div.mean_m < 2.0 && div.max_m < 5.0, "{div:?}");
     let gq = logs::gps::quality(&log).expect("GPS while armed");
     eprintln!("gps: {gq:?}");
     assert!(

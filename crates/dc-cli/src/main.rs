@@ -1467,6 +1467,15 @@ fn print_log_gps(log: &logs::Log) -> Result<(), String> {
         .map(|(i, s)| format!("{} {:.1} %", logs::gps::STATUS_NAMES[i], s * 100.0))
         .collect();
     println!("fix types: {}", fixes.join(", "));
+    if let Some(d) = logs::gps::gps_vs_ekf(log) {
+        println!(
+            "GPS vs EKF position while flying: mean {:.1} m, largest {:.1} m at {:.1} s ({} samples)",
+            d.mean_m,
+            d.max_m,
+            d.max_at_us as f64 / 1e6,
+            d.samples
+        );
+    }
     println!("GPS glitches: {}", q.glitches.len());
     for (start, end) in &q.glitches {
         println!(

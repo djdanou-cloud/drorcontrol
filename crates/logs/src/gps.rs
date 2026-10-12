@@ -48,6 +48,77 @@ pub const STATUS_NAMES: [&str; 9] = [
     "PPP",
 ];
 
+/// How far the GPS position (first receiver) and the EKF position (`POS`) were apart while
+/// flying, horizontally.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Divergence {
+    /// Samples compared.
+    pub samples: usize,
+    /// Mean and largest distance, m, and when the largest was (µs since boot).
+    pub mean_m: f64,
+    /// See `mean_m`.
+    pub max_m: f64,
+    /// See `mean_m`.
+    pub max_at_us: u64,
+}
+
+/// GPS against EKF horizontal position while flying (each `GPS` sample against the latest
+/// `POS` at or before it, both with a 3D fix / non-zero position).
+pub fn gps_vs_ekf(log: &Log) -> Option<Divergence> {
+    let inst = Some(("I", 0.0));
+    let (glat, glon, gst) = (
+        log.column("GPS", "Lat", inst)?,
+        log.column("GPS", "Lng", inst)?,
+        log.column("GPS", "Status", inst)?,
+    );
+    let (plat, plon) = (
+        log.column("POS", "Lat", None)?,
+        log.column("POS", "Lng", None)?,
+    );
+    let (flying, _) = crate::flight::flying_periods(log);
+    let mut k = 0;
+    let (mut sum, mut n, mut max, mut max_at) = (0.0, 0usize, 0.0f64, 0u64);
+    for i in 0..glat.values.len() {
+        let t = glat.time_us[i];
+        if !in_periods(&flying, t) || gst.values.get(i).is_none_or(|s| *s < 3.0) {
+            continue;
+        }
+        while k + 1 < plat.time_us.len() && plat.time_us[k + 1] <= t {
+            k += 1;
+        }
+        if plat.time_us.get(k).is_none_or(|pt| *pt > t) {
+            continue;
+        }
+        let (a, b) = (
+            (glat.values[i], glon.values[i]),
+            (plat.values[k], plon.values[k]),
+        );
+        if a == (0.0, 0.0) || b == (0.0, 0.0) {
+            continue;
+        }
+        let d = metres(a, b);
+        sum += d;
+        n += 1;
+        if d > max {
+            (max, max_at) = (d, t);
+        }
+    }
+    (n > 0).then(|| Divergence {
+        samples: n,
+        mean_m: sum / n as f64,
+        max_m: max,
+        max_at_us: max_at,
+    })
+}
+
+fn metres(a: (f64, f64), b: (f64, f64)) -> f64 {
+    const R: f64 = 6_371_008.8;
+    let (la1, la2) = (a.0.to_radians(), b.0.to_radians());
+    let h = ((la2 - la1) / 2.0).sin().powi(2)
+        + la1.cos() * la2.cos() * ((b.1 - a.1).to_radians() / 2.0).sin().powi(2);
+    2.0 * R * h.sqrt().asin()
+}
+
 /// GPS quality while armed; `None` without `GPS` samples then.
 pub fn quality(log: &Log) -> Option<GpsQuality> {
     let inst = Some(("I", 0.0));
@@ -104,6 +175,27 @@ pub fn quality(log: &Log) -> Option<GpsQuality> {
 mod tests {
     use super::*;
     use crate::testlog::{LogBuilder, V::N};
+
+    #[test]
+    fn gps_and_ekf_positions_compared_while_flying() {
+        let mut b = LogBuilder::default();
+        b.format("ARM", "QBIBB", "TimeUS,ArmState,ArmChecks,Forced,Method")
+            .format("GPS", "QBBLL", "TimeUS,I,Status,Lat,Lng")
+            .format("POS", "QLL", "TimeUS,Lat,Lng");
+        b.rec("ARM", &[N(1e6), N(1.0), N(0.0), N(0.0), N(0.0)]);
+        b.rec("POS", &[N(2e6), N(-35.0), N(149.0)]);
+        // 0.0001 deg north is about 11.1 m; then the same point; then a 2D fix (ignored).
+        b.rec("GPS", &[N(2.1e6), N(0.0), N(3.0), N(-34.9999), N(149.0)]);
+        b.rec("GPS", &[N(2.2e6), N(0.0), N(3.0), N(-35.0), N(149.0)]);
+        b.rec("GPS", &[N(2.3e6), N(0.0), N(2.0), N(-34.99), N(149.0)]);
+        let d = gps_vs_ekf(&b.open()).unwrap();
+        assert_eq!(d.samples, 2);
+        assert!(
+            (d.max_m - 11.12).abs() < 0.05 && d.max_at_us == 2_100_000,
+            "{d:?}"
+        );
+        assert!((d.mean_m - 5.56).abs() < 0.05, "{d:?}");
+    }
 
     #[test]
     fn satellites_hdop_fix_and_glitches() {
