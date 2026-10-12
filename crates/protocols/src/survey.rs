@@ -20,6 +20,9 @@ pub struct SurveyConfig {
     pub angle_deg: f64,
     /// Altitude above home, m.
     pub alt_m: f32,
+    /// Photo distance along the lines, m: adds `DO_SET_CAM_TRIGG_DIST` (206) at the first
+    /// survey waypoint and switches it off (0) before RTL. `None`: no camera commands.
+    pub trigger_m: Option<f64>,
 }
 
 /// Why a survey cannot be made.
@@ -198,7 +201,9 @@ pub fn line_length_m(points: &[(f64, f64)]) -> f64 {
 }
 
 /// A complete mission for the survey: home placeholder (item 0, replaced by the vehicle),
-/// TAKEOFF to the survey altitude, the grid waypoints, RTL.
+/// TAKEOFF to the survey altitude, the grid waypoints, RTL. With `trigger_m`, the camera is
+/// triggered by distance from the first survey waypoint (ArduPilot 4.7.1 `AP_Camera`:
+/// param1 = metres, param3 = 1 takes one photo at once) and stopped (0 m) before RTL.
 pub fn mission(cfg: &SurveyConfig) -> Result<Vec<MissionItem>, SurveyError> {
     if cfg.alt_m.is_nan() || cfg.alt_m <= 0.0 {
         return Err(SurveyError::BadAltitude);
@@ -217,7 +222,21 @@ pub fn mission(cfg: &SurveyConfig) -> Result<Vec<MissionItem>, SurveyError> {
         item(16, 0, cfg.polygon[0], 0.0),
         item(22, 3, (0.0, 0.0), cfg.alt_m),
     ];
-    m.extend(points.into_iter().map(|p| item(16, 3, p, cfg.alt_m)));
+    let trigg = |metres: f64, now: f32| MissionItem {
+        params: [metres as f32, 0.0, now, 0.0],
+        ..item(206, 2, (0.0, 0.0), 0.0)
+    };
+    for (k, p) in points.into_iter().enumerate() {
+        m.push(item(16, 3, p, cfg.alt_m));
+        if k == 0
+            && let Some(d) = cfg.trigger_m
+        {
+            m.push(trigg(d, 1.0));
+        }
+    }
+    if cfg.trigger_m.is_some() {
+        m.push(trigg(0.0, 0.0));
+    }
     m.push(item(20, 2, (0.0, 0.0), 0.0));
     Ok(m)
 }
@@ -243,6 +262,7 @@ mod tests {
             spacing_m: 25.0,
             angle_deg: 0.0,
             alt_m: 50.0,
+            trigger_m: None,
         };
         let pts = grid(&cfg).unwrap();
         assert_eq!(pts.len(), 8, "4 lines, 2 points each");
@@ -279,6 +299,7 @@ mod tests {
             spacing_m: 50.0,
             angle_deg: 90.0,
             alt_m: 40.0,
+            trigger_m: None,
         };
         let m = mission(&cfg).unwrap();
         // home, takeoff, 2 lines x 2 points, RTL
@@ -295,6 +316,20 @@ mod tests {
             "{:?}",
             crate::mission::lint(&m)
         );
+        // With a photo distance: trigger on at the first survey waypoint, off before RTL.
+        let m = mission(&SurveyConfig {
+            trigger_m: Some(12.5),
+            ..cfg
+        })
+        .unwrap();
+        assert_eq!(
+            m.iter().map(|i| i.command).collect::<Vec<_>>(),
+            [16, 22, 16, 206, 16, 16, 16, 206, 20]
+        );
+        assert_eq!((m[3].params[0], m[3].params[2]), (12.5, 1.0));
+        assert_eq!((m[7].params[0], m[7].params[2]), (0.0, 0.0));
+        let text = crate::wpl::to_string(&m);
+        assert_eq!(crate::wpl::parse(&text).unwrap(), m);
     }
 
     #[test]
@@ -319,6 +354,7 @@ mod tests {
             spacing_m: 40.0,
             angle_deg: 90.0,
             alt_m: 30.0,
+            trigger_m: None,
         })
         .unwrap();
         // y = -40: one segment; y = 0 and 40: two each.
@@ -351,6 +387,7 @@ mod tests {
             spacing_m: 25.0,
             angle_deg: 0.0,
             alt_m: 50.0,
+            trigger_m: None,
         };
         assert!((line_length_m(&grid(&cfg).unwrap()) - 400.0).abs() < 0.5);
     }
@@ -362,6 +399,7 @@ mod tests {
             spacing_m: 0.0,
             angle_deg: 0.0,
             alt_m: 50.0,
+            trigger_m: None,
         };
         assert_eq!(grid(&cfg), Err(SurveyError::BadSpacing));
         cfg.spacing_m = 500.0;

@@ -1602,8 +1602,12 @@ async fn survey_grid_uploads_and_verifies() {
         spacing_m: 40.0,
         angle_deg: 30.0,
         alt_m: 50.0,
+        // Camera triggered every 15 m: ArduPilot stores DO_SET_CAM_TRIGG_DIST and the
+        // read-back matches.
+        trigger_m: Some(15.0),
     })
     .unwrap();
+    assert_eq!(mission.iter().filter(|i| i.command == 206).count(), 2);
     assert!(protocols::mission::lint(&mission).is_empty());
     let report = core.upload_mission((1, 1), mission.clone()).await.unwrap();
     assert!(report.verified(), "{:?}", report.mismatches);

@@ -273,6 +273,10 @@ enum MissionCmd {
         /// Front overlap between photos, % (with --camera).
         #[arg(long, default_value_t = 80.0)]
         frontlap: f64,
+        /// Trigger the camera by distance in the mission (DO_SET_CAM_TRIGG_DIST at the first
+        /// survey waypoint, off before RTL), at the photo distance from --camera.
+        #[arg(long, requires = "camera")]
+        trigger: bool,
         /// Line direction, degrees clockwise from north.
         #[arg(long, default_value_t = 0.0)]
         angle: f64,
@@ -1619,6 +1623,7 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
             camera,
             sidelap,
             frontlap,
+            trigger,
             angle,
             alt,
             out,
@@ -1679,12 +1684,14 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
                 spacing_m: spacing,
                 angle_deg: *angle,
                 alt_m: *alt,
+                trigger_m: fp.filter(|_| *trigger).map(|f| f.trigger_m),
             })
             .map_err(|e| e.to_string())?;
             print_stats(&items);
             if let Some(fp) = fp {
                 let points: Vec<(f64, f64)> = items[2..items.len() - 1]
                     .iter()
+                    .filter(|i| i.command == 16)
                     .map(|i| (f64::from(i.x) * 1e-7, f64::from(i.y) * 1e-7))
                     .collect();
                 let lines = points.len() / 2;
@@ -1694,10 +1701,17 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
                     fp.trigger_m,
                     (length / fp.trigger_m).floor() as usize + lines
                 );
-                eprintln!(
-                    "the mission does not trigger the camera: set it to {:.1} m (distance) on the camera or autopilot",
-                    fp.trigger_m
-                );
+                if *trigger {
+                    eprintln!(
+                        "the mission triggers the camera every {:.1} m from the first survey waypoint",
+                        fp.trigger_m
+                    );
+                } else {
+                    eprintln!(
+                        "the mission does not trigger the camera (--trigger adds it): set {:.1} m on the camera or autopilot",
+                        fp.trigger_m
+                    );
+                }
             }
             let text = protocols::wpl::to_string(&items);
             write_or_print(out.as_deref(), &text, &format!("{} items", items.len()))

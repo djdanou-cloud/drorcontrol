@@ -200,7 +200,7 @@ vehicle is involved, and the audit log:
 3. **Mission upload:** in flight with one confirmation (T0-19); from the CLI without a state lock.
 4. **Fence and rally upload** (ground and in flight) with read-back verification.
 5. **Log erase** (`LOG_ERASE`) as a command, audited.
-6. **Camera trigger commands** in generated surveys.
+6. **Camera trigger commands — done 2026-10-12:** `mission survey --camera … --trigger` adds DO_SET_CAM_TRIGG_DIST (206) at the first survey waypoint and 0 m before RTL; SITL upload verified on 4.7.1 and 4.6.3.
 7. **gRPC — done 2026-10-12:** `dc-cli daemon --listen ADDR [--token-file F]` (or `DC_API_TOKEN`); a key is required beyond loopback; every call needs `authorization: Bearer <key>` (constant-time check); `dc-cli remote --token-file`/`DC_API_TOKEN`. A shared secret, not encryption: trusted networks or a tunnel.
 8. Replace the custom FFT with a mature crate; switch the UI font to Inter.
 9. Phase 1 (Qt shell) once the above are in.
