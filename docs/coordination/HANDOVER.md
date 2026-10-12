@@ -113,7 +113,7 @@ and the code are newer. Where either disagrees with an owner instruction, the ow
 | H16 navigation health mirrored from the autopilot's EKF (ArduPilot `FS_EKF_THRESH` rule) | `vehicle::nav`, `Core::nav_health` | SITL: GPS failed → UNTRUSTED in 7.5 s |
 | H4 mission upload verified by read-back; ArduPilot storage rules; refused while armed | `protocols::mission`, `Core::upload_mission` | 30 % loss × 20 seeds; SITL: 20 % loss, 14 items, 0 differences |
 | Mission progress (`MISSION_CURRENT`, `MISSION_ITEM_REACHED`) in `VehicleState` | `vehicle::MissionProgress` | SITL: AUTO mission flight followed item by item to COMPLETE |
-| gRPC `Vehicle` carries `mode_name` (banner-confirmed only), `mission` progress and `landed` state; `dc-cli telemetry` shows them | `proto/dc/v1/core.proto`, `api::vehicle_to_pb` | unit test; checked against SITL through `dc-cli daemon` + `remote vehicles` |
+| gRPC `Vehicle` carries `mode_name` (banner-confirmed only), `mission` progress, `landed` state, `nav` health (H16 trust + reasons) and `link` state; `dc-cli telemetry` shows them | `proto/dc/v1/core.proto`, `api::vehicle_to_pb` | unit test; checked against SITL through `dc-cli daemon` + `remote vehicles` |
 | Mission files (`QGC WPL 110`, Mission Planner `.waypoints`); `dc-cli mission download / check / compare` (read-only: no upload from the CLI) | `protocols::wpl`, `dc-cli` | unit tests; SITL: file round trip verifies against the vehicle |
 | Mac test runbook | [`../dev/mac-test-runbook.md`](../dev/mac-test-runbook.md) | — |
 

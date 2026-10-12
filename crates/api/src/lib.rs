@@ -11,7 +11,7 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 
-use dc_core::{AlertLevel, Core, CoreEvent, VehicleLink, VehicleState};
+use dc_core::{AlertLevel, Core, CoreEvent, PositionTrust, VehicleLink, VehicleState};
 use tokio_stream::Stream;
 use tonic::{Request, Response, Status};
 
@@ -66,7 +66,36 @@ fn mission_state_to_pb(s: dc_core::MissionState) -> pb::MissionState {
     }
 }
 
-/// Convert core state to the wire type.
+fn link_to_pb(l: VehicleLink) -> pb::vehicle_link_event::State {
+    use pb::vehicle_link_event::State;
+    match l {
+        VehicleLink::Connected => State::Connected,
+        VehicleLink::Stale => State::Stale,
+        VehicleLink::Lost => State::Lost,
+    }
+}
+
+/// [`vehicle_to_pb`] plus what the core derives: navigation health and link state.
+pub fn vehicle_with_health(core: &Core, v: &VehicleState, now: Instant) -> pb::Vehicle {
+    let mut pb = vehicle_to_pb(v, now);
+    let nav = core.nav_health(v.sysid);
+    pb.nav = Some(pb::NavHealth {
+        trust: match nav.trust {
+            PositionTrust::Unknown => pb::PositionTrust::Unknown,
+            PositionTrust::Good => pb::PositionTrust::Good,
+            PositionTrust::Degraded => pb::PositionTrust::Degraded,
+            PositionTrust::Untrusted => pb::PositionTrust::Untrusted,
+        } as i32,
+        reasons: nav.reasons.iter().map(|r| r.to_string()).collect(),
+    });
+    if let Some(l) = core.vehicle_link(v.sysid) {
+        pb.link = link_to_pb(l) as i32;
+    }
+    pb
+}
+
+/// Convert core state to the wire type (vehicle state only: `nav` and `link` are left unset;
+/// see [`vehicle_with_health`]).
 pub fn vehicle_to_pb(v: &VehicleState, now: Instant) -> pb::Vehicle {
     pb::Vehicle {
         sysid: u32::from(v.sysid),
@@ -117,6 +146,8 @@ pub fn vehicle_to_pb(v: &VehicleState, now: Instant) -> pb::Vehicle {
             age_ms: ms(e.age(now)),
             landed_state: u32::from(e.value.landed.to_mavlink()),
         }),
+        nav: None,
+        link: 0,
     }
 }
 
@@ -160,7 +191,7 @@ impl CoreApi for CoreService {
             .core
             .fleet()
             .vehicles()
-            .map(|v| vehicle_to_pb(v, now))
+            .map(|v| vehicle_with_health(&self.core, v, now))
             .collect();
         Ok(Response::new(pb::VehicleList { vehicles }))
     }
@@ -218,7 +249,11 @@ impl CoreApi for CoreService {
                 tick.tick().await;
                 let fleet = core.fleet();
                 let Some(v) = fleet.get(sysid) else { continue };
-                if tx.send(Ok(vehicle_to_pb(v, Instant::now()))).await.is_err() {
+                if tx
+                    .send(Ok(vehicle_with_health(&core, v, Instant::now())))
+                    .await
+                    .is_err()
+                {
                     break; // client went away
                 }
             }
@@ -257,19 +292,11 @@ impl CoreApi for CoreService {
                         sysid,
                         state,
                         heartbeat_age,
-                    }) => {
-                        use pb::vehicle_link_event::State;
-                        Kind::VehicleLink(pb::VehicleLinkEvent {
-                            sysid: u32::from(sysid),
-                            state: match state {
-                                VehicleLink::Connected => State::Connected,
-                                VehicleLink::Stale => State::Stale,
-                                VehicleLink::Lost => State::Lost,
-                            } as i32,
-                            heartbeat_age_ms: heartbeat_age.as_millis().min(u32::MAX as u128)
-                                as u32,
-                        })
-                    }
+                    }) => Kind::VehicleLink(pb::VehicleLinkEvent {
+                        sysid: u32::from(sysid),
+                        state: link_to_pb(state) as i32,
+                        heartbeat_age_ms: heartbeat_age.as_millis().min(u32::MAX as u128) as u32,
+                    }),
                     Ok(CoreEvent::Recorder { stopped, detail }) => {
                         Kind::Recorder(pb::RecorderEvent { stopped, detail })
                     }

@@ -105,7 +105,13 @@ async fn grpc_api_end_to_end() {
         .unwrap()
         .into_inner();
     assert_eq!(list.vehicles.len(), 1);
-    assert!(list.vehicles[0].heartbeat.is_some());
+    let v = &list.vehicles[0];
+    assert!(v.heartbeat.is_some());
+    assert_eq!(v.link(), pb::vehicle_link_event::State::Connected);
+    // The fake vehicle sends no EKF_STATUS_REPORT: trust is UNKNOWN, with the reason given.
+    let nav = v.nav.as_ref().expect("nav health is always set by the API");
+    assert_eq!(nav.trust(), pb::PositionTrust::Unknown);
+    assert!(!nav.reasons.is_empty(), "{nav:?}");
 
     let params = c
         .get_params(pb::GetParamsRequest {

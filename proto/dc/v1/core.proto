@@ -58,6 +58,11 @@ message Vehicle {
   optional GpsState gps = 6;
   optional MissionProgress mission = 7;
   optional LandedState landed = 8;
+  // Navigation health (hazard H16), from EKF_STATUS_REPORT with ArduPilot's failsafe rule.
+  // Set by ListVehicles and StreamTelemetry.
+  optional NavHealth nav = 9;
+  // Heartbeat-based link state, as in VehicleLinkEvent.
+  VehicleLinkEvent.State link = 10;
 }
 
 message HeartbeatState {
@@ -121,6 +126,19 @@ enum MissionState {
   MISSION_STATE_ACTIVE = 3;
   MISSION_STATE_PAUSED = 4;
   MISSION_STATE_COMPLETE = 5;
+}
+
+// How far the vehicle's position can be trusted (hazard H16).
+message NavHealth {
+  PositionTrust trust = 1;
+  repeated string reasons = 2;  // why it is not GOOD; empty when GOOD
+}
+
+enum PositionTrust {
+  POSITION_TRUST_UNKNOWN = 0;    // no current EKF report
+  POSITION_TRUST_GOOD = 1;
+  POSITION_TRUST_DEGRADED = 2;   // usable but degraded (high variance, no 3D fix)
+  POSITION_TRUST_UNTRUSTED = 3;  // do not steer by it
 }
 
 // From EXTENDED_SYS_STATE (autopilot component).
