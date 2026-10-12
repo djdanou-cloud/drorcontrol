@@ -144,6 +144,17 @@ $B run sample.mkv --seconds 60 --report s05-m1-file.json
 $B run sample.mkv --seconds 60 --decoder avdec_h264 --report s05-m1-sw.json
 $B run rtsp://<camera>/stream --seconds 60 --report s05-m1-rtsp.json   # optional
 ```
+Then the decode-buffer check (why the hardware path held 100 ms; see RESULTS.md "Why the
+hardware path holds frames"). Make the Baseline and 1-reference clips, and run each live as in
+round 2 (mediamtx relay, `ffmpeg -re -c copy` publisher):
+```bash
+$B make-sample base.mkv 90 --profile baseline
+$B make-sample ref1.mkv 90 --refs 1
+# publish each to rtsp://127.0.0.1:8554/cam in turn, then:
+$B run rtsp://127.0.0.1:8554/cam --seconds 60 --report s05-m1-<clip>.json
+```
+Prediction: Baseline ≈ decode time only (a few ms); `--refs 1` ≈ 36 ms; default ≈ 103 ms.
+
 Record in `ui/spikes/s0-5-video/RESULTS.md` and ADR-0004.
 
 ## T0-10 — first launch of the downloaded app (ADR-0010)

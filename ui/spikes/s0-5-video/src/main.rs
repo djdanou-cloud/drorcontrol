@@ -2,7 +2,8 @@
 //! decoder (plan 01 §6; pass: decode ≤ 8 ms, CPU ≤ 5 % on M1).
 //!
 //! ```text
-//! spike-s0-5-video make-sample <out.mkv> [seconds]      # 1080p30 H.264 test clip (no B-frames)
+//! spike-s0-5-video make-sample <out.mkv> [seconds] [--profile high|main|baseline] [--refs N]
+//!                                                       # 1080p30 H.264 test clip (no B-frames)
 //! spike-s0-5-video run <rtsp://… | file.mkv> [options]  # measure, print JSON
 //!     --seconds N    measured time after warm-up (default 60)
 //!     --warmup N     seconds ignored at the start (default 3)
@@ -78,9 +79,23 @@ fn real_main() -> Result<(), String> {
             let out = args.get(1).ok_or("make-sample <out.mkv> [seconds]")?;
             let secs: u32 = args
                 .get(2)
+                .filter(|a| !a.starts_with("--"))
                 .map_or(Ok(60), |s| s.parse())
                 .map_err(|_| "seconds")?;
-            make_sample(out, secs)
+            let opt = |name: &str| {
+                args.iter()
+                    .position(|a| a == name)
+                    .and_then(|i| args.get(i + 1))
+                    .cloned()
+            };
+            let profile = opt("--profile").unwrap_or_else(|| "high".into());
+            if !["high", "main", "baseline"].contains(&profile.as_str()) {
+                return Err(format!("--profile {profile}: high, main or baseline"));
+            }
+            let refs = opt("--refs")
+                .map(|r| r.parse::<u32>().map_err(|_| format!("--refs {r}")))
+                .transpose()?;
+            make_sample(out, secs, &profile, refs)
         }
         Some("run") => {
             let source = args.get(1).ok_or("run <rtsp://… | file.mkv> [options]")?;
@@ -116,21 +131,29 @@ fn available(name: &str) -> bool {
     gst::ElementFactory::find(name).is_some()
 }
 
-fn make_sample(out: &str, secs: u32) -> Result<(), String> {
+/// `profile` and `refs` exist to test GStreamer's `vtdec`, which holds
+/// `max(max_dec_frame_buffering, num_ref_frames)` decoded frames in its own reorder queue
+/// unless the stream is Baseline profile (see RESULTS.md, "Why the hardware path holds frames").
+fn make_sample(out: &str, secs: u32, profile: &str, refs: Option<u32>) -> Result<(), String> {
     let (name, enc) = ENCODERS
         .iter()
         .find(|(n, _)| available(n))
         .ok_or("no H.264 encoder (install x264 or use vtenc_h264 on macOS)")?;
+    let enc = match refs {
+        Some(r) if *name == "x264enc" => format!("{enc} ref={r}"),
+        Some(_) => return Err(format!("--refs needs x264enc; using {name}")),
+        None => enc.to_string(),
+    };
     let desc = format!(
         // A moving zone plate: fine detail everywhere and motion in every frame, so the
         // encoder spends its bitrate like on real aerial footage. 4:2:0 8-bit, as cameras send.
         "videotestsrc pattern=zone-plate kx2=20 ky2=20 kt=1 num-buffers={n} ! \
          video/x-raw,width=1920,height=1080,framerate=30/1 ! videoconvert ! \
-         video/x-raw,format=I420 ! {enc} ! video/x-h264,profile=high ! \
+         video/x-raw,format=I420 ! {enc} ! video/x-h264,profile={profile} ! \
          h264parse ! matroskamux ! filesink location=\"{out}\"",
         n = secs * 30
     );
-    eprintln!("encoding {secs} s of 1080p30 with {name} → {out}");
+    eprintln!("encoding {secs} s of 1080p30 with {name}, profile {profile} → {out}");
     let pipeline = launch(&desc)?;
     wait(&pipeline, None)?;
     Ok(())

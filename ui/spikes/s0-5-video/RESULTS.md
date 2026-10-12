@@ -69,6 +69,45 @@ indicative numbers (job "video spike S0-5").
   decide its latency on this path; even with 1 frame it is 46 ms p99.
 * **Next step (not done):** a decode path that emits each frame as soon as it is decoded, e.g.
   VideoToolbox directly, or `vtdec` told to trust `max_num_reorder_frames`. Then re-measure.
+
+### Why the hardware path holds frames (source, 2026-10-12, core-1)
+GStreamer's `vtdec` keeps its own reorder queue and pushes a decoded frame downstream only once
+more than `dpb_size` frames are queued (`gst_vtdec_output_loop`, `sys/applemedia/vtdec.c` in
+gst-plugins-bad, GStreamer `main` at e1edc09):
+
+* `dpb_size = MAX(max_dec_frame_buffering, num_ref_frames)` when the SPS has
+  `bitstream_restriction_flag`; otherwise it is the level's maximum DPB, which can be larger
+  (`get_h264_dpb_size_from_sps`).
+* `max_num_reorder_frames` is never read, so a stream without B-frames still waits.
+* **Baseline profile (`profile_idc` 66) skips the queue:** `dpb_size = 0`
+  (`compute_h264_decode_picture_buffer_size`).
+
+That matches the M1 numbers: 3 frames held ≈ 103 ms, 1 frame ≈ 36 ms. It predicts that a
+**Baseline** stream decodes in a few ms on the same path. `make-sample` now takes
+`--profile high|main|baseline` and `--refs N` to test that. SPS fields checked with
+`ffmpeg -bsf:v trace_headers`:
+
+| Clip | `profile_idc` | `max_num_ref_frames` | `max_dec_frame_buffering` | `max_num_reorder_frames` | Frames `vtdec` holds (predicted) |
+|---|--:|--:|--:|--:|--:|
+| `make-sample s.mkv 90 --profile baseline` | 66 | 3 | 3 | 0 | **0** |
+| `make-sample s.mkv 90 --refs 1` | 100 | 1 | 1 | 0 | 1 (M1: 36 ms p50) |
+| `make-sample s.mkv 90` (default) | 100 | 3 | 3 | 0 | 3 (M1: 103 ms p50) |
+
+The Baseline clip keeps 3 reference frames and a 3-frame buffer, so a low result on it
+isolates the profile shortcut.
+
+Options for ADR-0004, from least to most work:
+1. **Run cameras in Baseline profile** where the camera allows it (or 1 reference frame:
+   about 36 ms). This is a configuration choice; it costs some bitrate efficiency.
+2. **Patch `vtdec`** to use `max_num_reorder_frames` when `bitstream_restriction_flag` is
+   set. This is what decoders like FFmpeg do. Propose it upstream, and carry it in our bundled
+   GStreamer meanwhile.
+3. **Use VideoToolbox directly** (no `vtdec`): emit each frame as soon as it is decoded, and
+   reorder only by `max_num_reorder_frames`. This is the most control and the most code.
+
+To confirm on a Mac (live, as before, through the mediamtx relay):
+`make-sample` each clip above, publish it, then
+`run rtsp://127.0.0.1:8554/cam --seconds 60 --report s05-m1-<clip>.json`.
 * Run note: GStreamer's macOS start-up (`gst_macos_main`) waits for `NSApplication`, which
   never starts without a desktop session, so over SSH even `gst-inspect-1.0 --version` hangs.
   Run from a terminal in a logged-in desktop session.
