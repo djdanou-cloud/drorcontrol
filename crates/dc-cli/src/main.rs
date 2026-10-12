@@ -727,8 +727,18 @@ fn print_mission(items: &[dc_core::MissionItem]) {
     }
 }
 
-/// Path length, altitudes and ending of a mission (an estimate).
+/// Path length, altitudes and ending of a mission (an estimate), then the lint findings.
 fn print_stats(items: &[dc_core::MissionItem]) {
+    print_stats_only(items);
+    for f in protocols::mission::lint(items) {
+        let at = f
+            .seq
+            .map_or_else(|| "mission".to_string(), |s| format!("item {s}"));
+        eprintln!("{:?}: {at}: {}", f.level, f.text);
+    }
+}
+
+fn print_stats_only(items: &[dc_core::MissionItem]) {
     let s = protocols::mission::stats(items);
     let alt = |name: &str, v: Option<f32>| v.map(|a| format!(", highest {a:.1} m {name}"));
     let alts: String = [

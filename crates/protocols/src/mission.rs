@@ -722,3 +722,204 @@ mod stats_tests {
         assert_eq!(stats(&[]), MissionStats::default());
     }
 }
+
+/// How serious a [`Finding`] is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum LintLevel {
+    /// Worth knowing.
+    Note,
+    /// Very likely a mistake.
+    Warning,
+}
+
+/// One remark about a mission.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Finding {
+    /// Item number (`None`: the mission as a whole).
+    pub seq: Option<u16>,
+    /// Level.
+    pub level: LintLevel,
+    /// What and why.
+    pub text: String,
+}
+
+const MAV_CMD_NAV_TAKEOFF: u16 = 22;
+const MAV_CMD_NAV_LAND: u16 = 21;
+
+/// Check an ArduPilot mission (`items[0]` is home) for likely mistakes before it is
+/// uploaded. Nothing here changes the mission.
+pub fn lint(items: &[MissionItem]) -> Vec<Finding> {
+    let mut out = Vec::new();
+    let mut add = |seq: Option<usize>, level, text: String| {
+        out.push(Finding {
+            seq: seq.map(|s| s as u16),
+            level,
+            text,
+        });
+    };
+    if items.len() <= 1 {
+        add(
+            None,
+            LintLevel::Warning,
+            "no mission items after home".into(),
+        );
+        return out;
+    }
+    let nav: Vec<(usize, &MissionItem)> = items
+        .iter()
+        .enumerate()
+        .skip(1)
+        .filter(|(_, i)| i.command <= MAV_CMD_NAV_LAST)
+        .collect();
+    // As `AP_Mission::is_takeoff_next` (4.7.1): the first navigation command, NAV_DELAY
+    // (93) skipped, must be NAV_TAKEOFF, NAV_TAKEOFF_LOCAL (24) or NAV_VTOL_TAKEOFF (84).
+    match nav.iter().find(|(_, i)| i.command != 93) {
+        Some((_, i)) if matches!(i.command, MAV_CMD_NAV_TAKEOFF | 24 | 84) => {}
+        Some((s, _)) => add(
+            Some(*s),
+            LintLevel::Note,
+            "the first navigation command is not TAKEOFF: Copter refuses AUTO while landed \
+             and armed (\"Auto: Missing Takeoff Cmd\"); fine only if AUTO starts in the air"
+                .into(),
+        ),
+        None => add(None, LintLevel::Warning, "no navigation commands".into()),
+    }
+    if let Some((s, i)) = nav.last()
+        && !matches!(i.command, MAV_CMD_NAV_RETURN_TO_LAUNCH | MAV_CMD_NAV_LAND)
+    {
+        add(
+            Some(*s),
+            LintLevel::Note,
+            "the mission does not end with RTL or LAND: what the vehicle does at the end \
+             depends on its settings"
+                .into(),
+        );
+    }
+    let mut frames = std::collections::BTreeSet::new();
+    for (s, i) in items.iter().enumerate().skip(1) {
+        if i.command == MAV_CMD_DO_JUMP {
+            let target = i.params[0];
+            if target < 1.0 || target as usize >= items.len() || target.fract() != 0.0 {
+                add(
+                    Some(s),
+                    LintLevel::Warning,
+                    format!("DO_JUMP to item {target}, which does not exist"),
+                );
+            }
+        }
+        if !has_location(i.command) || i.command > MAV_CMD_NAV_LAST {
+            continue;
+        }
+        if i.x != 0 || i.y != 0 {
+            let (lat, lon) = (f64::from(i.x) * 1e-7, f64::from(i.y) * 1e-7);
+            if !(-90.0..=90.0).contains(&lat) || !(-180.0..=180.0).contains(&lon) {
+                add(
+                    Some(s),
+                    LintLevel::Warning,
+                    format!("position {lat}, {lon} is invalid"),
+                );
+            }
+        }
+        let relative = matches!(i.frame, 3 | 6);
+        if i.command == MAV_CMD_NAV_TAKEOFF && relative && i.z <= 0.0 {
+            add(
+                Some(s),
+                LintLevel::Warning,
+                format!("TAKEOFF to {} m above home", i.z),
+            );
+        } else if relative && i.z <= 0.0 && i.command != MAV_CMD_NAV_LAND {
+            add(
+                Some(s),
+                LintLevel::Warning,
+                format!("waypoint at {} m above home: at or below the ground", i.z),
+            );
+        }
+        frames.insert(match i.frame {
+            0 | 5 => "above MSL",
+            3 | 6 => "above home",
+            10 | 11 => "above terrain",
+            _ => "other",
+        });
+        if matches!(i.frame, 10 | 11) {
+            add(
+                Some(s),
+                LintLevel::Note,
+                "altitude above terrain: the vehicle needs terrain data for this location".into(),
+            );
+        }
+    }
+    if frames.len() > 1 {
+        add(
+            None,
+            LintLevel::Note,
+            format!(
+                "altitudes use more than one reference ({}): check they mean what you intend",
+                frames.into_iter().collect::<Vec<_>>().join(", ")
+            ),
+        );
+    }
+    out
+}
+
+#[cfg(test)]
+mod lint_tests {
+    use super::*;
+
+    fn it(command: u16, frame: u8, z: f32) -> MissionItem {
+        MissionItem {
+            frame,
+            command,
+            params: [0.0; 4],
+            x: -353_632_610,
+            y: 1_491_652_300,
+            z,
+            autocontinue: true,
+        }
+    }
+
+    #[test]
+    fn a_clean_mission_has_no_findings() {
+        let m = [
+            it(16, 0, 584.0),
+            it(22, 3, 20.0),
+            it(16, 3, 30.0),
+            it(20, 2, 0.0),
+        ];
+        assert_eq!(lint(&m), []);
+        // A NAV_DELAY and a DO command before the takeoff are allowed (is_takeoff_next).
+        let m = [
+            it(16, 0, 584.0),
+            it(93, 2, 0.0),
+            it(178, 2, 0.0),
+            it(22, 3, 20.0),
+            it(20, 2, 0.0),
+        ];
+        assert_eq!(lint(&m), []);
+    }
+
+    #[test]
+    fn finds_likely_mistakes() {
+        let mut jump = it(177, 2, 0.0);
+        jump.params[0] = 9.0;
+        let m = [
+            it(16, 0, 584.0),
+            it(16, 3, 0.0),   // no takeoff first; at ground level
+            jump,             // jump to a missing item
+            it(16, 0, 650.0), // MSL among relative altitudes
+        ];
+        let f = lint(&m);
+        let texts: Vec<_> = f.iter().map(|f| (f.seq, f.level)).collect();
+        assert!(texts.contains(&(Some(1), LintLevel::Note)), "{f:#?}");
+        assert!(texts.contains(&(Some(1), LintLevel::Warning)), "{f:#?}");
+        assert!(texts.contains(&(Some(2), LintLevel::Warning)), "{f:#?}");
+        assert!(
+            texts.contains(&(Some(3), LintLevel::Note)),
+            "no RTL/LAND at the end: {f:#?}"
+        );
+        assert!(
+            f.iter()
+                .any(|f| f.seq.is_none() && f.text.contains("more than one reference"))
+        );
+        assert_eq!(lint(&m[..1])[0].text, "no mission items after home");
+    }
+}
