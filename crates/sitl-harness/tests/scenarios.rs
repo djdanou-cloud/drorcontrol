@@ -115,6 +115,23 @@ async fn connect_detects_the_vehicle_and_receives_telemetry() {
         out[0] > 0 && out[..4].iter().all(|&o| o == out[0]),
         "{out:?}"
     );
+    // AUTOPILOT_VERSION, requested once on connect: the pinned 4.7.1 build.
+    until(Duration::from_secs(20), "AUTOPILOT_VERSION", || {
+        core.fleet()
+            .get(1)
+            .is_some_and(|v| v.autopilot_version.is_some())
+    })
+    .await;
+    let av = core
+        .fleet()
+        .get(1)
+        .unwrap()
+        .autopilot_version
+        .clone()
+        .unwrap()
+        .value;
+    assert!(av.version_string().starts_with("4.7.1-"), "{av:?}");
+    assert_eq!(av.git_hash.len(), 8, "{av:?}");
     // TERRAIN_REPORT arrives; before the vehicle has a position it is for 0,0 and flagged.
     until(Duration::from_secs(30), "TERRAIN_REPORT", || {
         core.fleet().get(1).is_some_and(|v| v.terrain.is_some())

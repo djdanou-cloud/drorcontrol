@@ -80,6 +80,18 @@ message Vehicle {
   optional RadioState radio = 18;
   repeated RangefinderState rangefinders = 19;
   optional TerrainState terrain = 20;
+  optional AutopilotVersionState autopilot_version = 21;
+}
+
+// From AUTOPILOT_VERSION (requested once on connect).
+message AutopilotVersionState {
+  string version = 1;        // e.g. "4.7.1-official"
+  string git_hash = 2;       // first 8 characters
+  uint32 board_id = 3;       // APJ_BOARD_ID
+  uint32 vendor_id = 4;
+  uint32 product_id = 5;
+  uint64 uid = 6;
+  uint64 capabilities = 7;   // MAV_PROTOCOL_CAPABILITY bits
 }
 
 // From TERRAIN_REPORT: terrain under the vehicle from the autopilot's terrain database.

@@ -259,6 +259,18 @@ pub fn vehicle_to_pb(v: &VehicleState, now: Instant) -> pb::Vehicle {
             pending: u32::from(t.value.pending),
             loaded: u32::from(t.value.loaded),
         }),
+        autopilot_version: v
+            .autopilot_version
+            .as_ref()
+            .map(|t| pb::AutopilotVersionState {
+                version: t.value.version_string(),
+                git_hash: t.value.git_hash.clone(),
+                board_id: u32::from(t.value.board_id),
+                vendor_id: u32::from(t.value.vendor_product.0),
+                product_id: u32::from(t.value.vendor_product.1),
+                uid: t.value.uid,
+                capabilities: t.value.capabilities,
+            }),
         home: v.home.as_ref().map(|h| pb::HomeState {
             age_ms: ms(h.age(now)),
             lat_deg: h.value.lat_deg,

@@ -491,6 +491,42 @@ pub struct TerrainReport {
     pub loaded: u16,
 }
 
+/// `AUTOPILOT_VERSION` (autopilot component), as ArduPilot fills it
+/// (`GCS_MAVLINK::send_autopilot_version`, 4.7.1).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct AutopilotVersion {
+    /// Firmware version (major, minor, patch).
+    pub version: (u8, u8, u8),
+    /// `FIRMWARE_VERSION_TYPE` (0 dev, 64 alpha, 128 beta, 192 RC, 255 official).
+    pub release_type: u8,
+    /// First 8 characters of the firmware's git hash.
+    pub git_hash: String,
+    /// Board id (`APJ_BOARD_ID`, the top 16 bits of `board_version`).
+    pub board_id: u16,
+    /// USB vendor and product id.
+    pub vendor_product: (u16, u16),
+    /// Board unique id (0 if not provided).
+    pub uid: u64,
+    /// `MAV_PROTOCOL_CAPABILITY` bits.
+    pub capabilities: u64,
+}
+
+impl AutopilotVersion {
+    /// e.g. `4.7.1-official`.
+    pub fn version_string(&self) -> String {
+        let t = match self.release_type {
+            0 => "dev",
+            64 => "alpha",
+            128 => "beta",
+            192 => "rc",
+            255 => "official",
+            _ => "unknown",
+        };
+        let (a, b, c) = self.version;
+        format!("{a}.{b}.{c}-{t}")
+    }
+}
+
 /// `WIND` (ArduPilot, autopilot component): the autopilot's wind estimate.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Wind {
@@ -578,6 +614,8 @@ pub struct VehicleState {
     pub vibration: Option<Timed<Vibration>>,
     /// Wind estimate.
     pub wind: Option<Timed<Wind>>,
+    /// Firmware and board details.
+    pub autopilot_version: Option<Timed<AutopilotVersion>>,
     /// Terrain under the vehicle.
     pub terrain: Option<Timed<TerrainReport>>,
     /// Rangefinders by sensor id.
@@ -886,6 +924,27 @@ impl Fleet {
                             signal_quality: (d.signal_quality != 0).then_some(d.signal_quality),
                         },
                         at: now,
+                    },
+                );
+            }
+            Message::AutopilotVersion(a) if compid == AUTOPILOT_COMPID => {
+                let end = a
+                    .flight_custom_version
+                    .iter()
+                    .position(|&b| b == 0)
+                    .unwrap_or(a.flight_custom_version.len());
+                let v8 = |shift: u32| (a.flight_sw_version >> shift) as u8;
+                v.autopilot_version = timed(
+                    now,
+                    AutopilotVersion {
+                        version: (v8(24), v8(16), v8(8)),
+                        release_type: v8(0),
+                        git_hash: String::from_utf8_lossy(&a.flight_custom_version[..end])
+                            .into_owned(),
+                        board_id: (a.board_version >> 16) as u16,
+                        vendor_product: (a.vendor_id, a.product_id),
+                        uid: a.uid,
+                        capabilities: a.capabilities,
                     },
                 );
             }
@@ -1351,6 +1410,28 @@ mod tests {
         assert_eq!(rc.rssi, None, "255 = unknown");
         let out = v.servos[&0].value.outputs;
         assert_eq!((out[0], out[3], out[15]), (1100, 1150, 0));
+    }
+
+    #[test]
+    fn autopilot_version_fields() {
+        use mavlink_codec::messages::AutopilotVersion as Av;
+        let mut f = Fleet::new();
+        f.apply(
+            1,
+            1,
+            &Message::AutopilotVersion(Av {
+                flight_sw_version: 4 << 24 | 7 << 16 | 1 << 8 | 255,
+                flight_custom_version: *b"dbe79216",
+                board_version: 140 << 16,
+                vendor_id: 0x1209,
+                product_id: 0x5740,
+                ..Default::default()
+            }),
+            Instant::now(),
+        );
+        let a = &f.get(1).unwrap().autopilot_version.as_ref().unwrap().value;
+        assert_eq!(a.version_string(), "4.7.1-official");
+        assert_eq!((a.git_hash.as_str(), a.board_id), ("dbe79216", 140));
     }
 
     #[test]

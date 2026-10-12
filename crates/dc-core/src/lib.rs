@@ -58,9 +58,9 @@ pub use protocols::params::{Param, SetStatus};
 use tokio::sync::broadcast;
 
 pub use vehicle::{
-    Battery, Extended, Firmware, FirmwareSource, Fleet, Home, LandedState, MissionProgress,
-    MissionState, RadioStatus, Rangefinder, RcInput, ServoOutputs, StatusText, TerrainReport,
-    Traffic, VehicleState, Vibration, VtolState, Wind,
+    AutopilotVersion, Battery, Extended, Firmware, FirmwareSource, Fleet, Home, LandedState,
+    MissionProgress, MissionState, RadioStatus, Rangefinder, RcInput, ServoOutputs, StatusText,
+    TerrainReport, Traffic, VehicleState, Vibration, VtolState, Wind,
 };
 pub use vehicle::{NavHealth, NavThresholds, PositionTrust};
 
@@ -754,6 +754,7 @@ impl Core {
             let _ = self.events.send(CoreEvent::VehicleSeen { sysid });
             self.request_streams(sysid, compid).await;
             self.request_banner(sysid, compid);
+            self.request_version(sysid, compid);
         }
         if let Some(text) = text {
             // The firmware's version banner confirms it: from now on mode changes are named.
@@ -1108,6 +1109,34 @@ impl Core {
     /// Ask the autopilot for its version banner (`MAV_CMD_DO_SEND_BANNER`), which confirms the
     /// firmware and so the meaning of its mode numbers (`vehicle::modes`). Retried every 3 s,
     /// up to 5 times, until a banner arrives.
+    /// Ask for AUTOPILOT_VERSION (MAV_CMD_REQUEST_MESSAGE, read-only) until it arrives,
+    /// up to 5 times.
+    fn request_version(&self, sysid: u8, compid: u8) {
+        let core = self.clone();
+        tokio::spawn(async move {
+            for _ in 0..5 {
+                if core
+                    .fleet()
+                    .get(sysid)
+                    .is_some_and(|v| v.autopilot_version.is_some())
+                {
+                    return;
+                }
+                let cmd = Message::CommandLong(CommandLong {
+                    target_system: sysid,
+                    target_component: compid,
+                    command: MavCmd::REQUEST_MESSAGE.0,
+                    param1: 148.0,
+                    ..Default::default()
+                });
+                if !core.send(&cmd).await {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_secs(3)).await;
+            }
+        });
+    }
+
     fn request_banner(&self, sysid: u8, compid: u8) {
         let core = self.clone();
         tokio::spawn(async move {
