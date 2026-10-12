@@ -14,6 +14,7 @@ pub mod downsample;
 pub mod export;
 pub mod flight;
 pub mod health;
+pub mod motors;
 mod params;
 pub mod spectrum;
 #[cfg(test)]

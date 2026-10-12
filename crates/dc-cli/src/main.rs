@@ -301,6 +301,11 @@ enum LogCmd {
         /// Path to the .bin log.
         path: std::path::PathBuf,
     },
+    /// Motor outputs while flying: how hard each motor works compared with the others.
+    Motors {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+    },
     /// Vibration spectrum (Welch FFT) of an IMU axis while armed, and its strongest peaks.
     Fft {
         /// Path to the .bin log.
@@ -1156,6 +1161,57 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                 for (m, t) in modes {
                     println!("  {:<12} {t:7.1} s", mode_label(fw, m));
                 }
+            }
+        }
+        LogCmd::Motors { path } => {
+            let log = open(path)?;
+            if let Some(h) = logs::motors::hover_throttle(&log) {
+                let pct = |v: Option<f64>| v.map_or("-".into(), |v| format!("{:.1} %", v * 100.0));
+                println!(
+                    "hover throttle: learned {} (MOT_THST_HOVER {}), level flight {} over {} samples{}",
+                    pct(h.learned),
+                    pct(h.param),
+                    pct(h.mean_level),
+                    h.samples,
+                    match h.at_limit {
+                        Some("upper") =>
+                            " -- at the upper learning limit: underpowered or overloaded?",
+                        Some(_) => " -- at the lower learning limit: very overpowered",
+                        None => "",
+                    }
+                );
+            }
+            let m = logs::motors::motor_balance(&log)
+                .ok_or("no motor outputs in flight (SERVOn_FUNCTION motors and RCOU needed)")?;
+            println!(
+                "{} samples while {}",
+                m.samples,
+                if m.land_detector {
+                    "flying (land detector)"
+                } else {
+                    "armed (no land-detector events)"
+                }
+            );
+            for o in &m.motors {
+                println!(
+                    "  motor {:2} (SERVO{:<2}) {:6.0} us  {:5.1} %",
+                    o.motor,
+                    o.channel,
+                    o.mean_pwm,
+                    o.mean_output * 100.0
+                );
+            }
+            if let Some((motor, dev)) = m.worst() {
+                println!(
+                    "largest deviation: motor {motor} {:+.1} % from the mean",
+                    dev * 100.0
+                );
+            }
+            if let Some(d) = m.cw_minus_ccw {
+                println!(
+                    "quad: clockwise motors (3, 4) {:+.1} points of output vs counter-clockwise (1, 2)",
+                    d * 100.0
+                );
             }
         }
         LogCmd::Events { path } => {

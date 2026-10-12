@@ -75,6 +75,64 @@ pub fn armed_periods(log: &Log) -> Vec<ArmedPeriod> {
     out
 }
 
+/// Periods in the air, µs since boot: armed, between Copter's land detector reporting
+/// `NOT_LANDED` (EV 28) and `LAND_COMPLETE` (EV 18) (`Copter::set_land_complete`). The bool
+/// is false when the log has no land-detector events and the armed periods are used instead.
+pub fn flying_periods(log: &Log) -> (Vec<ArmedPeriod>, bool) {
+    let armed = armed_periods(log);
+    let land: Vec<(u64, bool)> = log
+        .column("EV", "Id", None)
+        .map(|c| {
+            c.time_us
+                .iter()
+                .zip(&c.values)
+                .filter(|(_, id)| **id == 18.0 || **id == 28.0)
+                .map(|(t, id)| (*t, *id == 28.0))
+                .collect()
+        })
+        .unwrap_or_default();
+    if !land.iter().any(|(_, flying)| *flying) {
+        return (armed, false);
+    }
+    let end = log_end_us(log);
+    let mut air: Vec<(u64, u64)> = Vec::new();
+    let mut since: Option<u64> = None;
+    for (t, flying) in land {
+        match (flying, since) {
+            (true, None) => since = Some(t),
+            (false, Some(s)) => {
+                air.push((s, t));
+                since = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(s) = since {
+        air.push((s, end));
+    }
+    let mut out = Vec::new();
+    for p in &armed {
+        let pe = p.end_us.unwrap_or(end);
+        for (a, b) in &air {
+            let (s, e) = (p.start_us.max(*a), pe.min(*b));
+            if e > s {
+                out.push(ArmedPeriod {
+                    start_us: s,
+                    end_us: Some(e),
+                });
+            }
+        }
+    }
+    (out, true)
+}
+
+/// Whether `t` falls in one of `periods` (an open period runs to the end of the log).
+pub fn in_periods(periods: &[ArmedPeriod], t: u64) -> bool {
+    periods
+        .iter()
+        .any(|p| t >= p.start_us && p.end_us.is_none_or(|e| t <= e))
+}
+
 /// What a flight log says about the flight.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct FlightSummary {
@@ -102,14 +160,17 @@ fn distance_m(a: (f64, f64), b: (f64, f64)) -> f64 {
     2.0 * R * h.sqrt().asin()
 }
 
-/// Last timestamp among the records written throughout a log (`POS`, `ATT`), µs.
+/// Latest `TimeUS` in the log (the last record of each message type), µs.
 fn log_end_us(log: &Log) -> u64 {
-    ["POS", "ATT"]
+    log.counts()
         .iter()
-        .filter_map(|m| log.column(m, "TimeUS", None))
-        .filter_map(|c| c.values.last().copied())
-        .reduce(f64::max)
-        .unwrap_or(0.0) as u64
+        .filter(|(_, n)| **n > 0)
+        .filter_map(|(name, n)| {
+            let fmt = log.format_by_name(name)?;
+            fmt.u64_value(log.record(name, n - 1)?, fmt.field("TimeUS")?)
+        })
+        .max()
+        .unwrap_or(0)
 }
 
 /// Summary of the flight(s) in a log.

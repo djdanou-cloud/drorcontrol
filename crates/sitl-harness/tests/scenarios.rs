@@ -1054,6 +1054,20 @@ async fn auto_mission_flight_reports_progress_to_landing() {
         "{modes:?} vs {}",
         s.armed_s
     );
+    // The simulated quad's motors share the work evenly, and it learned a hover throttle
+    // well inside the learning range.
+    let mb = logs::motors::motor_balance(&log).expect("motor outputs");
+    eprintln!("motors: {mb:?}");
+    assert!(mb.land_detector && mb.motors.len() == 4, "{mb:?}");
+    assert!(mb.worst().is_some_and(|(_, d)| d.abs() < 0.1), "{mb:?}");
+    assert!(mb.cw_minus_ccw.is_some_and(|d| d.abs() < 0.05), "{mb:?}");
+    let hover = logs::motors::hover_throttle(&log).expect("CTUN");
+    eprintln!("hover: {hover:?}");
+    assert!(hover.at_limit.is_none() && hover.samples > 100, "{hover:?}");
+    assert!(
+        hover.learned.is_some_and(|h| (0.2..0.6).contains(&h)),
+        "{hover:?}"
+    );
     // Only values the autopilot updates itself changed (STAT_* counters, the learned
     // MOT_THST_HOVER at disarm). STAT_DISTFLWN counts 3-D distance, so it reads a little
     // more than the horizontal distance computed from POS.
