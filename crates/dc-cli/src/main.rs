@@ -301,6 +301,9 @@ enum MissionCmd {
         /// Fly a second set of lines at 90 degrees to the first (crosshatch).
         #[arg(long)]
         crosshatch: bool,
+        /// Extend each line this many metres beyond the polygon at both ends.
+        #[arg(long, default_value_t = 0.0)]
+        overshoot: f64,
         /// Line direction, degrees clockwise from north.
         #[arg(long, default_value_t = 0.0)]
         angle: f64,
@@ -1871,6 +1874,7 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
             frontlap,
             trigger,
             crosshatch,
+            overshoot,
             angle,
             alt,
             out,
@@ -1931,6 +1935,7 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
                 alt_m: *alt,
                 trigger_m: fp.filter(|_| *trigger).map(|f| f.trigger_m),
                 crosshatch: *crosshatch,
+                overshoot_m: *overshoot,
             })
             .map_err(|e| e.to_string())?;
             print_stats(&items);

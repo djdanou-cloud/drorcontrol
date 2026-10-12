@@ -1606,6 +1606,7 @@ async fn survey_grid_uploads_and_verifies() {
         // read-back matches.
         trigger_m: Some(15.0),
         crosshatch: false,
+        overshoot_m: 0.0,
     })
     .unwrap();
     assert_eq!(mission.iter().filter(|i| i.command == 206).count(), 2);

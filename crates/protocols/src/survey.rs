@@ -25,6 +25,9 @@ pub struct SurveyConfig {
     pub trigger_m: Option<f64>,
     /// Fly a second set of lines at 90° to the first (crosshatch), after the first set.
     pub crosshatch: bool,
+    /// Extend each line this far beyond the polygon at both ends, m, so the vehicle is
+    /// straight and level (and the camera steady) before it reaches the area.
+    pub overshoot_m: f64,
 }
 
 /// Why a survey cannot be made.
@@ -123,7 +126,9 @@ pub fn grid(cfg: &SurveyConfig) -> Result<Vec<(f64, f64)>, SurveyError> {
         if !forward {
             segments.reverse();
         }
+        let o = cfg.overshoot_m.max(0.0);
         for (x0, x1) in segments {
+            let (x0, x1) = (x0 - o, x1 + o);
             let (a, b) = if forward { (x0, x1) } else { (x1, x0) };
             out.push(plane.to_latlon(unrot((a, y))));
             out.push(plane.to_latlon(unrot((b, y))));
@@ -272,9 +277,22 @@ mod tests {
             alt_m: 50.0,
             trigger_m: None,
             crosshatch: false,
+            overshoot_m: 0.0,
         };
         let pts = grid(&cfg).unwrap();
         assert_eq!(pts.len(), 8, "4 lines, 2 points each");
+        // With a 10 m overshoot the lines run 10 m past both edges.
+        let longer = grid(&SurveyConfig {
+            overshoot_m: 10.0,
+            ..cfg.clone()
+        })
+        .unwrap();
+        let pl = Plane::new((-35.36, 149.16));
+        let (a, b) = (pl.to_xy(longer[0]), pl.to_xy(longer[1]));
+        assert!(
+            ((a.1 - b.1).abs() - 120.0).abs() < 0.05,
+            "100 m + 2 x 10 m: {a:?} {b:?}"
+        );
         let p = Plane::new((-35.36, 149.16));
         let xy: Vec<(f64, f64)> = pts.iter().map(|&q| p.to_xy(q)).collect();
         // Lines run north-south, 25 m apart at x = ±12.5 and ±37.5, edge to edge, flown in
@@ -310,6 +328,7 @@ mod tests {
             alt_m: 40.0,
             trigger_m: None,
             crosshatch: false,
+            overshoot_m: 0.0,
         };
         let m = mission(&cfg).unwrap();
         // home, takeoff, 2 lines x 2 points, RTL
@@ -381,6 +400,7 @@ mod tests {
             alt_m: 30.0,
             trigger_m: None,
             crosshatch: false,
+            overshoot_m: 0.0,
         })
         .unwrap();
         // y = -40: one segment; y = 0 and 40: two each.
@@ -415,6 +435,7 @@ mod tests {
             alt_m: 50.0,
             trigger_m: None,
             crosshatch: false,
+            overshoot_m: 0.0,
         };
         assert!((line_length_m(&grid(&cfg).unwrap()) - 400.0).abs() < 0.5);
     }
@@ -428,6 +449,7 @@ mod tests {
             alt_m: 50.0,
             trigger_m: None,
             crosshatch: false,
+            overshoot_m: 0.0,
         };
         assert_eq!(grid(&cfg), Err(SurveyError::BadSpacing));
         cfg.spacing_m = 500.0;
