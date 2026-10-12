@@ -408,6 +408,40 @@ impl CoreApi for CoreService {
         }))
     }
 
+    async fn get_link_stats(
+        &self,
+        _req: Request<pb::GetLinkStatsRequest>,
+    ) -> Result<Response<pb::LinkStats>, Status> {
+        let s = self
+            .core
+            .hub_snapshot()
+            .await
+            .ok_or_else(|| Status::unavailable("router stopped"))?;
+        let mut routes: Vec<pb::RouteEntry> = s
+            .routes
+            .iter()
+            .map(|((sysid, compid), link)| pb::RouteEntry {
+                sysid: u32::from(*sysid),
+                compid: u32::from(*compid),
+                link_id: link.0,
+            })
+            .collect();
+        routes.sort_by_key(|r| (r.sysid, r.compid));
+        Ok(Response::new(pb::LinkStats {
+            links: s
+                .links
+                .into_iter()
+                .map(|(id, name)| pb::LinkEntry { id: id.0, name })
+                .collect(),
+            routes,
+            frames: s.stats.frames,
+            loops_dropped: s.stats.loops_dropped,
+            flooded: s.stats.flooded,
+            app_dropped: s.app_dropped,
+            links_dropped: s.links_dropped,
+        }))
+    }
+
     async fn list_logs(
         &self,
         req: Request<pb::ListLogsRequest>,

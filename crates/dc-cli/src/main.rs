@@ -401,6 +401,8 @@ enum RemoteCmd {
         #[arg(long)]
         out: Option<std::path::PathBuf>,
     },
+    /// The daemon's router: links, routes (which link each system is heard on), counters.
+    Links,
     /// Print events (STATUSTEXT, links) for a while.
     Events {
         /// Seconds to listen.
@@ -1604,6 +1606,23 @@ async fn remote(url: &str, what: &RemoteCmd) -> Result<(), String> {
                 );
             }
             eprintln!("vehicle {}: {} messages", list.sysid, list.messages.len());
+        }
+        RemoteCmd::Links => {
+            let s = c
+                .get_link_stats(pb::GetLinkStatsRequest {})
+                .await
+                .map_err(err)?
+                .into_inner();
+            for l in &s.links {
+                println!("link {}  {}", l.id, l.name);
+            }
+            for r in &s.routes {
+                println!("route {}/{} -> link {}", r.sysid, r.compid, r.link_id);
+            }
+            println!(
+                "frames {}  flooded {}  loops dropped {}  queue drops {}  link-event drops {}",
+                s.frames, s.flooded, s.loops_dropped, s.app_dropped, s.links_dropped
+            );
         }
         RemoteCmd::Events { seconds } => {
             let mut stream = c

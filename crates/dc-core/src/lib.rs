@@ -33,6 +33,7 @@ use arc_swap::ArcSwap;
 use link_core::{LinkId, LinkIds};
 use link_net::{UdpMode, spawn_tcp_client, spawn_tcp_server, spawn_udp};
 use mav_router::{HubHandle, HubOutput, LinkPolicy, RouterConfig, spawn_hub};
+pub use mav_router::{HubSnapshot, RouterStats};
 use mavlink_codec::enums::{MavAutopilot, MavCmd, MavState, MavType};
 use mavlink_codec::messages::{CommandLong, Heartbeat};
 use mavlink_codec::{Frame, Header, Message, Version, encode};
@@ -1161,6 +1162,11 @@ impl Core {
                     .id
             }
         })
+    }
+
+    /// Links, routes and router counters (`None` once the hub has stopped).
+    pub async fn hub_snapshot(&self) -> Option<HubSnapshot> {
+        self.hub.snapshot().await
     }
 
     /// Send a message from us (MAVLink 2, our ids, next sequence number).

@@ -34,6 +34,8 @@ service Core {
   // Download one log: progress updates, then the data in chunks (the last has done = true).
   // Logs are never erased by this API.
   rpc DownloadLog(DownloadLogRequest) returns (stream LogDownloadUpdate);
+  // The router: open links, learned routes and counters (diagnostics).
+  rpc GetLinkStats(GetLinkStatsRequest) returns (LinkStats);
 }
 
 message GetInfoRequest {}
@@ -308,6 +310,30 @@ enum PositionTrust {
 message LandedState {
   uint32 age_ms = 1;
   uint32 landed_state = 2;  // MAV_LANDED_STATE: 0 undefined, 1 on ground, 2 in air, 3 takeoff, 4 landing
+}
+
+message GetLinkStatsRequest {}
+
+message LinkEntry {
+  uint32 id = 1;
+  string name = 2;
+}
+
+// A (system, component) heard recently, and the link it was heard on.
+message RouteEntry {
+  uint32 sysid = 1;
+  uint32 compid = 2;
+  uint32 link_id = 3;
+}
+
+message LinkStats {
+  repeated LinkEntry links = 1;
+  repeated RouteEntry routes = 2;
+  uint64 frames = 3;          // frames routed
+  uint64 loops_dropped = 4;   // frames claiming our own identity
+  uint64 flooded = 5;         // targeted frames for unknown systems, sent to every link
+  uint64 app_dropped = 6;     // frames lost because the core's queue was full
+  uint64 links_dropped = 7;   // link notifications lost (core not draining)
 }
 
 message ListLogsRequest {

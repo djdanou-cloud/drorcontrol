@@ -234,6 +234,21 @@ async fn grpc_api_end_to_end() {
     assert_eq!((m.severity, m.text.as_str(), m.compid), (2, "PreArm: x", 1));
     assert!(m.unix_ms > 1_700_000_000_000, "wall-clock time");
 
+    let stats = c
+        .get_link_stats(pb::GetLinkStatsRequest {})
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(stats.links.len(), 1, "{stats:?}");
+    assert!(
+        stats
+            .routes
+            .iter()
+            .any(|r| (r.sysid, r.compid, r.link_id) == (7, 1, stats.links[0].id)),
+        "{stats:?}"
+    );
+    assert!(stats.frames > 0 && stats.app_dropped == 0, "{stats:?}");
+
     let logs = c
         .list_logs(pb::ListLogsRequest {
             sysid: 0,
