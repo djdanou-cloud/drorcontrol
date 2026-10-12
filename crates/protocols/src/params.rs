@@ -444,6 +444,24 @@ impl ParamDiff {
     }
 }
 
+/// Parameters the autopilot writes itself, so they differ between any two snapshots without
+/// anyone changing them (seen on ArduCopter 4.7.1 SITL after boot, and in `AP_Stats`):
+/// flight statistics (`STAT_*` but `STAT_RESET`), the learned `MOT_THST_HOVER`, barometer
+/// ground pressure (`BAROn_GND_PRESS`), the boot gyro calibration (`INS_GYROFFS_*`,
+/// `INS_GYRnOFFS_*`, `INS_GYRn_CALTEMP`) and sensor IDs found at detection (`INS_*_ID`,
+/// `COMPASS_DEV_ID*`, `BAROn_DEVID`).
+pub fn set_by_autopilot(name: &str) -> bool {
+    let n = name;
+    (n.starts_with("STAT_") && n != "STAT_RESET")
+        || n == "MOT_THST_HOVER"
+        || (n.starts_with("BARO") && n.ends_with("_GND_PRESS"))
+        || n.starts_with("INS_GYROFFS_")
+        || (n.starts_with("INS_GYR") && (n.contains("OFFS_") || n.ends_with("_CALTEMP")))
+        || (n.starts_with("INS_") && n.ends_with("_ID"))
+        || n.starts_with("COMPASS_DEV_ID")
+        || (n.starts_with("BARO") && n.ends_with("_DEVID"))
+}
+
 /// Compare two parameter sets. Values are compared as the vehicle stores them (`f32`), so
 /// `0.143237` in a file equals the vehicle's nearest float.
 pub fn diff_params(left: &BTreeMap<String, f64>, right: &BTreeMap<String, f64>) -> ParamDiff {
@@ -465,6 +483,33 @@ pub fn diff_params(left: &BTreeMap<String, f64>, right: &BTreeMap<String, f64>) 
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn values_the_autopilot_sets_itself() {
+        for n in [
+            "STAT_RUNTIME",
+            "MOT_THST_HOVER",
+            "BARO2_GND_PRESS",
+            "INS_GYROFFS_X",
+            "INS_GYR2OFFS_Z",
+            "INS_GYR1_CALTEMP",
+            "INS_ACC2_ID",
+            "COMPASS_DEV_ID3",
+            "BARO1_DEVID",
+        ] {
+            assert!(set_by_autopilot(n), "{n}");
+        }
+        for n in [
+            "STAT_RESET",
+            "WP_SPD",
+            "INS_ACCOFFS_X",
+            "FS_THR_ENABLE",
+            "INS_ACC1_CALTEMP",
+        ] {
+            assert!(!set_by_autopilot(n), "{n}");
+        }
+    }
+
     use super::*;
 
     fn value(name: &str, v: f32, index: u16, count: u16) -> Message {

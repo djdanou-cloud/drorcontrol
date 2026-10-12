@@ -65,6 +65,10 @@ enum Cmd {
         /// Write a Mission Planner-compatible .param file instead of printing.
         #[arg(long)]
         out: Option<std::path::PathBuf>,
+        /// Compare the vehicle with this .param file or .bin log instead of printing; exits
+        /// with failure on any difference (read-only).
+        #[arg(long, conflicts_with = "out")]
+        compare: Option<std::path::PathBuf>,
         /// Seconds to wait for a vehicle heartbeat.
         #[arg(long, default_value_t = 15)]
         wait: u64,
@@ -731,6 +735,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             target,
             component,
             out,
+            compare,
             wait,
         } => {
             let core = start(&cli, connect).await?;
@@ -758,6 +763,23 @@ async fn run(cli: Cli) -> Result<(), String> {
                 params.len(),
                 t0.elapsed().as_secs_f32()
             );
+            if let Some(file) = compare {
+                let on_vehicle: std::collections::BTreeMap<String, f64> = params
+                    .iter()
+                    .map(|(k, p)| (k.clone(), f64::from(p.value)))
+                    .collect();
+                let same = print_param_diff(
+                    &file.display().to_string(),
+                    &load_params(file)?,
+                    &format!("vehicle {sysid}"),
+                    &on_vehicle,
+                );
+                return if same {
+                    Ok(())
+                } else {
+                    Err("the vehicle differs from the file".into())
+                };
+            }
             let text = to_param_file(&params);
             match out {
                 Some(path) => {
@@ -2225,11 +2247,30 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
 
 fn params_diff(a: &std::path::Path, b: &std::path::Path) -> Result<(), String> {
     let (pa, pb) = (load_params(a)?, load_params(b)?);
-    let d = diff_params(&pa, &pb);
+    print_param_diff(&a.display().to_string(), &pa, &b.display().to_string(), &pb);
+    Ok(())
+}
+
+/// Print the differences between two parameter sets; true when there are none.
+fn print_param_diff(
+    a: &str,
+    pa: &std::collections::BTreeMap<String, f64>,
+    b: &str,
+    pb: &std::collections::BTreeMap<String, f64>,
+) -> bool {
+    let d = diff_params(pa, pb);
     // Shortest text that round-trips the vehicle's f32.
     let f = |v: f64| v as f32;
+    let mut by_autopilot = 0;
     for (k, x, y) in &d.changed {
-        println!("~ {k:<16} {} -> {}", f(*x), f(*y));
+        let auto = protocols::params::set_by_autopilot(k);
+        by_autopilot += usize::from(auto);
+        println!(
+            "~ {k:<16} {} -> {}{}",
+            f(*x),
+            f(*y),
+            if auto { "  (set by the autopilot)" } else { "" }
+        );
     }
     for k in &d.only_left {
         println!("- {k:<16} {}", f(pa[k]));
@@ -2238,16 +2279,14 @@ fn params_diff(a: &std::path::Path, b: &std::path::Path) -> Result<(), String> {
         println!("+ {k:<16} {}", f(pb[k]));
     }
     println!(
-        "{} vs {}: {} vs {} parameters; {} changed, {} only left, {} only right",
-        a.display(),
-        b.display(),
+        "{a} vs {b}: {} vs {} parameters; {} changed ({by_autopilot} set by the autopilot itself), {} only left, {} only right",
         pa.len(),
         pb.len(),
         d.changed.len(),
         d.only_left.len(),
         d.only_right.len()
     );
-    Ok(())
+    d.changed.len() == by_autopilot && d.only_left.is_empty() && d.only_right.is_empty()
 }
 
 async fn log_transfer(cli: &Cli, what: &LogCmd) -> Result<(), String> {
