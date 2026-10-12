@@ -207,6 +207,12 @@ enum LogCmd {
         /// Path to the .bin log.
         path: std::path::PathBuf,
     },
+    /// Automatic checks: vibration and clipping, battery against the vehicle's failsafe
+    /// voltages, EKF variances against FS_EKF_THRESH, and the autopilot's ERR records.
+    Health {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+    },
     /// Extract MSG.FIELD and downsample it (MinMaxLTTB) for plotting.
     Plot {
         /// Path to the .bin log.
@@ -667,6 +673,29 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
             for (name, n) in log.counts() {
                 println!("{name:<6} {n}");
             }
+        }
+        LogCmd::Health { path } => {
+            let log = open(path)?;
+            let findings = logs::health::assess(&log);
+            if findings.is_empty() {
+                println!("no checks apply: the log has no VIBE, BAT, XKF4 or ERR records");
+            }
+            for f in &findings {
+                let at = f
+                    .at_us
+                    .map_or_else(String::new, |t| format!(" at {:.1} s", t as f64 / 1e6));
+                println!(
+                    "{:<8} {:<10} {}{at}",
+                    format!("{:?}", f.level).to_uppercase(),
+                    f.check,
+                    f.text
+                );
+            }
+            let worst = findings.iter().map(|f| f.level).max();
+            println!(
+                "overall: {}",
+                worst.map_or("n/a".into(), |l| format!("{l:?}").to_uppercase())
+            );
         }
         LogCmd::Plot {
             path,
