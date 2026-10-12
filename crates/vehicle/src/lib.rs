@@ -236,6 +236,18 @@ pub struct Extended {
     pub vtol: VtolState,
 }
 
+/// Home position from `HOME_POSITION` (autopilot component only): where RTL returns to and
+/// what "altitude above home" is measured from.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Home {
+    /// Latitude, degrees.
+    pub lat_deg: f64,
+    /// Longitude, degrees.
+    pub lon_deg: f64,
+    /// Altitude above MSL, m.
+    pub alt_msl_m: f32,
+}
+
 /// `MISSION_STATE` from `MISSION_CURRENT`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MissionState {
@@ -306,6 +318,8 @@ pub struct VehicleState {
     pub extended: Option<Timed<Extended>>,
     /// EKF status (see [`nav`]).
     pub ekf: Option<Timed<Ekf>>,
+    /// Home position.
+    pub home: Option<Timed<Home>>,
     /// Mission progress.
     pub mission: Option<Timed<MissionProgress>>,
     /// Last mission item the vehicle reported reached (`MISSION_ITEM_REACHED`).
@@ -496,6 +510,16 @@ impl Fleet {
                             2 => Some(false),
                             _ => None,
                         },
+                    },
+                );
+            }
+            Message::HomePosition(h) if compid == AUTOPILOT_COMPID => {
+                v.home = timed(
+                    now,
+                    Home {
+                        lat_deg: f64::from(h.latitude) * 1e-7,
+                        lon_deg: f64::from(h.longitude) * 1e-7,
+                        alt_msl_m: h.altitude as f32 / 1000.0,
                     },
                 );
             }
@@ -710,6 +734,26 @@ mod tests {
             "banner wins, and sticks"
         );
         assert_eq!(v.mode_name(), Some("FLY_BY_WIRE_A"), "not LOITER");
+    }
+
+    #[test]
+    fn home_from_the_autopilot() {
+        use mavlink_codec::messages::HomePosition;
+        let mut f = Fleet::new();
+        let now = Instant::now();
+        let h = Message::HomePosition(HomePosition {
+            latitude: -353_632_610,
+            longitude: 1_491_652_300,
+            altitude: 584_090,
+            ..Default::default()
+        });
+        f.apply(1, 100, &h, now);
+        assert_eq!(f.get(1).unwrap().home, None, "not from another component");
+        f.apply(1, 1, &h, now);
+        let home = f.get(1).unwrap().home.as_ref().unwrap().value;
+        assert!((home.lat_deg + 35.363_261).abs() < 1e-9);
+        assert!((home.lon_deg - 149.165_23).abs() < 1e-9);
+        assert_eq!(home.alt_msl_m, 584.09);
     }
 
     #[test]

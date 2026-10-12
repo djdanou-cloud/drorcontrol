@@ -63,6 +63,16 @@ message Vehicle {
   optional NavHealth nav = 9;
   // Heartbeat-based link state, as in VehicleLinkEvent.
   VehicleLinkEvent.State link = 10;
+  optional HomeState home = 11;
+}
+
+// From HOME_POSITION (autopilot component): where RTL returns to, and the reference for
+// PositionState.alt_rel_m.
+message HomeState {
+  uint32 age_ms = 1;
+  double lat_deg = 2;
+  double lon_deg = 3;
+  float alt_msl_m = 4;
 }
 
 message HeartbeatState {

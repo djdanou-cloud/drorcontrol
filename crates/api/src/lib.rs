@@ -148,6 +148,12 @@ pub fn vehicle_to_pb(v: &VehicleState, now: Instant) -> pb::Vehicle {
         }),
         nav: None,
         link: 0,
+        home: v.home.as_ref().map(|h| pb::HomeState {
+            age_ms: ms(h.age(now)),
+            lat_deg: h.value.lat_deg,
+            lon_deg: h.value.lon_deg,
+            alt_msl_m: h.value.alt_msl_m,
+        }),
     }
 }
 
@@ -430,5 +436,19 @@ mod tests {
             (2, Some(4), pb::MissionState::Active, Some(true), Some(1))
         );
         assert_eq!(pb.landed.unwrap().landed_state, 2);
+        assert!(pb.home.is_none());
+        f.apply(
+            1,
+            1,
+            &Message::HomePosition(mavlink_codec::messages::HomePosition {
+                latitude: -353_632_610,
+                longitude: 1_491_652_300,
+                altitude: 584_090,
+                ..Default::default()
+            }),
+            now,
+        );
+        let home = vehicle_to_pb(f.get(1).unwrap(), now).home.unwrap();
+        assert_eq!((home.lat_deg, home.alt_msl_m), (-35.363_261, 584.09));
     }
 }

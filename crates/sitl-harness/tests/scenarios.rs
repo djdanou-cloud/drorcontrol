@@ -738,6 +738,18 @@ async fn auto_mission_flight_reports_progress_to_landing() {
         .and_then(|v| v.position.clone())
         .map(|p| (p.value.lat_deg, p.value.lon_deg))
         .expect("position");
+    // HOME_POSITION: the harness starts SITL at -35.363261, 149.165230, 584 m.
+    until(Duration::from_secs(20), "HOME_POSITION", || {
+        core.fleet().get(1).is_some_and(|v| v.home.is_some())
+    })
+    .await;
+    let home = core.fleet().get(1).unwrap().home.clone().unwrap().value;
+    assert!(
+        (home.lat_deg + 35.363_261).abs() < 1e-5
+            && (home.lon_deg - 149.165_230).abs() < 1e-5
+            && (home.alt_msl_m - 584.0).abs() < 2.0,
+        "{home:?}"
+    );
     let item = |command: u16, frame: u8, lat: f64, lon: f64, alt: f32| MissionItem {
         frame,
         command,

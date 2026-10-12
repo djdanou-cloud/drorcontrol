@@ -56,7 +56,7 @@ pub use protocols::params::{Param, SetStatus};
 use tokio::sync::broadcast;
 
 pub use vehicle::{
-    Extended, Firmware, FirmwareSource, Fleet, LandedState, MissionProgress, MissionState,
+    Extended, Firmware, FirmwareSource, Fleet, Home, LandedState, MissionProgress, MissionState,
     StatusText, VehicleState, VtolState,
 };
 pub use vehicle::{NavHealth, NavThresholds, PositionTrust};
@@ -244,7 +244,8 @@ impl Default for CoreConfig {
             tlog: None,
             // ATTITUDE, GLOBAL_POSITION_INT, VFR_HUD, SYS_STATUS, GPS_RAW_INT,
             // EXTENDED_SYS_STATE (landed / VTOL state), EKF_STATUS_REPORT (navigation health),
-            // MISSION_CURRENT (mission progress)
+            // MISSION_CURRENT (mission progress), HOME_POSITION (sent on change anyway; the
+            // slow interval covers a missed one)
             stream_rates: vec![
                 (30, 10.0),
                 (33, 5.0),
@@ -254,6 +255,7 @@ impl Default for CoreConfig {
                 (245, 2.0),
                 (193, 2.0),
                 (42, 1.0),
+                (242, 0.2),
             ],
             link_stale: Duration::from_millis(1500),
             link_lost: Duration::from_secs(5),
