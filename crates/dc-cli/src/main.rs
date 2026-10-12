@@ -448,6 +448,11 @@ enum LogCmd {
         /// Path to the .bin log.
         path: std::path::PathBuf,
     },
+    /// IMU health: temperatures, error counts, unhealthy samples while armed, sample rates.
+    Imu {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+    },
     /// EKF lane switches (primary core changes), flagged when armed.
     Lanes {
         /// Path to the .bin log.
@@ -1138,6 +1143,28 @@ fn print_params_review(params: &std::collections::BTreeMap<String, f64>) {
         };
         println!("{tag}  {:<16} {}", f.param, f.text);
     }
+}
+
+fn print_log_imu(log: &logs::Log) -> Result<(), String> {
+    let h = logs::imu::imu_health(log);
+    if h.is_empty() {
+        return Err("no IMU records".into());
+    }
+    for i in h {
+        println!(
+            "IMU {}: {} samples; temperature {:.1} to {:.1} C; errors gyro {} accel {}; unhealthy while armed {}; rates gyro {:.0} Hz accel {:.0} Hz",
+            i.instance,
+            i.samples,
+            i.temp_c.0,
+            i.temp_c.1,
+            i.gyro_errors,
+            i.accel_errors,
+            i.unhealthy_armed,
+            i.rates_hz.0,
+            i.rates_hz.1
+        );
+    }
+    Ok(())
 }
 
 fn print_log_lanes(log: &logs::Log) -> Result<(), String> {
@@ -2194,6 +2221,7 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                 ("Wind", Box::new(|| print_log_wind(&log))),
                 ("GPS", Box::new(|| print_log_gps(&log))),
                 ("EKF lane switches", Box::new(|| print_log_lanes(&log))),
+                ("IMU health", Box::new(|| print_log_imu(&log))),
                 ("Altitude sources", Box::new(|| print_log_altitude(&log))),
                 ("Flow and rangefinder", Box::new(|| print_log_sensors(&log))),
                 ("RC link", Box::new(|| print_log_rc(&log))),
@@ -2261,6 +2289,7 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
         LogCmd::Perf { path } => print_log_perf(&open(path)?)?,
         LogCmd::Cells { path } => print_log_cells(&open(path)?)?,
         LogCmd::Lanes { path } => print_log_lanes(&open(path)?)?,
+        LogCmd::Imu { path } => print_log_imu(&open(path)?)?,
         LogCmd::Gps { path } => print_log_gps(&open(path)?)?,
         LogCmd::Compass { path, instance } => print_log_compass(&open(path)?, instance)?,
         LogCmd::Battery { path, instance } => print_log_battery(&open(path)?, instance)?,
