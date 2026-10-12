@@ -306,6 +306,14 @@ enum LogCmd {
         /// Path to the .bin log.
         path: std::path::PathBuf,
     },
+    /// The battery under load while flying: current, power, voltage sag, use, resistance.
+    Battery {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+        /// Battery instance (0 = first).
+        #[arg(long, default_value_t = 0)]
+        instance: u8,
+    },
     /// Attitude tracking while flying: desired minus achieved roll, pitch and yaw.
     Attitude {
         /// Path to the .bin log.
@@ -1218,6 +1226,48 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                     d * 100.0
                 );
             }
+        }
+        LogCmd::Battery { path, instance } => {
+            let log = open(path)?;
+            let b = logs::battery::battery_use(&log, *instance)
+                .ok_or("no battery voltage and current while flying")?;
+            let opt = |v: Option<f64>, unit: &str, digits: usize| {
+                v.map_or("not logged".into(), |v| format!("{v:.digits$} {unit}"))
+            };
+            println!(
+                "{} samples over {:.1} s {}",
+                b.samples,
+                b.flying_s,
+                if b.land_detector {
+                    "of flight (land detector)"
+                } else {
+                    "armed (no land-detector events)"
+                }
+            );
+            println!(
+                "current: max {:.1} A, mean {:.1} A",
+                b.max_current_a, b.mean_current_a
+            );
+            println!(
+                "power: max {:.0} W, mean {:.0} W",
+                b.max_power_w, b.mean_power_w
+            );
+            println!(
+                "voltage: lowest {:.2} V under load, largest sag {}",
+                b.min_voltage,
+                opt(b.max_sag_v, "V", 2)
+            );
+            println!(
+                "used: {}, {} ({})",
+                opt(b.used_mah, "mAh", 0),
+                opt(b.used_wh, "Wh", 1),
+                opt(b.mah_per_min(), "mAh/min", 0)
+            );
+            println!(
+                "internal resistance: logged {}, fitted {}",
+                opt(b.logged_resistance_ohm.map(|r| r * 1000.0), "mOhm", 1),
+                opt(b.fitted_resistance_ohm.map(|r| r * 1000.0), "mOhm", 1)
+            );
         }
         LogCmd::Attitude { path } => {
             let log = open(path)?;

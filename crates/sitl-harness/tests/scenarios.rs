@@ -1074,6 +1074,20 @@ async fn auto_mission_flight_reports_progress_to_landing() {
     assert!(att.land_detector && att.samples > 100, "{att:?}");
     assert!(att.roll.rms_deg < 2.0 && att.pitch.rms_deg < 2.0, "{att:?}");
     assert!(att.yaw.rms_deg < 5.0, "{att:?}");
+    // The simulated battery: current drawn while flying, charge used matching the summary.
+    let bat = logs::battery::battery_use(&log, 0).expect("BAT in flight");
+    eprintln!("battery: {bat:?}");
+    assert!(
+        bat.max_current_a > bat.mean_current_a && bat.mean_current_a > 1.0,
+        "{bat:?}"
+    );
+    assert!(
+        bat.used_mah
+            .zip(s.used_mah)
+            .is_some_and(|(f, total)| f > 0.8 * total && f <= total + 1.0),
+        "{bat:?} vs {:?}",
+        s.used_mah
+    );
     // Only values the autopilot updates itself changed (STAT_* counters, the learned
     // MOT_THST_HOVER at disarm). STAT_DISTFLWN counts 3-D distance, so it reads a little
     // more than the horizontal distance computed from POS.
