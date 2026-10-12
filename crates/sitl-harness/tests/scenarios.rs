@@ -1040,6 +1040,39 @@ async fn fence_and_rally_points_are_downloaded() {
     );
 }
 
+/// SITL's simulated rangefinder (RNGFND1_TYPE 100, downward by default) is reported with
+/// its configured range.
+#[tokio::test(flavor = "multi_thread")]
+async fn rangefinder_is_reported() {
+    let Some(mut cfg) = SitlConfig::copter_or_skip() else {
+        return;
+    };
+    // RNGFND1_MIN/MAX are in metres in 4.7.1 (AP_RangeFinder_Params.cpp).
+    cfg.params = vec![("RNGFND1_TYPE".into(), 100.0), ("RNGFND1_MAX".into(), 30.0)];
+    let sitl = Sitl::start(&cfg).unwrap();
+    let core = core_on(sitl.addr()).await;
+    assert_eq!(
+        core.wait_for_vehicle(Duration::from_secs(60)).await,
+        Some(1)
+    );
+    until(Duration::from_secs(30), "DISTANCE_SENSOR", || {
+        core.fleet()
+            .get(1)
+            .is_some_and(|v| !v.rangefinders.is_empty())
+    })
+    .await;
+    let r = core
+        .fleet()
+        .get(1)
+        .unwrap()
+        .rangefinders
+        .values()
+        .next()
+        .unwrap()
+        .value;
+    assert_eq!((r.orientation, r.max_m), (25, 30.0), "{r:?}");
+}
+
 /// ADS-B traffic reaches the GCS: SITL's simulated receiver (uAvionix MAVLink on SERIAL4)
 /// reports aircraft, ArduPilot relays them as ADSB_VEHICLE when the GCS asks for the
 /// message, and every one arrives marked as simulated.

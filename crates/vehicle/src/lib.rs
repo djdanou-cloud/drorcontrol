@@ -443,6 +443,33 @@ pub struct RadioStatus {
     pub corrected: u16,
 }
 
+/// One rangefinder from `DISTANCE_SENSOR` (autopilot component).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Rangefinder {
+    /// Sensor id.
+    pub id: u8,
+    /// `MAV_SENSOR_ORIENTATION` (25 = pitch 270, facing down).
+    pub orientation: u8,
+    /// `MAV_DISTANCE_SENSOR` type.
+    pub kind: u8,
+    /// Reading, m.
+    pub distance_m: f32,
+    /// Measurable range, m.
+    pub min_m: f32,
+    /// See `min_m`.
+    pub max_m: f32,
+    /// Signal quality, 1–100 %; `None` when not reported (0).
+    pub signal_quality: Option<u8>,
+}
+
+impl Rangefinder {
+    /// The reading lies within the sensor's range (outside it, e.g. a downward sensor on
+    /// the ground, it is not a measurement).
+    pub fn in_range(&self) -> bool {
+        self.distance_m >= self.min_m && self.distance_m <= self.max_m
+    }
+}
+
 /// `WIND` (ArduPilot, autopilot component): the autopilot's wind estimate.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Wind {
@@ -530,6 +557,8 @@ pub struct VehicleState {
     pub vibration: Option<Timed<Vibration>>,
     /// Wind estimate.
     pub wind: Option<Timed<Wind>>,
+    /// Rangefinders by sensor id.
+    pub rangefinders: BTreeMap<u8, Timed<Rangefinder>>,
     /// Telemetry radio link quality reported under this system id.
     pub radio: Option<Timed<RadioStatus>>,
     /// RC input.
@@ -815,6 +844,23 @@ impl Fleet {
                                 s.servo15_raw,
                                 s.servo16_raw,
                             ],
+                        },
+                        at: now,
+                    },
+                );
+            }
+            Message::DistanceSensor(d) if compid == AUTOPILOT_COMPID => {
+                v.rangefinders.insert(
+                    d.id,
+                    Timed {
+                        value: Rangefinder {
+                            id: d.id,
+                            orientation: d.orientation,
+                            kind: d.r#type,
+                            distance_m: f32::from(d.current_distance) / 100.0,
+                            min_m: f32::from(d.min_distance) / 100.0,
+                            max_m: f32::from(d.max_distance) / 100.0,
+                            signal_quality: (d.signal_quality != 0).then_some(d.signal_quality),
                         },
                         at: now,
                     },
@@ -1269,6 +1315,33 @@ mod tests {
         assert_eq!(rc.rssi, None, "255 = unknown");
         let out = v.servos[&0].value.outputs;
         assert_eq!((out[0], out[3], out[15]), (1100, 1150, 0));
+    }
+
+    #[test]
+    fn rangefinder_readings() {
+        use mavlink_codec::messages::DistanceSensor;
+        let mut f = Fleet::new();
+        let d = DistanceSensor {
+            min_distance: 20,
+            max_distance: 700,
+            current_distance: 345,
+            orientation: 25,
+            ..Default::default()
+        };
+        f.apply(1, 1, &Message::DistanceSensor(d.clone()), Instant::now());
+        let r = f.get(1).unwrap().rangefinders[&0].value;
+        assert_eq!((r.distance_m, r.max_m, r.signal_quality), (3.45, 7.0, None));
+        assert!(r.in_range());
+        f.apply(
+            1,
+            1,
+            &Message::DistanceSensor(DistanceSensor {
+                current_distance: 5,
+                ..d
+            }),
+            Instant::now(),
+        );
+        assert!(!f.get(1).unwrap().rangefinders[&0].value.in_range());
     }
 
     #[test]

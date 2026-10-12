@@ -78,6 +78,20 @@ message Vehicle {
   optional RcState rc = 16;
   repeated ServoState servos = 17;
   optional RadioState radio = 18;
+  repeated RangefinderState rangefinders = 19;
+}
+
+// From DISTANCE_SENSOR, by sensor id.
+message RangefinderState {
+  uint32 age_ms = 1;
+  uint32 id = 2;
+  uint32 orientation = 3;  // MAV_SENSOR_ORIENTATION, 25 = facing down
+  uint32 kind = 4;         // MAV_DISTANCE_SENSOR
+  float distance_m = 5;
+  float min_m = 6;
+  float max_m = 7;
+  bool in_range = 8;       // outside min..max the reading is not a measurement
+  optional uint32 signal_quality = 9;
 }
 
 // From RADIO_STATUS (a telemetry radio, under the system id it reports with). Signal

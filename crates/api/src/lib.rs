@@ -235,6 +235,21 @@ pub fn vehicle_to_pb(v: &VehicleState, now: Instant) -> pb::Vehicle {
                 corrected: u32::from(r.corrected),
             }
         }),
+        rangefinders: v
+            .rangefinders
+            .values()
+            .map(|t| pb::RangefinderState {
+                age_ms: ms(t.age(now)),
+                id: u32::from(t.value.id),
+                orientation: u32::from(t.value.orientation),
+                kind: u32::from(t.value.kind),
+                distance_m: t.value.distance_m,
+                min_m: t.value.min_m,
+                max_m: t.value.max_m,
+                in_range: t.value.in_range(),
+                signal_quality: t.value.signal_quality.map(u32::from),
+            })
+            .collect(),
         home: v.home.as_ref().map(|h| pb::HomeState {
             age_ms: ms(h.age(now)),
             lat_deg: h.value.lat_deg,
