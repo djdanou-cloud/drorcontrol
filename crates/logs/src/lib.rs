@@ -10,6 +10,7 @@
 //! * [`track`]: the flight track (EKF position) with UTC from the GPS clock.
 
 pub mod battery;
+pub mod compass;
 pub mod dataflash;
 pub mod downsample;
 pub mod export;

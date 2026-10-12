@@ -306,6 +306,14 @@ enum LogCmd {
         /// Path to the .bin log.
         path: std::path::PathBuf,
     },
+    /// Compass interference: field strength against battery current while flying.
+    Compass {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+        /// Compass instance (0 = first).
+        #[arg(long, default_value_t = 0)]
+        instance: u8,
+    },
     /// The battery under load while flying: current, power, voltage sag, use, resistance.
     Battery {
         /// Path to the .bin log.
@@ -1226,6 +1234,20 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                     d * 100.0
                 );
             }
+        }
+        LogCmd::Compass { path, instance } => {
+            let log = open(path)?;
+            let c = logs::compass::compass_interference(&log, *instance)
+                .ok_or("needs MAG and BAT current while flying, with the current varying")?;
+            println!(
+                "compass {}: {} samples, mean field {:.0} mGauss",
+                c.instance, c.samples, c.mean_field_mgauss
+            );
+            println!(
+                "field strength changes {:+.2} mGauss per A (correlation {:+.2}); at the highest current ({:.1} A): {:+.1} % of the field",
+                c.mgauss_per_amp, c.correlation, c.max_current_a, c.change_at_max_pct
+            );
+            println!("(field strength only, a lower bound of the on-ground compassmot figure)");
         }
         LogCmd::Battery { path, instance } => {
             let log = open(path)?;

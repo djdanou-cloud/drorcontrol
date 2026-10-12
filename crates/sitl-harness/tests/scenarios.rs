@@ -834,6 +834,9 @@ async fn auto_mission_flight_reports_progress_to_landing() {
         // The vibration's amplitude follows the accelerometer noise level, 0 by default.
         ("SIM_ACC1_RND".into(), 2.0),
         ("LOG_BITMASK".into(), 704_510.0),
+        // Motor-current interference on the compass, 1 mGauss/A along body Z
+        // (SIM_Aircraft.cpp: mag_bf += SIM_MAG_MOT * battery_current), for the log check.
+        ("SIM_MAG_MOT_Z".into(), 1.0),
     ];
     let sitl = Sitl::start(&cfg).unwrap();
     let core = core_on(sitl.addr()).await;
@@ -1074,6 +1077,14 @@ async fn auto_mission_flight_reports_progress_to_landing() {
     assert!(att.land_detector && att.samples > 100, "{att:?}");
     assert!(att.roll.rms_deg < 2.0 && att.pitch.rms_deg < 2.0, "{att:?}");
     assert!(att.yaw.rms_deg < 5.0, "{att:?}");
+    // The compass field strength follows the current. Only the part of the 1 mGauss/A
+    // along the earth field shows (inclination about -66 degrees at the SITL home).
+    let mag = logs::compass::compass_interference(&log, 0).expect("MAG and BAT in flight");
+    eprintln!("compass interference: {mag:?}");
+    assert!(
+        (0.4..1.2).contains(&mag.mgauss_per_amp.abs()) && mag.correlation.abs() > 0.5,
+        "{mag:?}"
+    );
     // The simulated battery: current drawn while flying, charge used matching the summary.
     let bat = logs::battery::battery_use(&log, 0).expect("BAT in flight");
     eprintln!("battery: {bat:?}");
