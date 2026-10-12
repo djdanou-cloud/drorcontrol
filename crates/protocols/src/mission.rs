@@ -683,6 +683,247 @@ pub fn stats(items: &[MissionItem]) -> MissionStats {
     s
 }
 
+/// Speeds a Copter flies a mission at, for [`estimate_time`]. Defaults are ArduCopter
+/// 4.7.1's (`AC_WPNav.cpp`, `mode_land.cpp`, `ArduCopter/config.h`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Speeds {
+    /// Horizontal speed between waypoints (`WP_SPD`), m/s.
+    pub horizontal_ms: f64,
+    /// Climb and descent speed (`WP_SPD_UP`, `WP_SPD_DN`), m/s.
+    pub up_ms: f64,
+    /// See `up_ms`.
+    pub down_ms: f64,
+    /// Final landing speed (`LAND_SPD_MS`), m/s.
+    pub land_ms: f64,
+    /// Landing speed above `land_alt_low_m` (`LAND_SPD_HIGH_MS`; 0 = `down_ms`), m/s.
+    pub land_high_ms: f64,
+    /// Height below which landing slows to `land_ms` (`LAND_ALT_LOW_M`), m.
+    pub land_alt_low_m: f64,
+    /// RTL return altitude (`RTL_ALT_M`; 0 = current altitude), m.
+    pub rtl_alt_m: f64,
+    /// RTL horizontal speed (`RTL_SPEED_MS`; 0 = `horizontal_ms`), m/s.
+    pub rtl_speed_ms: f64,
+}
+
+impl Default for Speeds {
+    fn default() -> Self {
+        Speeds {
+            horizontal_ms: 10.0,
+            up_ms: 2.5,
+            down_ms: 1.5,
+            land_ms: 0.5,
+            land_high_ms: 0.0,
+            land_alt_low_m: 10.0,
+            rtl_alt_m: 15.0,
+            rtl_speed_ms: 0.0,
+        }
+    }
+}
+
+impl Speeds {
+    /// From a vehicle's parameters: 4.7 names (metres), else the 4.6-and-earlier names
+    /// (centimetres: `WPNAV_SPEED`, `WPNAV_SPEED_UP`, `WPNAV_SPEED_DN`, `LAND_SPEED`,
+    /// `LAND_SPEED_HIGH`, `LAND_ALT_LOW`, `RTL_ALT`, `RTL_SPEED`; renamed in 4.7.1's
+    /// `AC_WPNav::convert_parameters`, `mode_land.cpp`, `mode_rtl.cpp`), else the default.
+    pub fn from_params(p: &std::collections::BTreeMap<String, f64>) -> Speeds {
+        let d = Speeds::default();
+        let get = |new: &str, old: &str, default: f64| {
+            p.get(new)
+                .copied()
+                .or_else(|| p.get(old).map(|v| v / 100.0))
+                .unwrap_or(default)
+        };
+        Speeds {
+            horizontal_ms: get("WP_SPD", "WPNAV_SPEED", d.horizontal_ms),
+            up_ms: get("WP_SPD_UP", "WPNAV_SPEED_UP", d.up_ms),
+            down_ms: get("WP_SPD_DN", "WPNAV_SPEED_DN", d.down_ms),
+            land_ms: get("LAND_SPD_MS", "LAND_SPEED", d.land_ms),
+            land_high_ms: get("LAND_SPD_HIGH_MS", "LAND_SPEED_HIGH", d.land_high_ms),
+            land_alt_low_m: get("LAND_ALT_LOW_M", "LAND_ALT_LOW", d.land_alt_low_m),
+            rtl_alt_m: get("RTL_ALT_M", "RTL_ALT", d.rtl_alt_m),
+            rtl_speed_ms: get("RTL_SPEED_MS", "RTL_SPEED", d.rtl_speed_ms),
+        }
+    }
+}
+
+/// Rough flight time of a mission.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct TimeEstimate {
+    /// Total, s.
+    pub total_s: f64,
+    /// Of which holding (waypoint delays, `LOITER_TIME`, `DELAY`), s.
+    pub hold_s: f64,
+    /// Some altitudes are above MSL or terrain and could not be compared with home: their
+    /// climbs and descents are not counted.
+    pub alt_unknown: bool,
+    /// The mission contains `LOITER_UNLIM` (it never ends by itself) or `DO_JUMP` (repeats
+    /// are not counted).
+    pub open_ended: bool,
+}
+
+/// Rough flight time: each leg flown in a straight line at the waypoint speeds (whichever
+/// of the horizontal and vertical distance takes longer), plus holds, RTL and landing as
+/// Copter flies them. Acceleration, turns and wind are ignored, so this is a lower bound:
+/// a short SITL test mission (about 190 m) took 1.5 times as long.
+pub fn estimate_time(items: &[MissionItem], sp: &Speeds) -> TimeEstimate {
+    let mut e = TimeEstimate::default();
+    let Some(home) = items.first() else {
+        return e;
+    };
+    let deg = |i: &MissionItem| (f64::from(i.x) * 1e-7, f64::from(i.y) * 1e-7);
+    let home = deg(home);
+    let (mut at, mut alt) = (home, 0.0f64);
+    let leg = |from: (f64, f64), to: (f64, f64), dz: f64, h_speed: f64| {
+        let h = distance_m(from, to) / h_speed;
+        let v = if dz >= 0.0 {
+            dz / sp.up_ms
+        } else {
+            -dz / sp.down_ms
+        };
+        h.max(v)
+    };
+    let land = |alt: f64| {
+        let low = alt.min(sp.land_alt_low_m).max(0.0);
+        let high_speed = if sp.land_high_ms > 0.0 {
+            sp.land_high_ms
+        } else {
+            sp.down_ms
+        };
+        (alt - low).max(0.0) / high_speed.max(sp.land_ms) + low / sp.land_ms
+    };
+    for i in &items[1..] {
+        let target_alt = match i.frame {
+            3 | 6 => Some(f64::from(i.z)),
+            _ => None,
+        };
+        let has_pos = has_location(i.command) && !(i.x == 0 && i.y == 0);
+        let to = if has_pos { deg(i) } else { at };
+        match i.command {
+            177 => e.open_ended = true,
+            17 => e.open_ended = true,
+            // TAKEOFF: straight up.
+            22 => {
+                if let Some(z) = target_alt {
+                    e.total_s += (z - alt).max(0.0) / sp.up_ms;
+                    alt = z;
+                } else {
+                    e.alt_unknown = true;
+                }
+            }
+            // WAYPOINT, LOITER_TIME, LOITER_TURNS, SPLINE_WAYPOINT.
+            16 | 19 | 18 | 82 => {
+                let dz = match target_alt {
+                    Some(z) => z - alt,
+                    None => {
+                        e.alt_unknown |= has_location(i.command);
+                        0.0
+                    }
+                };
+                e.total_s += leg(at, to, dz, sp.horizontal_ms);
+                alt += dz;
+                at = to;
+                let hold = match i.command {
+                    16 | 19 => f64::from(i.params[0]).max(0.0),
+                    _ => 0.0,
+                };
+                e.hold_s += hold;
+                e.total_s += hold;
+                if i.command == 18 {
+                    let circle = 2.0 * std::f64::consts::PI * f64::from(i.params[2]).abs();
+                    e.total_s += f64::from(i.params[0]).max(0.0) * circle / sp.horizontal_ms;
+                }
+            }
+            // DELAY.
+            93 => {
+                let d = f64::from(i.params[0]).max(0.0);
+                e.hold_s += d;
+                e.total_s += d;
+            }
+            // LAND: fly there at the current altitude, then descend.
+            21 => {
+                e.total_s += leg(at, to, 0.0, sp.horizontal_ms) + land(alt);
+                at = to;
+                alt = 0.0;
+            }
+            // RTL: climb to the return altitude, fly home, land (RTL_ALT_FINAL_M 0).
+            20 => {
+                let ret = if sp.rtl_alt_m > 0.0 {
+                    alt.max(sp.rtl_alt_m)
+                } else {
+                    alt
+                };
+                e.total_s += (ret - alt) / sp.up_ms;
+                let speed = if sp.rtl_speed_ms > 0.0 {
+                    sp.rtl_speed_ms
+                } else {
+                    sp.horizontal_ms
+                };
+                e.total_s += leg(at, home, 0.0, speed) + land(ret);
+                at = home;
+                alt = 0.0;
+            }
+            _ => {}
+        }
+    }
+    e
+}
+
+#[cfg(test)]
+mod time_tests {
+    use super::*;
+
+    fn it(command: u16, lat: f64, z: f32, p1: f32) -> MissionItem {
+        MissionItem {
+            frame: if command == 16 && lat == -35.0 && z == 0.0 {
+                0
+            } else {
+                3
+            },
+            command,
+            params: [p1, 0.0, 0.0, 0.0],
+            x: (lat * 1e7).round() as i32,
+            y: if lat == 0.0 { 0 } else { 1_490_000_000 },
+            z,
+            autocontinue: true,
+        }
+    }
+
+    #[test]
+    fn takeoff_out_hold_and_rtl() {
+        // 0.009 deg of latitude is about 1000.8 m.
+        let m = [
+            it(16, -35.0, 0.0, 0.0),     // home
+            it(22, 0.0, 20.0, 0.0),      // takeoff to 20 m: 8 s
+            it(16, -34.991, 20.0, 10.0), // 1000.8 m at 10 m/s, hold 10 s
+            it(20, 0.0, 0.0, 0.0),       // RTL: stays at 20 m (> 15), back, land
+        ];
+        let e = estimate_time(&m, &Speeds::default());
+        let d = distance_m((-35.0, 149.0), (-34.991, 149.0));
+        // Landing from 20 m: 10 m at 1.5 m/s, then 10 m at 0.5 m/s.
+        let want = 8.0 + d / 10.0 + 10.0 + d / 10.0 + 10.0 / 1.5 + 20.0;
+        assert!((e.total_s - want).abs() < 1e-6, "{e:?} vs {want}");
+        assert_eq!(e.hold_s, 10.0);
+        assert!(!e.alt_unknown && !e.open_ended);
+    }
+
+    #[test]
+    fn climbs_limit_short_legs_and_params_of_both_versions_are_read() {
+        let m = [
+            it(16, -35.0, 0.0, 0.0),
+            it(22, 0.0, 10.0, 0.0),
+            // 111 m away but 50 m higher: the climb at 2.5 m/s (20 s) takes longer.
+            it(16, -34.999, 60.0, 0.0),
+        ];
+        let e = estimate_time(&m, &Speeds::default());
+        assert!((e.total_s - (4.0 + 20.0)).abs() < 1e-6, "{e:?}");
+        let mut p = std::collections::BTreeMap::new();
+        p.insert("WPNAV_SPEED".to_string(), 500.0); // 4.6: cm/s
+        p.insert("WP_SPD_UP".to_string(), 5.0); // 4.7: m/s
+        let s = Speeds::from_params(&p);
+        assert_eq!((s.horizontal_ms, s.up_ms, s.down_ms), (5.0, 5.0, 1.5));
+    }
+}
+
 #[cfg(test)]
 mod stats_tests {
     use super::*;

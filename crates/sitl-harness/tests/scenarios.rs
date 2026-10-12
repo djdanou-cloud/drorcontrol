@@ -1051,6 +1051,17 @@ async fn auto_mission_flight_reports_progress_to_landing() {
     eprintln!("armed time per mode: {modes:?}");
     let in_auto = modes.iter().find(|(m, _)| *m == auto).map_or(0.0, |m| m.1);
     assert!(in_auto > 20.0, "{modes:?}");
+    // The flight-time estimate (straight legs at the default speeds, no acceleration) is
+    // below the time actually spent in AUTO, but not far below.
+    let est = protocols::mission::estimate_time(&mission, &protocols::mission::Speeds::default());
+    eprintln!(
+        "estimated {:.1} s, flown in AUTO {in_auto:.1} s",
+        est.total_s
+    );
+    assert!(
+        (1.0..2.0).contains(&(in_auto / est.total_s)),
+        "estimate {est:?}, AUTO {in_auto} s"
+    );
     let total: f64 = modes.iter().map(|m| m.1).sum();
     assert!(
         (total - s.armed_s).abs() < 1.0,

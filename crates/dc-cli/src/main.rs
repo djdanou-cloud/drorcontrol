@@ -262,6 +262,10 @@ enum MissionCmd {
     Check {
         /// The file.
         file: std::path::PathBuf,
+        /// The vehicle's parameters (.param or .bin) for the flight-time estimate's speeds
+        /// (default: ArduCopter 4.7 defaults).
+        #[arg(long)]
+        params: Option<std::path::PathBuf>,
     },
     /// Does the vehicle hold exactly this file's mission? Downloads and compares (home, item
     /// 0, is not compared); exits with failure on any difference.
@@ -858,6 +862,39 @@ fn print_stats(items: &[dc_core::MissionItem]) {
     }
 }
 
+fn print_time_estimate(
+    items: &[dc_core::MissionItem],
+    speeds: &protocols::mission::Speeds,
+    from_vehicle: bool,
+) {
+    let e = protocols::mission::estimate_time(items, speeds);
+    let t = e.total_s.round() as u64;
+    eprintln!(
+        "flight time at least {}:{:02} (holds {:.0} s) at {:.1} m/s, climb {:.1}, descent {:.1} ({}); acceleration, turns and wind add time (a short SITL test mission took 1.5x as long){}{}",
+        t / 60,
+        t % 60,
+        e.hold_s,
+        speeds.horizontal_ms,
+        speeds.up_ms,
+        speeds.down_ms,
+        if from_vehicle {
+            "vehicle parameters"
+        } else {
+            "ArduCopter 4.7 defaults; --params for the vehicle's"
+        },
+        if e.alt_unknown {
+            "; climbs to MSL/terrain altitudes not counted"
+        } else {
+            ""
+        },
+        if e.open_ended {
+            "; DO_JUMP repeats and LOITER_UNLIM not counted"
+        } else {
+            ""
+        }
+    );
+}
+
 fn print_stats_only(items: &[dc_core::MissionItem]) {
     let s = protocols::mission::stats(items);
     let alt = |name: &str, v: Option<f32>| v.map(|a| format!(", highest {a:.1} m {name}"));
@@ -1029,7 +1066,7 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
             let text = protocols::wpl::to_string(&items);
             write_or_print(out.as_deref(), &text, &format!("{} items", items.len()))
         }
-        MissionCmd::Check { file } => {
+        MissionCmd::Check { file, params } => {
             let items = read_mission(file)?;
             print_mission(&items);
             eprintln!(
@@ -1038,6 +1075,11 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
                 items.len()
             );
             print_stats(&items);
+            let speeds = match params {
+                Some(p) => protocols::mission::Speeds::from_params(&load_params(p)?),
+                None => protocols::mission::Speeds::default(),
+            };
+            print_time_estimate(&items, &speeds, params.is_some());
             Ok(())
         }
         MissionCmd::Compare { file, vehicle } => {
