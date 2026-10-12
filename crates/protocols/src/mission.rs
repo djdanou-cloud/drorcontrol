@@ -597,3 +597,128 @@ mod tests {
         );
     }
 }
+
+/// Summary of a mission for the planner (an estimate; the vehicle's own path will differ
+/// with turns, splines and wind).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct MissionStats {
+    /// Navigation items (commands up to `MAV_CMD_NAV_LAST`, 95), home excluded.
+    pub nav_items: usize,
+    /// Horizontal path length, m: home, then every navigation item with a location, back to
+    /// home on RTL. `DO_JUMP` repeats are not followed.
+    pub path_m: f64,
+    /// Highest altitude of a navigation item, by frame: above home (frames 3, 6), above
+    /// MSL (0, 5) and above terrain (10, 11). Altitudes in different frames cannot be
+    /// compared without terrain data, so they are kept apart.
+    pub max_alt_rel_m: Option<f32>,
+    /// See `max_alt_rel_m`.
+    pub max_alt_msl_m: Option<f32>,
+    /// See `max_alt_rel_m`.
+    pub max_alt_terrain_m: Option<f32>,
+    /// The last navigation command: 20 (RTL), 21 (LAND) or another.
+    pub last_nav: Option<u16>,
+    /// The mission contains `DO_JUMP` (177): the path counts each item once.
+    pub has_jumps: bool,
+}
+
+/// `MAV_CMD_NAV_LAST`: navigation commands have ids up to this (`AP_Mission::is_nav_cmd`
+/// adds a few higher ones without a location).
+const MAV_CMD_NAV_LAST: u16 = 95;
+const MAV_CMD_NAV_RETURN_TO_LAUNCH: u16 = 20;
+const MAV_CMD_DO_JUMP: u16 = 177;
+
+/// Great-circle distance, m (mean Earth radius).
+fn distance_m(a: (f64, f64), b: (f64, f64)) -> f64 {
+    const R: f64 = 6_371_008.8;
+    let (la1, lo1, la2, lo2) = (
+        a.0.to_radians(),
+        a.1.to_radians(),
+        b.0.to_radians(),
+        b.1.to_radians(),
+    );
+    let h = ((la2 - la1) / 2.0).sin().powi(2)
+        + la1.cos() * la2.cos() * ((lo2 - lo1) / 2.0).sin().powi(2);
+    2.0 * R * h.sqrt().asin()
+}
+
+/// Statistics of an ArduPilot mission (`items[0]` is home). A navigation item at 0, 0 means
+/// "where the vehicle is" (`ModeAuto::get_loc_from_cmd`), so it adds no distance.
+pub fn stats(items: &[MissionItem]) -> MissionStats {
+    let mut s = MissionStats::default();
+    let Some(home) = items.first() else {
+        return s;
+    };
+    let deg = |i: &MissionItem| (f64::from(i.x) * 1e-7, f64::from(i.y) * 1e-7);
+    let home = deg(home);
+    let mut at = home;
+    for i in &items[1..] {
+        s.has_jumps |= i.command == MAV_CMD_DO_JUMP;
+        if i.command > MAV_CMD_NAV_LAST {
+            continue;
+        }
+        s.nav_items += 1;
+        s.last_nav = Some(i.command);
+        if i.command == MAV_CMD_NAV_RETURN_TO_LAUNCH {
+            s.path_m += distance_m(at, home);
+            at = home;
+            continue;
+        }
+        if !has_location(i.command) {
+            continue;
+        }
+        let max = |m: &mut Option<f32>| *m = Some(m.map_or(i.z, |v| v.max(i.z)));
+        match i.frame {
+            3 | 6 => max(&mut s.max_alt_rel_m),
+            0 | 5 => max(&mut s.max_alt_msl_m),
+            10 | 11 => max(&mut s.max_alt_terrain_m),
+            _ => {}
+        }
+        if i.x == 0 && i.y == 0 {
+            continue;
+        }
+        let p = deg(i);
+        s.path_m += distance_m(at, p);
+        at = p;
+    }
+    s
+}
+
+#[cfg(test)]
+mod stats_tests {
+    use super::*;
+
+    fn it(command: u16, frame: u8, lat: f64, lon: f64, z: f32) -> MissionItem {
+        MissionItem {
+            frame,
+            command,
+            params: [0.0; 4],
+            x: (lat * 1e7).round() as i32,
+            y: (lon * 1e7).round() as i32,
+            z,
+            autocontinue: true,
+        }
+    }
+
+    #[test]
+    fn path_and_altitudes() {
+        // 0.001° of latitude is about 111.2 m.
+        let m = [
+            it(16, 0, -35.0, 149.0, 584.0),
+            it(22, 3, 0.0, 0.0, 20.0),        // take off where it is
+            it(16, 3, -34.999, 149.0, 30.0),  // 111 m north
+            it(178, 2, 0.0, 0.0, 0.0),        // DO_CHANGE_SPEED: not navigation
+            it(177, 2, 0.0, 0.0, 0.0),        // DO_JUMP
+            it(16, 0, -34.998, 149.0, 650.0), // another 111 m, MSL altitude
+            it(20, 2, 0.0, 0.0, 0.0),         // RTL: 222 m back
+        ];
+        let s = stats(&m);
+        assert_eq!(s.nav_items, 4);
+        assert!((s.path_m - 444.8).abs() < 1.0, "{}", s.path_m);
+        assert_eq!(
+            (s.max_alt_rel_m, s.max_alt_msl_m, s.max_alt_terrain_m),
+            (Some(30.0), Some(650.0), None)
+        );
+        assert_eq!((s.last_nav, s.has_jumps), (Some(20), true));
+        assert_eq!(stats(&[]), MissionStats::default());
+    }
+}

@@ -612,6 +612,36 @@ fn print_mission(items: &[dc_core::MissionItem]) {
     }
 }
 
+/// Path length, altitudes and ending of a mission (an estimate).
+fn print_stats(items: &[dc_core::MissionItem]) {
+    let s = protocols::mission::stats(items);
+    let alt = |name: &str, v: Option<f32>| v.map(|a| format!(", highest {a:.1} m {name}"));
+    let alts: String = [
+        alt("above home", s.max_alt_rel_m),
+        alt("MSL", s.max_alt_msl_m),
+        alt("above terrain", s.max_alt_terrain_m),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let ends = match s.last_nav {
+        Some(20) => "ends with RTL",
+        Some(21) => "ends with LAND",
+        Some(_) => "does not end with RTL or LAND",
+        None => "no navigation items",
+    };
+    eprintln!(
+        "{} navigation items, path {:.0} m{alts}; {ends}{}",
+        s.nav_items,
+        s.path_m,
+        if s.has_jumps {
+            " (DO_JUMP repeats not counted)"
+        } else {
+            ""
+        }
+    );
+}
+
 async fn download_mission(
     cli: &Cli,
     v: &VehicleArgs,
@@ -654,6 +684,7 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
             }
             let items = download_mission(cli, vehicle, kind).await?;
             eprintln!("{} items (including home)", items.len());
+            print_stats(&items);
             let text = protocols::wpl::to_string(&items);
             match out {
                 Some(path) => {
@@ -672,6 +703,7 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
                 file.display(),
                 items.len()
             );
+            print_stats(&items);
             Ok(())
         }
         MissionCmd::Compare { file, vehicle } => {
