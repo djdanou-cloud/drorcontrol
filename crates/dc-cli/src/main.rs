@@ -189,10 +189,14 @@ enum TlogCmd {
         #[arg(long)]
         vehicle: Option<u8>,
     },
-    /// The last complete mission in the recording (a download or an upload) as .waypoints.
+    /// The last complete mission, fence or rally list in the recording (a download or an
+    /// upload) as .waypoints (QGC WPL 110).
     Mission {
         /// The .tlog file.
         file: std::path::PathBuf,
+        /// Which list.
+        #[arg(long = "type", value_enum, default_value_t = ListKind::Mission)]
+        kind: ListKind,
         /// Output .waypoints file (default: print).
         #[arg(long)]
         out: Option<std::path::PathBuf>,
@@ -1202,14 +1206,23 @@ fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
                 &format!("{} parameters from system {sys}", p.len()),
             );
         }
-        TlogCmd::Mission { file, out } => {
+        TlogCmd::Mission { file, kind, out } => {
+            let (ty, what) = match kind {
+                ListKind::Mission => (0, "mission"),
+                ListKind::Fence => (1, "fence"),
+                ListKind::Rally => (2, "rally list"),
+            };
             let f = std::fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()))?;
-            let ((sys, comp), items) = tlog::mission(std::io::BufReader::new(f))
+            let ((sys, comp), items) = tlog::mission(std::io::BufReader::new(f), ty)
                 .map_err(|e| format!("{}: {e}", file.display()))?
                 .ok_or_else(|| {
-                    format!("{}: no complete mission in this recording", file.display())
+                    format!("{}: no complete {what} in this recording", file.display())
                 })?;
-            print_stats(&items);
+            if ty == 0 {
+                print_stats(&items);
+            } else {
+                print_mission(&items);
+            }
             let text = protocols::wpl::to_string(&items);
             return write_or_print(
                 out.as_deref(),

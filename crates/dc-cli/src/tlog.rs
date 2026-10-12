@@ -283,11 +283,12 @@ pub fn params(
 /// A mission and who sent it: (system id, component id).
 pub type SentMission = ((u8, u8), Vec<dc_core::MissionItem>);
 
-/// The last complete mission seen in a recording (`MISSION_COUNT` then every item, from one
-/// sender, mission type 0): the vehicle's answer to a download, or the GCS's upload. Items
+/// The last complete list of `mission_type` (`MAV_MISSION_TYPE`: 0 mission, 1 fence, 2 rally)
+/// seen in a recording (`MISSION_COUNT` then every item, from one sender): the vehicle's
+/// answer to a download, or the GCS's upload. Items
 /// in `MISSION_ITEM` (not `_INT`) are converted as ArduPilot does (x, y × 1e7 for commands
 /// with a location). Returns the sender and the items.
-pub fn mission(input: impl Read) -> io::Result<Option<SentMission>> {
+pub fn mission(input: impl Read, mission_type: u8) -> io::Result<Option<SentMission>> {
     use protocols::mission::{MissionItem, has_location};
     let mut r = TlogReader::new(input);
     // Per sender: the announced count and the items so far.
@@ -297,7 +298,7 @@ pub fn mission(input: impl Read) -> io::Result<Option<SentMission>> {
         let f = &rec.frame;
         let from = (f.sysid(), f.compid());
         let (seq, item) = match f.decode() {
-            Ok(Message::MissionCount(c)) if c.mission_type == 0 => {
+            Ok(Message::MissionCount(c)) if c.mission_type == mission_type => {
                 if c.count == 0 {
                     // An empty mission is complete as announced.
                     last = Some((from, Vec::new()));
@@ -307,10 +308,10 @@ pub fn mission(input: impl Read) -> io::Result<Option<SentMission>> {
                 }
                 continue;
             }
-            Ok(Message::MissionItemInt(m)) if m.mission_type == 0 => {
+            Ok(Message::MissionItemInt(m)) if m.mission_type == mission_type => {
                 (m.seq, MissionItem::from_message(&m))
             }
-            Ok(Message::MissionItem(m)) if m.mission_type == 0 => {
+            Ok(Message::MissionItem(m)) if m.mission_type == mission_type => {
                 let scale = |v: f32| {
                     if has_location(m.command) {
                         (f64::from(v) * 1e7).round() as i32
@@ -500,13 +501,48 @@ mod tests {
         assert_eq!(sys, 1);
         assert_eq!(p["WP_SPD"].value, 6.5, "last value wins");
         assert_eq!(p.len(), 2);
-        let (from, m) = mission(&bytes[..]).unwrap().unwrap();
+        let (from, m) = mission(&bytes[..], 0).unwrap().unwrap();
         assert_eq!((from, m.len()), ((1, 1), 2));
         assert_eq!(m[1].x, -353_622_610);
         // A later empty mission is the last complete one.
         let mut more = bytes.clone();
         more.extend(tlog(&[(9, 1, count(0))]));
-        assert_eq!(mission(&more[..]).unwrap().unwrap().1.len(), 0);
+        assert_eq!(mission(&more[..], 0).unwrap().unwrap().1.len(), 0);
+        // A rally list (type 2) is kept apart from the mission.
+        assert!(mission(&bytes[..], 2).unwrap().is_none());
+        let rally = tlog(&[
+            (
+                10,
+                1,
+                Message::MissionCount(MissionCount {
+                    count: 1,
+                    mission_type: 2,
+                    ..Default::default()
+                }),
+            ),
+            (
+                11,
+                1,
+                Message::MissionItemInt(MissionItemInt {
+                    command: 5100,
+                    frame: 3,
+                    x: -353_620_000,
+                    y: 1_491_630_000,
+                    z: 25.0,
+                    mission_type: 2,
+                    ..Default::default()
+                }),
+            ),
+        ]);
+        let mut all = bytes.clone();
+        all.extend(rally);
+        let (_, r) = mission(&all[..], 2).unwrap().unwrap();
+        assert_eq!((r.len(), r[0].command, r[0].z), (1, 5100, 25.0));
+        assert_eq!(
+            mission(&all[..], 0).unwrap().unwrap().1.len(),
+            2,
+            "mission unchanged"
+        );
     }
 
     #[test]
