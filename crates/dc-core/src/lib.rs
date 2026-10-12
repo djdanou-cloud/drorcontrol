@@ -62,6 +62,7 @@ pub use vehicle::{
 pub use vehicle::{NavHealth, NavThresholds, PositionTrust};
 
 mod parameters;
+mod replay;
 pub use parameters::{
     PARAM_HEARTBEAT_MAX_AGE, ParamOperationError, ParamReport, ParamRisk, ParamWriteResult,
     parameter_risk,
@@ -85,6 +86,25 @@ pub enum LinkSpec {
         /// Baud rate.
         baud: u32,
     },
+    /// `tlog:PATH[@SPEED]` — replay a recorded `.tlog` at SPEED × real time (default 1).
+    /// Receive-only, and only as the core's sole link.
+    Tlog {
+        /// The recording.
+        path: std::path::PathBuf,
+        /// Playback speed, 1..=100.
+        speed: u32,
+    },
+}
+
+/// What kind of links a core has opened: a replay never shares the core with a live link,
+/// so recorded traffic cannot be relayed to a vehicle and replayed data cannot be mistaken
+/// for live data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum LinkMode {
+    #[default]
+    None,
+    Live,
+    Replay,
 }
 
 impl FromStr for LinkSpec {
@@ -103,6 +123,25 @@ impl FromStr for LinkSpec {
             "tcpin" => LinkSpec::TcpIn(addr()?),
             "udp" => LinkSpec::Udp(addr()?),
             "udpout" => LinkSpec::UdpOut(addr()?),
+            "tlog" => {
+                let (path, speed) = match rest.rsplit_once('@') {
+                    Some((p, s)) => (
+                        p,
+                        s.parse::<u32>()
+                            .ok()
+                            .filter(|s| (1..=100).contains(s))
+                            .ok_or_else(|| format!("replay speed `{s}`: expected 1..=100"))?,
+                    ),
+                    None => (rest, 1),
+                };
+                if path.is_empty() {
+                    return Err("tlog:PATH[@SPEED]".into());
+                }
+                LinkSpec::Tlog {
+                    path: path.into(),
+                    speed,
+                }
+            }
             "serial" => {
                 let (path, baud) = rest.rsplit_once(':').ok_or("serial:PATH:BAUD")?;
                 LinkSpec::Serial {
@@ -112,7 +151,7 @@ impl FromStr for LinkSpec {
             }
             _ => {
                 return Err(format!(
-                    "unknown link kind `{kind}` (tcp, tcpin, udp, udpout, serial)"
+                    "unknown link kind `{kind}` (tcp, tcpin, udp, udpout, serial, tlog)"
                 ));
             }
         })
@@ -127,6 +166,8 @@ impl fmt::Display for LinkSpec {
             LinkSpec::Udp(a) => write!(f, "udp:{a}"),
             LinkSpec::UdpOut(a) => write!(f, "udpout:{a}"),
             LinkSpec::Serial { path, baud } => write!(f, "serial:{path}:{baud}"),
+            LinkSpec::Tlog { path, speed: 1 } => write!(f, "tlog:{}", path.display()),
+            LinkSpec::Tlog { path, speed } => write!(f, "tlog:{}@{speed}", path.display()),
         }
     }
 }
@@ -446,6 +487,8 @@ pub struct Core {
     /// Last navigation trust per vehicle, to alert on changes.
     nav_trust: Arc<std::sync::Mutex<HashMap<u8, PositionTrust>>>,
     parameters: Arc<parameters::ParameterState>,
+    /// Held across opening a link, so concurrent connects cannot both pass the check.
+    link_mode: Arc<tokio::sync::Mutex<LinkMode>>,
 }
 
 impl Core {
@@ -480,6 +523,7 @@ impl Core {
             audit,
             nav_trust: Arc::default(),
             parameters: Arc::default(),
+            link_mode: Arc::default(),
         };
 
         // Recorder: lossless, on a blocking thread so disk latency never touches routing.
@@ -836,9 +880,41 @@ impl Core {
     }
 
     /// Open a link.
+    ///
+    /// A `.tlog` replay must be the only link: it is refused once any other link was opened,
+    /// and every other link is refused while a replay is open.
     pub async fn connect(&self, spec: &LinkSpec) -> io::Result<LinkId> {
+        let want = if matches!(spec, LinkSpec::Tlog { .. }) {
+            LinkMode::Replay
+        } else {
+            LinkMode::Live
+        };
+        let mut mode = self.link_mode.lock().await;
+        match (*mode, want) {
+            (LinkMode::None, _) | (LinkMode::Live, LinkMode::Live) => {}
+            (LinkMode::Replay, _) | (LinkMode::Live, _) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "a .tlog replay must be the core's only link: use a separate core \
+                     (dc-cli process) for replay and for live links",
+                ));
+            }
+        }
+        let id = self.open_link(spec).await?;
+        // Recorded only once the link is open: a replay file that does not exist must not
+        // lock the core out of live links.
+        *mode = want;
+        Ok(id)
+    }
+
+    async fn open_link(&self, spec: &LinkSpec) -> io::Result<LinkId> {
         let ev = self.hub.events.clone();
         Ok(match spec {
+            LinkSpec::Tlog { path, speed } => {
+                replay::spawn_replay(self.ids.next(), path, *speed, ev)
+                    .await?
+                    .id
+            }
             LinkSpec::Tcp(a) => spawn_tcp_client(self.ids.next(), *a, ev).await.id,
             LinkSpec::TcpIn(a) => {
                 spawn_tcp_server(self.ids.clone(), *a, ev).await?;

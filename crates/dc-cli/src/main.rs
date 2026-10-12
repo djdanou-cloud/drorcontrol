@@ -4,6 +4,7 @@
 //! dc-cli params    --connect tcp:127.0.0.1:5760 [--out copter.param]
 //! dc-cli telemetry --connect udp:0.0.0.0:14550 [--seconds 10]
 //! dc-cli daemon    --connect tcp:127.0.0.1:5760 [--listen 127.0.0.1:50051]
+//! dc-cli daemon    --connect tlog:flight.tlog@4     # replay a recording (sole link)
 //! dc-cli remote    --grpc http://127.0.0.1:50051 vehicles|params|events
 //! dc-cli params-diff old.param flight.bin
 //! dc-cli mission download --connect tcp:127.0.0.1:5760 [--out plan.waypoints]
@@ -44,7 +45,7 @@ struct Cli {
 enum Cmd {
     /// Download all parameters and print them (or write a .param file).
     Params {
-        /// Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200.
+        /// Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay).
         #[arg(long)]
         connect: LinkSpec,
         /// Target system id (default: first vehicle heard).
@@ -139,7 +140,7 @@ enum Cmd {
 /// Which vehicle to talk to.
 #[derive(clap::Args)]
 struct VehicleArgs {
-    /// Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200.
+    /// Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay).
     #[arg(long)]
     connect: LinkSpec,
     /// Target system id (default: first vehicle heard).
