@@ -121,7 +121,7 @@ async fn connect_detects_the_vehicle_and_receives_telemetry() {
         out[0] > 0 && out[..4].iter().all(|&o| o == out[0]),
         "{out:?}"
     );
-    // AUTOPILOT_VERSION, requested once on connect: the pinned 4.7.1 build.
+    // AUTOPILOT_VERSION, requested once on connect: the build under test.
     until(Duration::from_secs(20), "AUTOPILOT_VERSION", || {
         core.fleet()
             .get(1)
@@ -136,9 +136,13 @@ async fn connect_detects_the_vehicle_and_receives_telemetry() {
         .clone()
         .unwrap()
         .value;
-    assert!(av.version_string().starts_with("4.7.1-"), "{av:?}");
+    let (a, b, c) = cfg.version;
+    assert!(
+        av.version_string().starts_with(&format!("{a}.{b}.{c}-")),
+        "{av:?}"
+    );
     assert_eq!(av.git_hash.len(), 8, "{av:?}");
-    // The banner confirmed ArduCopter and the version is 4.7: covered by these tests.
+    // The banner confirmed ArduCopter at a version these tests run against.
     assert_eq!(core.fleet().get(1).unwrap().firmware_tested(), Some(true));
     // TERRAIN_REPORT arrives; before the vehicle has a position it is for 0,0 and flagged.
     until(Duration::from_secs(30), "TERRAIN_REPORT", || {
@@ -181,7 +185,7 @@ async fn parameter_download_is_complete() {
     );
     assert_eq!(params.len(), total, "every index the vehicle announced");
     // ArduPilot 4.7 renamed SYSID_THISMAV to MAV_SYSID.
-    assert_eq!(params["MAV_SYSID"].value, 1.0);
+    assert_eq!(params[&cfg.param("MAV_SYSID", 1.0).0].value, 1.0);
     assert_eq!(params["FRAME_CLASS"].value, 1.0, "quad, from copter.parm");
 }
 
@@ -235,10 +239,11 @@ async fn parameter_write_and_rollback_are_verified_through_30_percent_loss() {
     let recovery_path = dir.join("rollback.snapshot");
     // Copter 4.7.1 renamed WPNAV_SPEED (cm/s) to WP_SPD (m/s); see AC_WPNav.cpp and
     // the WP_ group in ArduCopter/Parameters.cpp. Change only this simulator's setting.
+    let (wp_spd, wp_value) = cfg.param("WP_SPD", 6.5);
     let report = core
         .write_params(
             (1, 1),
-            BTreeMap::from([("WP_SPD".into(), 6.5)]),
+            BTreeMap::from([(wp_spd.clone(), wp_value)]),
             &baseline_path,
         )
         .await
@@ -251,19 +256,23 @@ async fn parameter_write_and_rollback_are_verified_through_30_percent_loss() {
     );
     let original =
         ParamSnapshot::from_text(&std::fs::read_to_string(&baseline_path).unwrap()).unwrap();
-    assert_ne!(original.params()["WP_SPD"].value, 6.5);
-    assert_eq!(report.results[0].name, "WP_SPD");
+    assert_ne!(f64::from(original.params()[&wp_spd].value), wp_value);
+    assert_eq!(report.results[0].name, wp_spd);
     let restored = core
-        .rollback_params(&baseline_path, &["WP_SPD".into()], &recovery_path)
+        .rollback_params(
+            &baseline_path,
+            std::slice::from_ref(&wp_spd),
+            &recovery_path,
+        )
         .await
         .unwrap();
     assert!(restored.verified(), "{restored:?}");
     assert!(
-        matches!(restored.results[0].status, dc_core::SetStatus::Verified(p) if p.value == original.params()["WP_SPD"].value)
+        matches!(restored.results[0].status, dc_core::SetStatus::Verified(p) if p.value == original.params()[&wp_spd].value)
     );
     let dropped = chaos.stats().dropped.load(Ordering::Relaxed);
     assert!(dropped > 100, "the link really dropped frames: {dropped}");
-    eprintln!("WP_SPD set and rollback verified through 30 % loss; {dropped} frames dropped");
+    eprintln!("{wp_spd} set and rollback verified through 30 % loss; {dropped} frames dropped");
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -537,14 +546,19 @@ async fn gps_loss_makes_the_position_untrusted() {
     eprintln!("position good after {:.1} s", t0.elapsed().as_secs_f32());
     while events.try_recv().is_ok() {}
 
-    // Fail the simulated GPS.
+    // Fail the simulated GPS: SIM_GPS1_ENABLE 0 in 4.7, SIM_GPS_DISABLE 1 in 4.6 (SITL.cpp).
+    let (name, value): (&[u8], f32) = if cfg.version >= (4, 7, 0) {
+        (b"SIM_GPS1_ENABLE", 0.0)
+    } else {
+        (b"SIM_GPS_DISABLE", 1.0)
+    };
     let mut param_id = [0u8; 16];
-    param_id[..15].copy_from_slice(b"SIM_GPS1_ENABLE");
+    param_id[..name.len()].copy_from_slice(name);
     core.send(&Message::ParamSet(ParamSet {
         target_system: 1,
         target_component: 1,
         param_id,
-        param_value: 0.0,
+        param_value: value,
         param_type: 9,
     }))
     .await;
@@ -851,7 +865,7 @@ async fn auto_mission_flight_reports_progress_to_landing() {
         ("SIM_FLOW_ENABLE".into(), 1.0),
         ("FLOW_TYPE".into(), 10.0),
         ("RNGFND1_TYPE".into(), 100.0),
-        ("RNGFND1_MAX".into(), 50.0),
+        cfg.param("RNGFND1_MAX", 50.0),
     ];
     let sitl = Sitl::start(&cfg).unwrap();
     let core = core_on(sitl.addr()).await;
@@ -1337,8 +1351,11 @@ async fn rangefinder_is_reported() {
     let Some(mut cfg) = SitlConfig::copter_or_skip() else {
         return;
     };
-    // RNGFND1_MIN/MAX are in metres in 4.7.1 (AP_RangeFinder_Params.cpp).
-    cfg.params = vec![("RNGFND1_TYPE".into(), 100.0), ("RNGFND1_MAX".into(), 30.0)];
+    // RNGFND1_MIN/MAX are in metres in 4.7.1, RNGFND1_MAX_CM in 4.6 (AP_RangeFinder_Params.cpp).
+    cfg.params = vec![
+        ("RNGFND1_TYPE".into(), 100.0),
+        cfg.param("RNGFND1_MAX", 30.0),
+    ];
     let sitl = Sitl::start(&cfg).unwrap();
     let core = core_on(sitl.addr()).await;
     assert_eq!(

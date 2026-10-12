@@ -40,6 +40,24 @@ pub struct SitlConfig {
     pub params: Vec<(String, f64)>,
     /// Extra command-line arguments, e.g. `--serial4=sim:adsb`.
     pub args: Vec<String>,
+    /// ArduPilot version of the binary (major, minor, patch), from `DC_SITL_TAG`.
+    pub version: (u8, u8, u8),
+}
+
+/// The ArduPilot tag under test: `DC_SITL_TAG` (CI runs 4.7.1 and the owner's fleet version,
+/// 4.6.3), else [`PINNED_TAG`].
+pub fn sitl_tag() -> String {
+    std::env::var("DC_SITL_TAG").unwrap_or_else(|_| PINNED_TAG.to_string())
+}
+
+/// Version from a tag such as `Copter-4.6.3`.
+pub fn tag_version(tag: &str) -> Option<(u8, u8, u8)> {
+    let mut v = tag
+        .rsplit('-')
+        .next()?
+        .split('.')
+        .map(|p| p.parse::<u8>().ok());
+    Some((v.next()??, v.next()??, v.next()??))
 }
 
 impl SitlConfig {
@@ -47,7 +65,8 @@ impl SitlConfig {
     /// output under `.sitl/`. `None` if not found.
     pub fn copter() -> Option<SitlConfig> {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let src = root.join(format!(".sitl/ardupilot-{PINNED_TAG}"));
+        let tag = sitl_tag();
+        let src = root.join(format!(".sitl/ardupilot-{tag}"));
         let bin = std::env::var_os("DC_SITL_BIN")
             .map(PathBuf::from)
             .unwrap_or_else(|| src.join("build/sitl/bin/arducopter"));
@@ -62,7 +81,27 @@ impl SitlConfig {
             home: "-35.363261,149.165230,584,353".into(),
             params: Vec::new(),
             args: Vec::new(),
+            version: tag_version(&tag).unwrap_or((4, 7, 1)),
         })
+    }
+
+    /// The parameter for this version: scenarios use 4.7 names; on 4.6 a renamed parameter
+    /// gets its old name and unit (4.7.1 conversion tables: `AC_WPNav::convert_parameters`,
+    /// `AP_RangeFinder_Params.cpp`, `MAV_SYSID` from `SYSID_THISMAV`).
+    pub fn param(&self, name: &str, value: f64) -> (String, f64) {
+        const RENAMED_IN_4_7: [(&str, &str, f64); 7] = [
+            ("WP_SPD", "WPNAV_SPEED", 100.0),
+            ("WP_SPD_UP", "WPNAV_SPEED_UP", 100.0),
+            ("WP_SPD_DN", "WPNAV_SPEED_DN", 100.0),
+            ("RNGFND1_MAX", "RNGFND1_MAX_CM", 100.0),
+            ("RNGFND1_MIN", "RNGFND1_MIN_CM", 100.0),
+            ("RTL_ALT_M", "RTL_ALT", 100.0),
+            ("MAV_SYSID", "SYSID_THISMAV", 1.0),
+        ];
+        match RENAMED_IN_4_7.iter().find(|r| r.0 == name) {
+            Some((_, old, scale)) if self.version < (4, 7, 0) => (old.to_string(), value * scale),
+            _ => (name.to_string(), value),
+        }
     }
 
     /// [`SitlConfig::copter`], or why the caller should skip. Panics when

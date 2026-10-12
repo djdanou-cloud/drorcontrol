@@ -4,7 +4,7 @@ One session on a Windows PC with a flight controller on USB checks what the simu
 cannot:
 * Windows serial ports;
 * real sensors;
-* a firmware version other than the pinned ArduCopter 4.7.1 (for example 4.6.3).
+* real firmware on real hardware (CI covers ArduCopter 4.6.3 and 4.7.1 in simulation only).
 
 Plan on about one hour.
 
@@ -132,7 +132,7 @@ with your port.
 
 ## Known limits
 
-* Tested in CI against SITL ArduCopter 4.7.1 only. On 4.6.x, a parameter or log field that
-  was renamed between versions shows up as missing or as a difference. Report it rather than
+* Tested in CI against SITL ArduCopter 4.7.1 and 4.6.3. On other versions, a parameter or log
+  field that was renamed shows up as missing or as a difference. Report it rather than
   working around it.
 * No UI yet: this is the command-line tool the app will be built on.

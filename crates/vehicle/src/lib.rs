@@ -66,10 +66,11 @@ impl VehicleState {
     }
 }
 
-/// Firmware and major.minor versions the automated tests run against (SITL from the pinned
-/// upstream, `.sitl/ardupilot-Copter-4.7.1`). Others may work but are not yet covered:
-/// parameter and log field names can change between versions.
-pub const TESTED_FIRMWARE: &[(Firmware, u8, u8)] = &[(Firmware::Copter, 4, 7)];
+/// Firmware and major.minor versions the automated tests run against (CI runs every SITL
+/// scenario on ArduCopter 4.7.1 and 4.6.3, the owner's fleet version; ADR-0012). Others may
+/// work but are not yet covered: parameter and log field names change between versions.
+pub const TESTED_FIRMWARE: &[(Firmware, u8, u8)] =
+    &[(Firmware::Copter, 4, 7), (Firmware::Copter, 4, 6)];
 
 impl Heartbeat {
     /// Motors armed (`MAV_MODE_FLAG_SAFETY_ARMED`).
@@ -1530,10 +1531,10 @@ mod tests {
                 now,
             )
         };
-        version(&mut f, 6);
+        version(&mut f, 5);
         assert_eq!(f.get(1).unwrap().firmware_tested(), None, "no banner yet");
         let mut text = [0u8; 50];
-        let banner = b"ArduCopter V4.6.3 (3fc7011a)";
+        let banner = b"ArduCopter V4.5.3 (3fc7011a)";
         text[..banner.len()].copy_from_slice(banner);
         f.apply(
             1,
@@ -1545,7 +1546,9 @@ mod tests {
             }),
             now,
         );
-        assert_eq!(f.get(1).unwrap().firmware_tested(), Some(false), "4.6");
+        assert_eq!(f.get(1).unwrap().firmware_tested(), Some(false), "4.5");
+        version(&mut f, 6);
+        assert_eq!(f.get(1).unwrap().firmware_tested(), Some(true), "4.6");
         version(&mut f, 7);
         assert_eq!(f.get(1).unwrap().firmware_tested(), Some(true), "4.7");
     }

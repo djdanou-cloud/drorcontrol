@@ -13,11 +13,18 @@
 ```sh
 scripts/build_sitl.sh                      # once; builds .sitl/ardupilot-Copter-4.7.1
 cargo test -p sitl-harness -- --nocapture  # ~65 s; prints timings and the chaos seed
+
+# The owner's fleet version (ADR-0012); CI runs both:
+scripts/build_sitl.sh .sitl Copter-4.6.3 copter
+DC_SITL_TAG=Copter-4.6.3 cargo test -p sitl-harness -- --nocapture
 ```
 
-Without a SITL binary the scenarios skip. Set `DC_SITL_BIN` / `DC_SITL_DEFAULTS` to use another
-build, and `DC_SITL_REQUIRED=1` to make a missing binary a failure (CI does). The `sitl` CI job
-caches the built binary keyed on `scripts/build_sitl.sh` and the tag.
+Without a SITL binary the scenarios skip. `DC_SITL_TAG` picks the build under `.sitl/` and tells
+the scenarios which version they test (`SitlConfig::version`; `SitlConfig::param` maps the
+parameters 4.7 renamed, e.g. `WP_SPD` to 4.6's `WPNAV_SPEED` in cm/s). Set `DC_SITL_BIN` /
+`DC_SITL_DEFAULTS` to use another build, and `DC_SITL_REQUIRED=1` to make a missing binary a
+failure (CI does). The `sitl` CI job runs every scenario on ArduCopter 4.7.1 and 4.6.3 and
+caches each built binary keyed on `scripts/build_sitl.sh` and the tag.
 
 ## Notes
 

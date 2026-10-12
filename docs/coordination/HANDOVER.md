@@ -190,8 +190,10 @@ and the code are newer. Where either disagrees with an owner instruction, the ow
 From the owner's decisions of 2026-10-12 (ADR-0012). Each lands with tests, SITL evidence where a
 vehicle is involved, and the audit log:
 
-1. **CI:** lean checks on pushes and PRs; the full 4-OS SITL matrix on a schedule and on
-   releases; **an ArduCopter 4.6 SITL build and scenarios** next to 4.7.1.
+1. **CI — done 2026-10-12:** pushes/PRs run Linux only (checks, tests, docs, SITL); Windows,
+   macOS builds and packaging run nightly (02:17 UTC), on releases and on dispatch. The `sitl`
+   job runs all 17 scenarios on ArduCopter 4.7.1 **and 4.6.3** (both green locally);
+   `TESTED_FIRMWARE` covers Copter 4.6 and 4.7.
 2. **Parameter writes for all parameters** (T0-18 follow-up): drop the dangerous-parameter
    refusal; a single confirmation, no typed text. Keep the disarmed-heartbeat freshness and
    read-back verification unless the owner says otherwise. Expose through gRPC and the CLI.

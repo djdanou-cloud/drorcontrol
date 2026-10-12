@@ -23,9 +23,17 @@ if [ ! -x "$WORK/venv/bin/python" ]; then
   "$WORK/venv/bin/pip" install --quiet "empy==3.3.4" pexpect future setuptools dronecan
 fi
 cd "$SRC"
-git submodule update --init --depth 1 --recursive \
-  modules/waf modules/mavlink modules/DroneCAN/DSDL modules/DroneCAN/dronecan_dsdlc \
-  modules/DroneCAN/libcanard modules/DroneCAN/pydronecan modules/littlefs modules/lwip
+# The submodules SITL needs; older tags lack some (4.6.x has no littlefs), so only those the
+# tag declares are fetched.
+WANT="modules/waf modules/mavlink modules/DroneCAN/DSDL modules/DroneCAN/dronecan_dsdlc
+  modules/DroneCAN/libcanard modules/DroneCAN/pydronecan modules/littlefs modules/lwip"
+HAVE="$(git config -f .gitmodules --get-regexp 'submodule\..*\.path' | awk '{print $2}')"
+SUBS=""
+for m in $WANT; do
+  if printf '%s\n' "$HAVE" | grep -qx "$m"; then SUBS="$SUBS $m"; fi
+done
+# shellcheck disable=SC2086 # word splitting is intended
+git submodule update --init --depth 1 --recursive $SUBS
 export PATH="$WORK/venv/bin:$PATH"
 python ./waf configure --board sitl --no-submodule-update > "$WORK/configure-$VEHICLE.log" 2>&1 \
   || { tail -40 "$WORK/configure-$VEHICLE.log"; exit 1; }

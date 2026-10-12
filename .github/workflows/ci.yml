@@ -1,10 +1,18 @@
 name: ci
 
+# Pushes and pull requests run the lean set (Linux: checks, tests, docs, SITL on ArduCopter
+# 4.7.1 and 4.6.3). The full set adds Windows and both macOS builds, the macOS package and its
+# Intel launch check; it runs nightly, on releases and on manual dispatch (owner, ADR-0012:
+# Windows and macOS runner minutes cost 2x and 10x Linux).
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  release:
+    types: [published]
+  schedule:
+    - cron: "17 2 * * *"
 
 permissions:
   contents: read
@@ -29,14 +37,11 @@ jobs:
     timeout-minutes: 30
     strategy:
       fail-fast: false
+      # Linux only on pushes and pull requests; all four on the full set. macos-x86_64 is
+      # GitHub's Intel label; if it is retired, move that slice to a self-hosted Intel Mac
+      # (docs/plan/03-macos-platform.md §5.2). The arm64 job also cross-builds x86_64 below.
       matrix:
-        include:
-          - { name: linux-x86_64, os: ubuntu-24.04 }
-          - { name: windows-x86_64, os: windows-2022 }
-          - { name: macos-arm64, os: macos-15 }
-          # GitHub's Intel macOS label; if it is retired, move this slice to a self-hosted Intel Mac
-          # (docs/plan/03-macos-platform.md §5.2). The arm64 job also cross-builds x86_64 below.
-          - { name: macos-x86_64, os: macos-15-intel }
+        include: ${{ fromJSON((github.event_name == 'schedule' || github.event_name == 'release' || github.event_name == 'workflow_dispatch') && '[{"name":"linux-x86_64","os":"ubuntu-24.04"},{"name":"windows-x86_64","os":"windows-2022"},{"name":"macos-arm64","os":"macos-15"},{"name":"macos-x86_64","os":"macos-15-intel"}]' || '[{"name":"linux-x86_64","os":"ubuntu-24.04"}]') }}
     steps:
       - uses: actions/checkout@v5
 
@@ -127,11 +132,16 @@ jobs:
           retention-days: 14
 
   sitl:
-    name: sitl scenarios (ArduCopter 4.7.1)
+    name: sitl scenarios (${{ matrix.tag }})
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # The pinned reference and the owner's fleet version (ADR-0012).
+        tag: [Copter-4.7.1, Copter-4.6.3]
     env:
-      SITL_TAG: Copter-4.7.1
+      SITL_TAG: ${{ matrix.tag }}
     steps:
       - uses: actions/checkout@v5
 
@@ -164,12 +174,14 @@ jobs:
       - name: Scenarios (all; listed in docs/dev/sitl-harness.md)
         env:
           DC_SITL_REQUIRED: "1"
+          DC_SITL_TAG: ${{ env.SITL_TAG }}
           DC_SITL_BIN: ${{ github.workspace }}/.sitl-dist/arducopter
           DC_SITL_DEFAULTS: ${{ github.workspace }}/.sitl-dist/copter.parm
         run: cargo test -p sitl-harness --locked -- --nocapture
 
   macos-package:
     name: macOS package (universal, ad-hoc signed)
+    if: github.event_name == 'schedule' || github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: macos-15
     timeout-minutes: 30
     steps:

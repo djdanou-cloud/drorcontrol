@@ -2590,7 +2590,7 @@ fn print_fleet(core: &Core) {
         });
         let fw = v.autopilot_version.as_ref().map(|a| {
             let note = match v.firmware_tested() {
-                Some(false) => " (not covered by DrorControl's tests: ArduCopter 4.7)",
+                Some(false) => " (not covered by DrorControl's tests: ArduCopter 4.6 and 4.7)",
                 _ => "",
             };
             format!("fw {}{note}", a.value.version_string())
