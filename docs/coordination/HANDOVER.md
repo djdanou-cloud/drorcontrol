@@ -201,7 +201,7 @@ vehicle is involved, and the audit log:
 4. **Fence and rally upload** (ground and in flight) with read-back verification.
 5. **Log erase** (`LOG_ERASE`) as a command, audited.
 6. **Camera trigger commands** in generated surveys.
-7. **gRPC:** configurable bind address and a pre-shared bearer key.
+7. **gRPC — done 2026-10-12:** `dc-cli daemon --listen ADDR [--token-file F]` (or `DC_API_TOKEN`); a key is required beyond loopback; every call needs `authorization: Bearer <key>` (constant-time check); `dc-cli remote --token-file`/`DC_API_TOKEN`. A shared secret, not encryption: trusted networks or a tunnel.
 8. Replace the custom FFT with a mature crate; switch the UI font to Inter.
 9. Phase 1 (Qt shell) once the above are in.
 

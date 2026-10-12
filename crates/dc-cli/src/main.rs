@@ -74,15 +74,22 @@ enum Cmd {
         /// Links to open at start (repeatable).
         #[arg(long)]
         connect: Vec<LinkSpec>,
-        /// gRPC listen address. Loopback by default: the API has no authentication yet.
+        /// gRPC listen address, e.g. 0.0.0.0:50051 for a field network. Beyond loopback an
+        /// API key is required (--token-file or DC_API_TOKEN).
         #[arg(long, default_value = "127.0.0.1:50051")]
         listen: std::net::SocketAddr,
+        /// File holding the API key clients must present (else the DC_API_TOKEN variable).
+        #[arg(long)]
+        token_file: Option<std::path::PathBuf>,
     },
     /// Talk to a running daemon over gRPC.
     Remote {
         /// Daemon URL.
         #[arg(long, default_value = "http://127.0.0.1:50051")]
         grpc: String,
+        /// File holding the daemon's API key (else the DC_API_TOKEN variable).
+        #[arg(long)]
+        token_file: Option<std::path::PathBuf>,
         #[command(subcommand)]
         what: RemoteCmd,
     },
@@ -664,7 +671,17 @@ async fn run(cli: Cli) -> Result<(), String> {
             }
             Ok(())
         }
-        Cmd::Daemon { connect, listen } => {
+        Cmd::Daemon {
+            connect,
+            listen,
+            token_file,
+        } => {
+            let token = api_token(token_file.as_deref())?;
+            if token.is_none() && !listen.ip().is_loopback() {
+                return Err(format!(
+                    "listening on {listen} needs an API key: --token-file FILE or DC_API_TOKEN"
+                ));
+            }
             let cfg = CoreConfig {
                 sysid: cli.sysid,
                 compid: cli.compid,
@@ -683,11 +700,15 @@ async fn run(cli: Cli) -> Result<(), String> {
             // Returning lets main drop the runtime, which flushes and closes the .tlog and
             // the links.
             tokio::select! {
-                r = api::serve(core, *listen) => r.map_err(|e| format!("gRPC server: {e}")),
+                r = api::serve_with(core, *listen, api::ServeOptions { token }) => r.map_err(|e| format!("gRPC server: {e}")),
                 _ = shutdown_signal() => Ok(()),
             }
         }
-        Cmd::Remote { grpc, what } => remote(grpc, what).await,
+        Cmd::Remote {
+            grpc,
+            token_file,
+            what,
+        } => remote(grpc, token_file.as_deref(), what).await,
         Cmd::Ports { watch, probe } => ports(*watch, probe.as_deref()),
         Cmd::Log {
             what: what @ (LogCmd::List { .. } | LogCmd::Download { .. }),
@@ -2336,11 +2357,45 @@ fn soak(tx_path: &str, rx_path: &str, baud: u32, seconds: u64) -> Result<(), Str
     }
 }
 
-async fn remote(url: &str, what: &RemoteCmd) -> Result<(), String> {
+/// The API key from `file` (trimmed) or the `DC_API_TOKEN` variable; `None` if neither is set.
+fn api_token(file: Option<&std::path::Path>) -> Result<Option<String>, String> {
+    let token = match file {
+        Some(f) => std::fs::read_to_string(f)
+            .map_err(|e| format!("{}: {e}", f.display()))?
+            .trim()
+            .to_string(),
+        None => std::env::var("DC_API_TOKEN").unwrap_or_default(),
+    };
+    if file.is_some() && token.is_empty() {
+        return Err("the API key file is empty".into());
+    }
+    Ok((!token.is_empty()).then_some(token))
+}
+
+async fn remote(
+    url: &str,
+    token_file: Option<&std::path::Path>,
+    what: &RemoteCmd,
+) -> Result<(), String> {
     use api::pb::{self, core_client::CoreClient};
-    let mut c = CoreClient::connect(url.to_string())
+    let channel = tonic::transport::Endpoint::from_shared(url.to_string())
+        .map_err(|e| format!("{url}: {e}"))?
+        .connect()
         .await
         .map_err(|e| format!("{url}: {e}"))?;
+    let auth = match api_token(token_file)? {
+        Some(t) => Some(
+            tonic::metadata::MetadataValue::try_from(format!("Bearer {t}"))
+                .map_err(|_| "the API key has characters a header cannot carry".to_string())?,
+        ),
+        None => None,
+    };
+    let mut c = CoreClient::with_interceptor(channel, move |mut req: tonic::Request<()>| {
+        if let Some(a) = &auth {
+            req.metadata_mut().insert("authorization", a.clone());
+        }
+        Ok(req)
+    });
     let err = |e: tonic::Status| format!("{}: {}", e.code(), e.message());
     match what {
         RemoteCmd::Info => {

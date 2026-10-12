@@ -306,3 +306,52 @@ async fn grpc_api_end_to_end() {
         .unwrap();
     assert_eq!(first.sysid, 7);
 }
+
+/// ADR-0012 item 18: with a pre-shared key, calls without it or with a wrong one are refused.
+#[tokio::test(flavor = "multi_thread")]
+async fn api_key_is_required_when_set() {
+    let core = Core::start(CoreConfig::default()).await.unwrap();
+    let grpc = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", grpc.local_addr().unwrap());
+    tokio::spawn(api::serve_on_with(
+        core.clone(),
+        grpc,
+        api::ServeOptions {
+            token: Some("s3cret-field-key".into()),
+        },
+    ));
+    let channel = tonic::transport::Endpoint::from_shared(url)
+        .unwrap()
+        .connect()
+        .await
+        .unwrap();
+    let call = |key: Option<&'static str>| {
+        let channel = channel.clone();
+        async move {
+            let mut c = CoreClient::with_interceptor(channel, move |mut req: tonic::Request<()>| {
+                if let Some(k) = key {
+                    req.metadata_mut()
+                        .insert("authorization", format!("Bearer {k}").parse().unwrap());
+                }
+                Ok(req)
+            });
+            c.get_info(pb::GetInfoRequest {})
+                .await
+                .map(|r| r.into_inner())
+        }
+    };
+    assert_eq!(
+        call(None).await.unwrap_err().code(),
+        tonic::Code::Unauthenticated
+    );
+    assert_eq!(
+        call(Some("s3cret-field-kez")).await.unwrap_err().code(),
+        tonic::Code::Unauthenticated
+    );
+    assert_eq!(
+        call(Some("s3cret")).await.unwrap_err().code(),
+        tonic::Code::Unauthenticated,
+        "a prefix is not the key"
+    );
+    assert!(call(Some("s3cret-field-key")).await.is_ok());
+}

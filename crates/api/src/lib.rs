@@ -2,7 +2,13 @@
 //!
 //! * [`pb`]: generated message types, client and server stubs.
 //! * [`CoreService`]: the server implementation over [`dc_core::Core`].
-//! * [`serve`]: run the server on an address.
+//! * [`serve`]: run the server on an address; [`serve_with`] / [`serve_on_with`] add a
+//!   pre-shared key ([`ServeOptions`]).
+//!
+//! Authentication (ADR-0012 item 18): with a key set, every call must carry
+//! `authorization: Bearer <key>`; others are refused as `UNAUTHENTICATED`. The daemon requires
+//! a key before it listens beyond loopback. The key is a shared secret, not encryption: use it
+//! on trusted field networks or inside a VPN/tunnel.
 //!
 //! The API is read-only in v1 (no parameter writes or commands) until the command-safety
 //! layer exists, so remote clients cannot bypass interlocks (plan 08 §4).
@@ -14,6 +20,35 @@ use std::time::{Duration, Instant};
 use dc_core::{AlertLevel, Core, CoreEvent, PositionTrust, VehicleLink, VehicleState};
 use tokio_stream::Stream;
 use tonic::{Request, Response, Status};
+
+/// How the server is run.
+#[derive(Debug, Clone, Default)]
+pub struct ServeOptions {
+    /// Pre-shared key every call must present as `authorization: Bearer <key>`; `None` serves
+    /// without authentication (loopback only, enforced by the daemon).
+    pub token: Option<String>,
+}
+
+/// Equal-length, constant-time comparison (no early exit on the first differing byte).
+fn same_secret(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Check a request's bearer key against `token` (none configured: every request passes).
+pub fn check_token(token: Option<&str>, req: &Request<()>) -> Result<(), Status> {
+    let Some(token) = token else {
+        return Ok(());
+    };
+    let given = req
+        .metadata()
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "));
+    match given {
+        Some(g) if same_secret(g.as_bytes(), token.as_bytes()) => Ok(()),
+        _ => Err(Status::unauthenticated("missing or wrong API key")),
+    }
+}
 
 /// Generated protobuf types and gRPC stubs.
 #[allow(missing_docs, clippy::all)]
@@ -714,9 +749,39 @@ impl CoreApi for CoreService {
 
 /// Serve the API on `addr` until the future is dropped.
 pub async fn serve(core: Core, addr: SocketAddr) -> Result<(), tonic::transport::Error> {
+    serve_with(core, addr, ServeOptions::default()).await
+}
+
+/// Serve on `addr` with options (pre-shared key).
+pub async fn serve_with(
+    core: Core,
+    addr: SocketAddr,
+    opts: ServeOptions,
+) -> Result<(), tonic::transport::Error> {
+    let token = opts.token;
     tonic::transport::Server::builder()
-        .add_service(CoreServer::new(CoreService::new(core)))
+        .add_service(CoreServer::with_interceptor(
+            CoreService::new(core),
+            move |req: Request<()>| check_token(token.as_deref(), &req).map(|()| req),
+        ))
         .serve(addr)
+        .await
+}
+
+/// [`serve_on`] with options (pre-shared key).
+pub async fn serve_on_with(
+    core: Core,
+    listener: tokio::net::TcpListener,
+    opts: ServeOptions,
+) -> Result<(), tonic::transport::Error> {
+    let token = opts.token;
+    let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+    tonic::transport::Server::builder()
+        .add_service(CoreServer::with_interceptor(
+            CoreService::new(core),
+            move |req: Request<()>| check_token(token.as_deref(), &req).map(|()| req),
+        ))
+        .serve_with_incoming(incoming)
         .await
 }
 
