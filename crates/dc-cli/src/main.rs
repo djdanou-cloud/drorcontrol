@@ -277,9 +277,14 @@ enum MissionCmd {
         /// The file.
         file: std::path::PathBuf,
         /// The vehicle's parameters (.param or .bin) for the flight-time estimate's speeds
-        /// (default: ArduCopter 4.7 defaults).
+        /// (default: ArduCopter 4.7 defaults) and the parameter fences (FENCE_TYPE circle and
+        /// altitude) of the --fence check.
         #[arg(long)]
         params: Option<std::path::PathBuf>,
+        /// Check the whole path against this geofence (fence items as saved by
+        /// `mission download --type fence --out`); exits with failure on a breach.
+        #[arg(long)]
+        fence: Option<std::path::PathBuf>,
     },
     /// Compare two mission files (offline); exits with failure on any difference.
     Diff {
@@ -1619,7 +1624,11 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
             }
             Ok(())
         }
-        MissionCmd::Check { file, params } => {
+        MissionCmd::Check {
+            file,
+            params,
+            fence,
+        } => {
             let items = read_mission(file)?;
             print_mission(&items);
             eprintln!(
@@ -1633,6 +1642,39 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
                 None => protocols::mission::Speeds::default(),
             };
             print_time_estimate(&items, &speeds, params.is_some());
+            if let Some(fence_file) = fence {
+                let zones = protocols::fence::Fence::from_items(&read_mission(fence_file)?)
+                    .map_err(|e| format!("{}: {e}", fence_file.display()))?;
+                let fp = match params {
+                    Some(p) => protocols::fence::FenceParams::from_params(&load_params(p)?),
+                    None => protocols::fence::FenceParams::default(),
+                };
+                if zones.is_empty() && fp.circle_radius_m.is_none() && fp.alt_max_m.is_none() {
+                    return Err(format!("{}: no fence zones", fence_file.display()));
+                }
+                let path = protocols::mission::path(&items);
+                let breaches = protocols::fence::check_path(&path, &zones, &fp, 5.0);
+                for b in &breaches {
+                    println!(
+                        "fence: leg to item {} {} at {:.7},{:.7}",
+                        b.seq, b.what, b.at.0, b.at.1
+                    );
+                }
+                if !breaches.is_empty() {
+                    return Err(format!(
+                        "the path breaches the fence on {} legs",
+                        breaches.len()
+                    ));
+                }
+                eprintln!(
+                    "fence: the whole path stays inside{}",
+                    if params.is_some() {
+                        ""
+                    } else {
+                        " (zones only; --params adds FENCE_TYPE circle and altitude)"
+                    }
+                );
+            }
             Ok(())
         }
         MissionCmd::Diff { a, b, with_home } => {
