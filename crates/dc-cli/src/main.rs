@@ -280,6 +280,16 @@ enum MissionCmd {
         #[arg(long)]
         params: Option<std::path::PathBuf>,
     },
+    /// Compare two mission files (offline); exits with failure on any difference.
+    Diff {
+        /// First .waypoints file.
+        a: std::path::PathBuf,
+        /// Second .waypoints file.
+        b: std::path::PathBuf,
+        /// Also compare home (item 0), which the vehicle sets itself.
+        #[arg(long)]
+        with_home: bool,
+    },
     /// The mission's flight path as GPX and/or KML (Google Earth), offline.
     Export {
         /// The .waypoints file.
@@ -1617,6 +1627,27 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
             };
             print_time_estimate(&items, &speeds, params.is_some());
             Ok(())
+        }
+        MissionCmd::Diff { a, b, with_home } => {
+            let (ma, mb) = (read_mission(a)?, read_mission(b)?);
+            let diff = protocols::mission::verify(&ma, &mb, !with_home);
+            if diff.is_empty() {
+                println!(
+                    "same mission ({} items{})",
+                    ma.len(),
+                    if *with_home {
+                        ""
+                    } else {
+                        "; home not compared"
+                    }
+                );
+                return Ok(());
+            }
+            for m in &diff {
+                let at = m.seq.map_or_else(String::new, |s| format!("item {s} "));
+                println!("{at}{}: first {}, second {}", m.field, m.draft, m.vehicle);
+            }
+            Err(format!("{} differences", diff.len()))
         }
         MissionCmd::Compare { file, vehicle } => {
             let draft = read_mission(file)?;
