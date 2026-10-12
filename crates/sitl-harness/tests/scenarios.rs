@@ -986,3 +986,47 @@ async fn fence_and_rally_points_are_downloaded() {
         (5100, rally[0].x, rally[0].y, 30.0)
     );
 }
+
+/// ADS-B traffic reaches the GCS: SITL's simulated receiver (uAvionix MAVLink on SERIAL4)
+/// reports aircraft, ArduPilot relays them as ADSB_VEHICLE when the GCS asks for the
+/// message, and every one arrives marked as simulated.
+#[tokio::test(flavor = "multi_thread")]
+async fn adsb_traffic_is_reported() {
+    let Some(mut cfg) = SitlConfig::copter_or_skip() else {
+        return;
+    };
+    // ADSB_TYPE 1 = uAvionix MAVLink, SERIAL4_PROTOCOL 35 = ADSB (ArduPilot 4.7.1).
+    cfg.params = [
+        ("ADSB_TYPE", 1.0),
+        ("SERIAL4_PROTOCOL", 35.0),
+        ("SIM_ADSB_COUNT", 4.0),
+        ("SIM_ADSB_RADIUS", 3000.0),
+        ("SIM_ADSB_TYPES", 1.0),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v))
+    .collect();
+    cfg.args = vec!["--serial4=sim:adsb".into()];
+    let sitl = Sitl::start(&cfg).unwrap();
+    let core = core_on(sitl.addr()).await;
+    assert_eq!(
+        core.wait_for_vehicle(Duration::from_secs(60)).await,
+        Some(1)
+    );
+    until(Duration::from_secs(60), "two aircraft", || {
+        core.fleet().get(1).is_some_and(|v| v.traffic.len() >= 2)
+    })
+    .await;
+    let v = core.fleet().get(1).unwrap().clone();
+    for t in v.traffic.values().map(|t| &t.value) {
+        assert!(t.simulated, "{t:?}");
+        assert!(
+            t.callsign.as_deref().is_some_and(|c| c.starts_with("SIM")),
+            "{t:?}"
+        );
+        // Near home: SITL re-spawns aircraft beyond SIM_ADSB_RADIUS (3 km); 0.1° leaves margin
+        // for a random spawn point. With an altitude.
+        assert!((t.lat_deg + 35.363_261).abs() < 0.1 && (t.lon_deg - 149.165_23).abs() < 0.1);
+        assert!(t.alt_msl_m.is_some(), "{t:?}");
+    }
+}

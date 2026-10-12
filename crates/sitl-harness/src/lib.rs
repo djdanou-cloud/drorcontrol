@@ -35,6 +35,11 @@ pub struct SitlConfig {
     pub speedup: u32,
     /// Start location `lat,lon,alt,heading`.
     pub home: String,
+    /// Extra parameter defaults applied at boot, after `defaults` (e.g. simulated devices
+    /// that need a reboot to take effect).
+    pub params: Vec<(String, f64)>,
+    /// Extra command-line arguments, e.g. `--serial4=sim:adsb`.
+    pub args: Vec<String>,
 }
 
 impl SitlConfig {
@@ -55,6 +60,8 @@ impl SitlConfig {
             model: "+".into(),
             speedup: 1,
             home: "-35.363261,149.165230,584,353".into(),
+            params: Vec::new(),
+            args: Vec::new(),
         })
     }
 
@@ -174,6 +181,18 @@ impl Sitl {
         let dir = std::env::temp_dir().join(format!("dc-sitl-{}-{instance}", std::process::id()));
         std::fs::create_dir_all(&dir)?;
         let log = std::fs::File::create(dir.join("sitl.log"))?;
+        let mut defaults = cfg.defaults.clone().into_os_string();
+        if !cfg.params.is_empty() {
+            let extra = dir.join("extra.parm");
+            let text: String = cfg
+                .params
+                .iter()
+                .map(|(k, v)| format!("{k} {v}\n"))
+                .collect();
+            std::fs::write(&extra, text)?;
+            defaults.push(",");
+            defaults.push(&extra);
+        }
         let child = Command::new(&cfg.bin)
             .current_dir(&dir)
             .args([
@@ -184,8 +203,9 @@ impl Sitl {
                 "--wipe",
             ])
             .arg("--defaults")
-            .arg(&cfg.defaults)
+            .arg(&defaults)
             .args(["--home", &cfg.home, "-I", &instance.to_string()])
+            .args(&cfg.args)
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
             .stderr(log)

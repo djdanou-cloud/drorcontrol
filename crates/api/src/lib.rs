@@ -155,6 +155,26 @@ pub fn vehicle_to_pb(v: &VehicleState, now: Instant) -> pb::Vehicle {
         }),
         nav: None,
         link: 0,
+        traffic: v
+            .traffic
+            .values()
+            .map(|t| pb::TrafficState {
+                age_ms: ms(t.age(now)),
+                icao: t.value.icao,
+                lat_deg: t.value.lat_deg,
+                lon_deg: t.value.lon_deg,
+                alt_msl_m: t.value.alt_msl_m.map(|(a, _)| a),
+                alt_geometric: t.value.alt_msl_m.is_some_and(|(_, g)| g),
+                heading_deg: t.value.heading_deg,
+                speed_ms: t.value.speed_ms,
+                climb_ms: t.value.climb_ms,
+                callsign: t.value.callsign.clone(),
+                squawk: t.value.squawk.map(u32::from),
+                emitter_type: u32::from(t.value.emitter_type),
+                tslc_s: u32::from(t.value.tslc_s),
+                simulated: t.value.simulated,
+            })
+            .collect(),
         home: v.home.as_ref().map(|h| pb::HomeState {
             age_ms: ms(h.age(now)),
             lat_deg: h.value.lat_deg,
@@ -491,6 +511,32 @@ mod tests {
             now,
         );
         let home = vehicle_to_pb(f.get(1).unwrap(), now).home.unwrap();
+        let mut callsign = [0u8; 9];
+        callsign[..4].copy_from_slice(b"TEST");
+        f.apply(
+            1,
+            156,
+            &Message::AdsbVehicle(mavlink_codec::messages::AdsbVehicle {
+                ICAO_address: 42,
+                lat: -353_600_000,
+                lon: 1_491_700_000,
+                callsign,
+                flags: 1 | 16 | 64,
+                ..Default::default()
+            }),
+            now,
+        );
+        let traffic = vehicle_to_pb(f.get(1).unwrap(), now).traffic;
+        assert_eq!(traffic.len(), 1);
+        assert_eq!(
+            (
+                traffic[0].icao,
+                traffic[0].callsign.as_deref(),
+                traffic[0].alt_msl_m,
+                traffic[0].simulated
+            ),
+            (42, Some("TEST"), None, true)
+        );
         assert_eq!((home.lat_deg, home.alt_msl_m), (-35.363_261, 584.09));
     }
 }

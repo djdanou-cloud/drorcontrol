@@ -248,6 +248,71 @@ pub struct Home {
     pub alt_msl_m: f32,
 }
 
+/// One aircraft from `ADSB_VEHICLE`, as reported through this vehicle (its ADS-B receiver).
+/// Each optional field is `None` unless the message's own `ADSB_FLAGS` mark it valid.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Traffic {
+    /// ICAO address.
+    pub icao: u32,
+    /// Latitude, degrees.
+    pub lat_deg: f64,
+    /// Longitude, degrees.
+    pub lon_deg: f64,
+    /// Altitude above MSL, m, and whether it is geometric (GNSS) rather than pressure (QNH).
+    pub alt_msl_m: Option<(f32, bool)>,
+    /// Course over ground, degrees.
+    pub heading_deg: Option<f32>,
+    /// Horizontal speed, m/s.
+    pub speed_ms: Option<f32>,
+    /// Vertical speed, m/s, positive up.
+    pub climb_ms: Option<f32>,
+    /// Callsign.
+    pub callsign: Option<String>,
+    /// Squawk code (as the decimal digits, e.g. 7700).
+    pub squawk: Option<u16>,
+    /// `ADSB_EMITTER_TYPE`.
+    pub emitter_type: u8,
+    /// Seconds since the receiver last heard it (`tslc`).
+    pub tslc_s: u8,
+    /// `ADSB_FLAGS_SIMULATED`: test traffic, not a real aircraft.
+    pub simulated: bool,
+}
+
+/// Traffic not reported for this long is forgotten.
+pub const TRAFFIC_FORGET: Duration = Duration::from_secs(60);
+
+impl Traffic {
+    /// From `ADSB_VEHICLE`; `None` without valid coordinates (nothing to place).
+    pub fn from_mavlink(a: &mavlink_codec::messages::AdsbVehicle) -> Option<Traffic> {
+        let valid = |bit: u16| a.flags & bit != 0;
+        if !valid(1) {
+            return None;
+        }
+        let end = a
+            .callsign
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(a.callsign.len());
+        let callsign = String::from_utf8_lossy(&a.callsign[..end])
+            .trim()
+            .to_string();
+        Some(Traffic {
+            icao: a.ICAO_address,
+            lat_deg: f64::from(a.lat) * 1e-7,
+            lon_deg: f64::from(a.lon) * 1e-7,
+            alt_msl_m: valid(2).then(|| (a.altitude as f32 / 1000.0, a.altitude_type == 1)),
+            heading_deg: valid(4).then(|| f32::from(a.heading) / 100.0),
+            speed_ms: valid(8).then(|| f32::from(a.hor_velocity) / 100.0),
+            climb_ms: valid(128).then(|| f32::from(a.ver_velocity) / 100.0),
+            callsign: (valid(16) && !callsign.is_empty()).then_some(callsign),
+            squawk: valid(32).then_some(a.squawk),
+            emitter_type: a.emitter_type,
+            tslc_s: a.tslc,
+            simulated: valid(64),
+        })
+    }
+}
+
 /// `MISSION_STATE` from `MISSION_CURRENT`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MissionState {
@@ -320,6 +385,9 @@ pub struct VehicleState {
     pub ekf: Option<Timed<Ekf>>,
     /// Home position.
     pub home: Option<Timed<Home>>,
+    /// ADS-B traffic reported through this vehicle, by ICAO address (forgotten after
+    /// [`TRAFFIC_FORGET`] without a report).
+    pub traffic: BTreeMap<u32, Timed<Traffic>>,
     /// Mission progress.
     pub mission: Option<Timed<MissionProgress>>,
     /// Last mission item the vehicle reported reached (`MISSION_ITEM_REACHED`).
@@ -381,6 +449,10 @@ impl Fleet {
             ..Default::default()
         });
         *v.message_counts.entry(msg.id()).or_default() += 1;
+        // Forget traffic on any message, so it ages out even when the receiver goes quiet.
+        if !v.traffic.is_empty() {
+            v.traffic.retain(|_, t| t.age(now) < TRAFFIC_FORGET);
+        }
         match msg {
             Message::Heartbeat(h) if compid == AUTOPILOT_COMPID || v.heartbeat.is_none() => {
                 if compid == AUTOPILOT_COMPID
@@ -512,6 +584,12 @@ impl Fleet {
                         },
                     },
                 );
+            }
+            // From any component: an ADS-B receiver is often its own component.
+            Message::AdsbVehicle(a) => {
+                if let Some(t) = Traffic::from_mavlink(a) {
+                    v.traffic.insert(t.icao, Timed { value: t, at: now });
+                }
             }
             Message::HomePosition(h) if compid == AUTOPILOT_COMPID => {
                 v.home = timed(
@@ -734,6 +812,67 @@ mod tests {
             "banner wins, and sticks"
         );
         assert_eq!(v.mode_name(), Some("FLY_BY_WIRE_A"), "not LOITER");
+    }
+
+    #[test]
+    fn traffic_keeps_only_valid_fields_and_is_forgotten() {
+        use mavlink_codec::messages::AdsbVehicle;
+        let mut f = Fleet::new();
+        let t0 = Instant::now();
+        let mut callsign = [0u8; 9];
+        callsign[..7].copy_from_slice(b"DLH4AB ");
+        let a = AdsbVehicle {
+            ICAO_address: 0x3C_4A_D2,
+            lat: -353_600_000,
+            lon: 1_491_700_000,
+            altitude_type: 1,
+            altitude: 1_524_000,
+            heading: 27_000,
+            hor_velocity: 12_000,
+            ver_velocity: -500,
+            callsign,
+            emitter_type: 3,
+            tslc: 1,
+            flags: 1 | 2 | 4 | 8 | 16, // no squawk, no vertical speed
+            squawk: 7700,
+        };
+        f.apply(1, 156, &Message::AdsbVehicle(a.clone()), t0);
+        let t = &f.get(1).unwrap().traffic[&0x3C_4A_D2].value;
+        assert_eq!(t.alt_msl_m, Some((1524.0, true)));
+        assert_eq!((t.heading_deg, t.speed_ms), (Some(270.0), Some(120.0)));
+        assert_eq!(t.callsign.as_deref(), Some("DLH4AB"));
+        assert_eq!((t.squawk, t.climb_ms, t.simulated), (None, None, false));
+
+        // Without valid coordinates there is nothing to place.
+        let no_pos = AdsbVehicle {
+            ICAO_address: 1,
+            flags: 2,
+            ..a.clone()
+        };
+        f.apply(1, 156, &Message::AdsbVehicle(no_pos), t0);
+        assert!(!f.get(1).unwrap().traffic.contains_key(&1));
+
+        // Another aircraft 61 s later: the first is forgotten.
+        let other = AdsbVehicle {
+            ICAO_address: 2,
+            ..a
+        };
+        f.apply(
+            1,
+            156,
+            &Message::AdsbVehicle(other),
+            t0 + Duration::from_secs(61),
+        );
+        let keys: Vec<_> = f.get(1).unwrap().traffic.keys().copied().collect();
+        assert_eq!(keys, [2]);
+        // The receiver goes quiet: any later message ages the last one out too.
+        f.apply(
+            1,
+            1,
+            &Message::Heartbeat(Hb::default()),
+            t0 + Duration::from_secs(122),
+        );
+        assert!(f.get(1).unwrap().traffic.is_empty());
     }
 
     #[test]

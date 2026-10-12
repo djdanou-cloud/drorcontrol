@@ -67,6 +67,27 @@ message Vehicle {
   // Heartbeat-based link state, as in VehicleLinkEvent.
   VehicleLinkEvent.State link = 10;
   optional HomeState home = 11;
+  // ADS-B traffic reported through this vehicle (forgotten after 60 s without a report).
+  repeated TrafficState traffic = 12;
+}
+
+// One aircraft from ADSB_VEHICLE. Optional fields are absent unless the message's own
+// ADSB_FLAGS mark them valid. Advisory only: plan 04 decides how it is shown.
+message TrafficState {
+  uint32 age_ms = 1;
+  uint32 icao = 2;
+  double lat_deg = 3;
+  double lon_deg = 4;
+  optional float alt_msl_m = 5;
+  bool alt_geometric = 6;  // GNSS altitude; false = pressure (QNH)
+  optional float heading_deg = 7;
+  optional float speed_ms = 8;
+  optional float climb_ms = 9;  // positive up
+  optional string callsign = 10;
+  optional uint32 squawk = 11;  // decimal digits, e.g. 7700
+  uint32 emitter_type = 12;     // ADSB_EMITTER_TYPE
+  uint32 tslc_s = 13;           // seconds since the receiver last heard it
+  bool simulated = 14;          // ADSB_FLAGS_SIMULATED: not a real aircraft
 }
 
 // From HOME_POSITION (autopilot component): where RTL returns to, and the reference for
