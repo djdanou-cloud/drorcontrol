@@ -520,6 +520,11 @@ enum LogCmd {
         /// Path to the .bin log.
         path: std::path::PathBuf,
     },
+    /// Landings: descent speed before touchdown, time to disarm.
+    Landings {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+    },
     /// EKF lane switches (primary core changes), flagged when armed.
     Lanes {
         /// Path to the .bin log.
@@ -1314,6 +1319,26 @@ fn print_log_imu(log: &logs::Log) -> Result<(), String> {
             i.unhealthy_armed,
             i.rates_hz.0,
             i.rates_hz.1
+        );
+    }
+    Ok(())
+}
+
+fn print_log_landings(log: &logs::Log) -> Result<(), String> {
+    let l = logs::landing::landings(log);
+    if l.is_empty() {
+        return Err("no touchdown reported by the land detector (EV 18)".into());
+    }
+    for x in l {
+        println!(
+            "touchdown at {:.1} s: descent over the last 3 s mean {:.2} m/s, fastest {:.2} m/s; {}",
+            x.time_us as f64 / 1e6,
+            x.mean_descent_ms,
+            x.max_descent_ms,
+            x.to_disarm_s
+                .map_or("not disarmed in this log".into(), |s| format!(
+                    "disarmed {s:.1} s later"
+                ))
         );
     }
     Ok(())
@@ -2458,6 +2483,7 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                 ("Health checks", Box::new(|| print_log_health(&log))),
                 ("Motors and hover", Box::new(|| print_log_motors(&log))),
                 ("Attitude tracking", Box::new(|| print_log_attitude(&log))),
+                ("Landings", Box::new(|| print_log_landings(&log))),
                 ("Battery", Box::new(|| print_log_battery(&log, &0))),
                 ("Cell balance", Box::new(|| print_log_cells(&log))),
                 (
@@ -2537,6 +2563,7 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
         LogCmd::Perf { path } => print_log_perf(&open(path)?)?,
         LogCmd::Cells { path } => print_log_cells(&open(path)?)?,
         LogCmd::Lanes { path } => print_log_lanes(&open(path)?)?,
+        LogCmd::Landings { path } => print_log_landings(&open(path)?)?,
         LogCmd::Imu { path } => print_log_imu(&open(path)?)?,
         LogCmd::Gps { path } => print_log_gps(&open(path)?)?,
         LogCmd::Compass { path, instance } => print_log_compass(&open(path)?, instance)?,

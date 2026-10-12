@@ -1171,6 +1171,20 @@ async fn auto_mission_flight_reports_progress_to_landing() {
         gq.fix_3d() > 0.99 && gq.min_sats >= 6.0 && gq.glitches.is_empty(),
         "{gq:?}"
     );
+    // One landing, slowing to the landing speed (LAND_SPD_MS 0.5 m/s by default) at the end.
+    let land = logs::landing::landings(&log);
+    eprintln!("landings: {land:?}");
+    assert_eq!(land.len(), 1, "{land:?}");
+    assert!(
+        land[0].mean_descent_ms < 1.0 && land[0].max_descent_ms < 2.0,
+        "{land:?}"
+    );
+    assert!(
+        land[0]
+            .to_disarm_s
+            .is_some_and(|s| (0.0..10.0).contains(&s)),
+        "{land:?}"
+    );
     // The EKF learned the simulated wind: from the north, about 4 m/s at its strongest.
     let wind = logs::wind::wind(&log).expect("wind estimated with drag fusion");
     eprintln!("wind: {wind:?}");

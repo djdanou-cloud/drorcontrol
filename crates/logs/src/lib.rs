@@ -22,6 +22,7 @@ pub mod flight;
 pub mod gps;
 pub mod health;
 pub mod imu;
+pub mod landing;
 pub mod lanes;
 pub mod motors;
 pub mod notch;
