@@ -79,6 +79,18 @@ message Vehicle {
   repeated ServoState servos = 17;
   optional RadioState radio = 18;
   repeated RangefinderState rangefinders = 19;
+  optional TerrainState terrain = 20;
+}
+
+// From TERRAIN_REPORT: terrain under the vehicle from the autopilot's terrain database.
+message TerrainState {
+  uint32 age_ms = 1;
+  float terrain_msl_m = 2;
+  float height_above_m = 3;
+  bool extrapolated = 4;  // no data here: heights extrapolated from the last known terrain
+  uint32 pending = 5;     // 4x4 blocks still to load
+  uint32 loaded = 6;
+  bool no_position = 7;   // report for 0,0 before the vehicle has a position: ignore values
 }
 
 // From DISTANCE_SENSOR, by sensor id.

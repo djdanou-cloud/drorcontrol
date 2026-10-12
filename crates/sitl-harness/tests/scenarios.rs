@@ -115,6 +115,11 @@ async fn connect_detects_the_vehicle_and_receives_telemetry() {
         out[0] > 0 && out[..4].iter().all(|&o| o == out[0]),
         "{out:?}"
     );
+    // TERRAIN_REPORT arrives; before the vehicle has a position it is for 0,0 and flagged.
+    until(Duration::from_secs(30), "TERRAIN_REPORT", || {
+        core.fleet().get(1).is_some_and(|v| v.terrain.is_some())
+    })
+    .await;
     let b = core.fleet().get(1).unwrap().batteries[&0].value.clone();
     assert!(
         b.voltage_v.is_some_and(|v| (v - 12.6).abs() < 0.5) && b.cells_v.is_empty(),

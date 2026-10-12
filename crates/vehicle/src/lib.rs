@@ -470,6 +470,27 @@ impl Rangefinder {
     }
 }
 
+/// `TERRAIN_REPORT` (autopilot component): terrain under the vehicle from the autopilot's
+/// terrain database (`AP_Terrain::send_terrain_report`, 4.7.1).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct TerrainReport {
+    /// Terrain height above MSL, m.
+    pub terrain_msl_m: f32,
+    /// Vehicle height above that terrain, m.
+    pub height_above_m: f32,
+    /// No terrain data at this location (grid spacing 0): the heights are the autopilot's
+    /// extrapolation from the last known terrain, not a lookup.
+    pub extrapolated: bool,
+    /// The report is for 0, 0: the vehicle has no position yet. ArduPilot then answers with
+    /// its (unset) home height and a non-zero spacing (`AP_Terrain::height_amsl` matches the
+    /// unset home), so the values mean nothing.
+    pub no_position: bool,
+    /// 4×4 terrain blocks still to load (from the GCS or the SD card).
+    pub pending: u16,
+    /// Blocks in memory.
+    pub loaded: u16,
+}
+
 /// `WIND` (ArduPilot, autopilot component): the autopilot's wind estimate.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Wind {
@@ -557,6 +578,8 @@ pub struct VehicleState {
     pub vibration: Option<Timed<Vibration>>,
     /// Wind estimate.
     pub wind: Option<Timed<Wind>>,
+    /// Terrain under the vehicle.
+    pub terrain: Option<Timed<TerrainReport>>,
     /// Rangefinders by sensor id.
     pub rangefinders: BTreeMap<u8, Timed<Rangefinder>>,
     /// Telemetry radio link quality reported under this system id.
@@ -863,6 +886,19 @@ impl Fleet {
                             signal_quality: (d.signal_quality != 0).then_some(d.signal_quality),
                         },
                         at: now,
+                    },
+                );
+            }
+            Message::TerrainReport(t) if compid == AUTOPILOT_COMPID => {
+                v.terrain = timed(
+                    now,
+                    TerrainReport {
+                        terrain_msl_m: t.terrain_height,
+                        height_above_m: t.current_height,
+                        extrapolated: t.spacing == 0,
+                        no_position: t.lat == 0 && t.lon == 0,
+                        pending: t.pending,
+                        loaded: t.loaded,
                     },
                 );
             }
@@ -1315,6 +1351,50 @@ mod tests {
         assert_eq!(rc.rssi, None, "255 = unknown");
         let out = v.servos[&0].value.outputs;
         assert_eq!((out[0], out[3], out[15]), (1100, 1150, 0));
+    }
+
+    #[test]
+    fn terrain_report_marks_extrapolation() {
+        use mavlink_codec::messages::TerrainReport as Tr;
+        let mut f = Fleet::new();
+        let t = Tr {
+            lat: -353_632_610,
+            lon: 1_491_652_300,
+            terrain_height: 584.2,
+            current_height: 31.5,
+            spacing: 100,
+            pending: 2,
+            loaded: 40,
+        };
+        f.apply(1, 1, &Message::TerrainReport(t.clone()), Instant::now());
+        let r = f.get(1).unwrap().terrain.as_ref().unwrap().value;
+        assert_eq!(
+            (r.terrain_msl_m, r.extrapolated, r.pending),
+            (584.2, false, 2)
+        );
+        f.apply(
+            1,
+            1,
+            &Message::TerrainReport(Tr { spacing: 0, ..t }),
+            Instant::now(),
+        );
+        assert!(
+            f.get(1)
+                .unwrap()
+                .terrain
+                .as_ref()
+                .unwrap()
+                .value
+                .extrapolated
+        );
+        let none = Tr {
+            lat: 0,
+            lon: 0,
+            ..Default::default()
+        };
+        f.apply(1, 1, &Message::TerrainReport(none), Instant::now());
+        let r = f.get(1).unwrap().terrain.as_ref().unwrap().value;
+        assert!(r.no_position);
     }
 
     #[test]

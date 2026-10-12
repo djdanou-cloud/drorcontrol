@@ -59,8 +59,8 @@ use tokio::sync::broadcast;
 
 pub use vehicle::{
     Battery, Extended, Firmware, FirmwareSource, Fleet, Home, LandedState, MissionProgress,
-    MissionState, RadioStatus, Rangefinder, RcInput, ServoOutputs, StatusText, Traffic,
-    VehicleState, Vibration, VtolState, Wind,
+    MissionState, RadioStatus, Rangefinder, RcInput, ServoOutputs, StatusText, TerrainReport,
+    Traffic, VehicleState, Vibration, VtolState, Wind,
 };
 pub use vehicle::{NavHealth, NavThresholds, PositionTrust};
 
@@ -328,6 +328,8 @@ impl Default for CoreConfig {
                 (36, 1.0),
                 // DISTANCE_SENSOR (rangefinders; nothing is sent without one)
                 (132, 2.0),
+                // TERRAIN_REPORT
+                (136, 1.0),
             ],
             link_stale: Duration::from_millis(1500),
             link_lost: Duration::from_secs(5),

@@ -250,6 +250,15 @@ pub fn vehicle_to_pb(v: &VehicleState, now: Instant) -> pb::Vehicle {
                 signal_quality: t.value.signal_quality.map(u32::from),
             })
             .collect(),
+        terrain: v.terrain.as_ref().map(|t| pb::TerrainState {
+            age_ms: ms(t.age(now)),
+            terrain_msl_m: t.value.terrain_msl_m,
+            height_above_m: t.value.height_above_m,
+            extrapolated: t.value.extrapolated,
+            no_position: t.value.no_position,
+            pending: u32::from(t.value.pending),
+            loaded: u32::from(t.value.loaded),
+        }),
         home: v.home.as_ref().map(|h| pb::HomeState {
             age_ms: ms(h.age(now)),
             lat_deg: h.value.lat_deg,
