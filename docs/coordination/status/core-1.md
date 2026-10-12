@@ -2,9 +2,9 @@
 agent: core-1
 role: workstream-agent
 workstream: WS-CORE
-state: idle
-task: batch4
-updated: 2026-10-12T19:31:13Z
+state: active
+task: batch5
+updated: 2026-10-12T19:32:41Z
 ---
 
 ## Current focus

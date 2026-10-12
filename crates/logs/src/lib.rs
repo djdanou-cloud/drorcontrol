@@ -24,5 +24,6 @@ pub mod spectrum;
 mod testlog;
 pub mod track;
 pub mod tuning;
+pub mod wind;
 
 pub use dataflash::{Column, Format, Log};

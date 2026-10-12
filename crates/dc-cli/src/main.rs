@@ -356,6 +356,11 @@ enum LogCmd {
         #[arg(long)]
         out: Option<std::path::PathBuf>,
     },
+    /// Wind while flying, as the EKF estimated it.
+    Wind {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+    },
     /// Compass interference: field strength against battery current while flying.
     Compass {
         /// Path to the .bin log.
@@ -1478,6 +1483,20 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                 &csv,
                 &format!("{} {msg} records", photos.len()),
             )?;
+        }
+        LogCmd::Wind { path } => {
+            let log = open(path)?;
+            let w = logs::wind::wind(&log).ok_or(
+                "no wind estimate in flight (a multicopter's EKF estimates wind only with drag fusion: EK3_DRAG_BCOEF_X/Y)",
+            )?;
+            println!(
+                "mean wind {:.1} m/s from {:.0} deg; strongest {:.1} m/s at {:.1} s ({} samples)",
+                w.mean_speed_ms,
+                w.mean_from_deg,
+                w.max_speed_ms,
+                w.max_at_us as f64 / 1e6,
+                w.samples
+            );
         }
         LogCmd::Compass { path, instance } => {
             let log = open(path)?;

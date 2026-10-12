@@ -837,6 +837,15 @@ async fn auto_mission_flight_reports_progress_to_landing() {
         // Motor-current interference on the compass, 1 mGauss/A along body Z
         // (SIM_Aircraft.cpp: mag_bf += SIM_MAG_MOT * battery_current), for the log check.
         ("SIM_MAG_MOT_Z".into(), 1.0),
+        // 4 m/s of wind from the north at every height (SIM_WIND_T 1: no profile), and drag
+        // fusion so the EKF estimates it (values from ArduPilot's own autotest,
+        // arducopter.py DeadReckoningInWind).
+        ("SIM_WIND_SPD".into(), 4.0),
+        ("SIM_WIND_DIR".into(), 0.0),
+        ("SIM_WIND_T".into(), 1.0),
+        ("EK3_DRAG_BCOEF_X".into(), 9.5),
+        ("EK3_DRAG_BCOEF_Y".into(), 9.5),
+        ("EK3_DRAG_MCOEF".into(), 0.082),
     ];
     let sitl = Sitl::start(&cfg).unwrap();
     let core = core_on(sitl.addr()).await;
@@ -1096,6 +1105,12 @@ async fn auto_mission_flight_reports_progress_to_landing() {
         (0.4..1.2).contains(&mag.mgauss_per_amp.abs()) && mag.correlation.abs() > 0.5,
         "{mag:?}"
     );
+    // The EKF learned the simulated wind: from the north, about 4 m/s at its strongest.
+    let wind = logs::wind::wind(&log).expect("wind estimated with drag fusion");
+    eprintln!("wind: {wind:?}");
+    let off_north = (wind.mean_from_deg + 180.0).rem_euclid(360.0) - 180.0;
+    assert!(off_north.abs() < 30.0, "{wind:?}");
+    assert!((2.5..6.0).contains(&wind.max_speed_ms), "{wind:?}");
     // The simulated battery: current drawn while flying, charge used matching the summary.
     let bat = logs::battery::battery_use(&log, 0).expect("BAT in flight");
     eprintln!("battery: {bat:?}");
