@@ -4,12 +4,14 @@
 //! * [`downsample`]: LTTB and MinMaxLTTB for plotting millions of points.
 //! * [`Log::params`]: parameter values recorded in the log.
 //! * [`export`]: one message as CSV; the recorded parameters as a .param file.
+//! * [`flight`]: armed periods and flight summary, event timeline, in-flight parameter changes.
 //! * [`health`]: automatic checks (vibration, battery, EKF, errors) against sourced thresholds.
 //! * [`track`]: the flight track (EKF position) with UTC from the GPS clock.
 
 pub mod dataflash;
 pub mod downsample;
 pub mod export;
+pub mod flight;
 pub mod health;
 mod params;
 pub mod track;

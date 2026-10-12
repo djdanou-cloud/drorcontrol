@@ -999,6 +999,58 @@ async fn auto_mission_flight_reports_progress_to_landing() {
             .is_some_and(|m| m.value.state == MissionState::Complete)
     })
     .await;
+    // The flight's own dataflash log (SITL writes it while armed) tells the same story.
+    tokio::time::sleep(Duration::from_secs(3)).await; // let the log reach the disk
+    let bin = std::fs::read_dir(sitl.dir().join("logs"))
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("bin")))
+        .max_by_key(|p| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0))
+        .expect("a flight log");
+    let log = logs::Log::open(&bin).unwrap();
+    let s = logs::flight::summary(&log);
+    eprintln!("flight log summary: {s:?}");
+    assert_eq!(s.armed.len(), 1, "one flight");
+    assert!(s.armed[0].end_us.is_some(), "disarmed at the end");
+    assert!(s.armed_s > 30.0, "{s:?}");
+    assert!(
+        s.max_alt_rel_m.is_some_and(|a| (17.0..24.0).contains(&a)),
+        "{s:?}"
+    );
+    // Out 55 m, across 55 m, back about 78 m (RTL): about 190 m.
+    assert!((150.0..260.0).contains(&s.distance_m), "{s:?}");
+    let auto = dc_core::Firmware::Copter.mode_number("AUTO").unwrap() as u8;
+    let ev = logs::flight::events(&log);
+    assert!(
+        ev.iter().any(|(_, e)| *e
+            == logs::flight::Event::Mode {
+                mode: auto,
+                reason: 2
+            }
+            || matches!(e, logs::flight::Event::Mode { mode, .. } if *mode == auto)),
+        "AUTO in the timeline"
+    );
+    // Only values the autopilot updates itself changed (STAT_* counters, the learned
+    // MOT_THST_HOVER at disarm). STAT_DISTFLWN counts 3-D distance, so it reads a little
+    // more than the horizontal distance computed from POS.
+    let changes = logs::flight::param_changes(&log);
+    assert!(changes.iter().all(|c| c.automatic), "{changes:?}");
+    let flown = changes
+        .iter()
+        .rev()
+        .find(|c| c.name == "STAT_DISTFLWN")
+        .map(|c| {
+            c.new
+                - changes
+                    .iter()
+                    .find(|c| c.name == "STAT_DISTFLWN")
+                    .unwrap()
+                    .old
+        });
+    eprintln!(
+        "STAT_DISTFLWN grew by {flown:?} m; POS distance {:.0} m",
+        s.distance_m
+    );
     // The same progress arrived as events, for a UI that does not poll.
     let mut seen = Vec::new();
     while let Ok(e) = events.try_recv() {

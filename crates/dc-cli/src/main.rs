@@ -16,6 +16,7 @@
 //! dc-cli tlog mission flight.tlog [--out flight.waypoints]
 //! dc-cli log export flight.bin --gpx flight.gpx [--kml flight.kml]
 //! dc-cli log csv flight.bin ATT [--out att.csv]
+//! dc-cli log summary|events|changes flight.bin
 //! dc-cli log params flight.bin [--out flight.param]
 //! ```
 //!
@@ -284,6 +285,21 @@ enum LogCmd {
         /// Output file.
         #[arg(long)]
         out: std::path::PathBuf,
+    },
+    /// Flight summary: armed time, highest altitude, top speed, distance, battery used.
+    Summary {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+    },
+    /// Timeline of mode changes, arming, events, errors and messages.
+    Events {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+    },
+    /// Parameters changed after boot (values the autopilot updates itself are marked).
+    Changes {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
     },
     /// Every record of one message as CSV (all fields; text quoted).
     Csv {
@@ -1032,6 +1048,75 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
             for (name, n) in log.counts() {
                 println!("{name:<6} {n}");
             }
+        }
+        LogCmd::Summary { path } => {
+            let log = open(path)?;
+            let s = logs::flight::summary(&log);
+            println!("flights: {}", s.armed.len());
+            for p in &s.armed {
+                let end = p.end_us.map_or("log end".to_string(), |e| {
+                    format!("{:.1} s", e as f64 / 1e6)
+                });
+                println!("  armed {:.1} s -> {end}", p.start_us as f64 / 1e6);
+            }
+            println!("armed time: {:.1} s", s.armed_s);
+            let opt = |v: Option<f64>, unit: &str| {
+                v.map_or("not logged".into(), |v| format!("{v:.1} {unit}"))
+            };
+            println!("highest above home: {}", opt(s.max_alt_rel_m, "m"));
+            println!("top ground speed: {}", opt(s.max_speed_ms, "m/s"));
+            println!("distance flown: {:.0} m", s.distance_m);
+            println!("battery used: {}", opt(s.used_mah, "mAh"));
+            println!("lowest battery voltage: {}", opt(s.min_voltage, "V"));
+        }
+        LogCmd::Events { path } => {
+            let log = open(path)?;
+            let ev = logs::flight::events(&log);
+            // Name modes once the banner says which firmware wrote the log.
+            let fw = ev.iter().find_map(|(_, e)| match e {
+                logs::flight::Event::Text(t) => dc_core::Firmware::from_banner(t),
+                _ => None,
+            });
+            for (t, e) in &ev {
+                let text = match e {
+                    logs::flight::Event::Mode { mode, reason } => {
+                        let name = fw
+                            .and_then(|f| f.mode_name(u32::from(*mode)))
+                            .map_or(format!("mode {mode}"), str::to_string);
+                        format!("MODE {name} (reason {reason})")
+                    }
+                    logs::flight::Event::Arm { armed, forced } => format!(
+                        "{}{}",
+                        if *armed { "ARMED" } else { "DISARMED" },
+                        if *forced { " (forced)" } else { "" }
+                    ),
+                    logs::flight::Event::Ev(id) => {
+                        logs::flight::ev_name(*id).map_or(format!("EV {id}"), |n| format!("EV {n}"))
+                    }
+                    logs::flight::Event::Err(sub, code) => format!("ERR {sub} {code}"),
+                    logs::flight::Event::Text(t) => t.clone(),
+                };
+                println!("{:10.3} s  {text}", *t as f64 / 1e6);
+            }
+        }
+        LogCmd::Changes { path } => {
+            let log = open(path)?;
+            let changes = logs::flight::param_changes(&log);
+            for c in &changes {
+                println!(
+                    "{:10.3} s  {} {} -> {}{}",
+                    c.time_us as f64 / 1e6,
+                    c.name,
+                    c.old as f32,
+                    c.new as f32,
+                    if c.automatic {
+                        "  (updated by the autopilot)"
+                    } else {
+                        ""
+                    }
+                );
+            }
+            eprintln!("{} changes", changes.len());
         }
         LogCmd::Csv { path, msg, out } => {
             let log = open(path)?;
