@@ -1,8 +1,11 @@
 //! Frequency spectrum of IMU data (plan 05: FFT), for finding vibration peaks, e.g. to set
 //! harmonic notch filters. Welch's method: Hann-windowed segments, 50 % overlap, averaged
-//! power. Samples are taken as evenly spaced at the mean rate of their timestamps.
+//! power. Samples are taken as evenly spaced at the mean rate of their timestamps. The FFT is
+//! `rustfft` (MIT/Apache-2.0; ADR-0012: mature crates over custom primitives).
 
 use std::f64::consts::PI;
+
+use rustfft::{FftPlanner, num_complex::Complex};
 
 /// Averaged power spectrum.
 #[derive(Debug, Clone, PartialEq)]
@@ -17,45 +20,11 @@ pub struct Spectrum {
     pub segments: usize,
 }
 
-/// In-place radix-2 FFT of (re, im); `re.len()` must be a power of two.
-fn fft(re: &mut [f64], im: &mut [f64]) {
-    let n = re.len();
-    let mut j = 0;
-    for i in 1..n {
-        let mut bit = n >> 1;
-        while j & bit != 0 {
-            j ^= bit;
-            bit >>= 1;
-        }
-        j |= bit;
-        if i < j {
-            re.swap(i, j);
-            im.swap(i, j);
-        }
-    }
-    let mut len = 2;
-    while len <= n {
-        let ang = -2.0 * PI / len as f64;
-        for start in (0..n).step_by(len) {
-            for k in 0..len / 2 {
-                let (s, c) = (ang * k as f64).sin_cos();
-                let (a, b) = (start + k, start + k + len / 2);
-                let (tr, ti) = (re[b] * c - im[b] * s, re[b] * s + im[b] * c);
-                re[b] = re[a] - tr;
-                im[b] = im[a] - ti;
-                re[a] += tr;
-                im[a] += ti;
-            }
-        }
-        len <<= 1;
-    }
-}
-
-/// Spectrum of `values` sampled at `time_us`, in segments of `segment` samples (a power of
-/// two). `None` with fewer samples than one segment.
+/// Spectrum of `values` sampled at `time_us`, in segments of `segment` samples (any length
+/// of at least 8; powers of two are fastest). `None` with fewer samples than one segment.
 pub fn spectrum(time_us: &[u64], values: &[f64], segment: usize) -> Option<Spectrum> {
     let n = values.len().min(time_us.len());
-    if !segment.is_power_of_two() || segment < 8 || n < segment {
+    if segment < 8 || n < segment {
         return None;
     }
     let span = time_us[n - 1].checked_sub(time_us[0])? as f64 / 1e6;
@@ -67,21 +36,20 @@ pub fn spectrum(time_us: &[u64], values: &[f64], segment: usize) -> Option<Spect
         .map(|i| 0.5 - 0.5 * (2.0 * PI * i as f64 / segment as f64).cos())
         .collect();
     let bins = segment / 2 + 1;
+    let fft = FftPlanner::<f64>::new().plan_fft_forward(segment);
+    let mut buf = vec![Complex::new(0.0, 0.0); segment];
     let mut power = vec![0.0; bins];
     let mut segments = 0;
     let mut start = 0;
     while start + segment <= n {
         let chunk = &values[start..start + segment];
         let mean = chunk.iter().sum::<f64>() / segment as f64;
-        let mut re: Vec<f64> = chunk
-            .iter()
-            .zip(&window)
-            .map(|(v, w)| (v - mean) * w)
-            .collect();
-        let mut im = vec![0.0; segment];
-        fft(&mut re, &mut im);
-        for k in 0..bins {
-            power[k] += re[k] * re[k] + im[k] * im[k];
+        for ((b, v), w) in buf.iter_mut().zip(chunk).zip(&window) {
+            *b = Complex::new((v - mean) * w, 0.0);
+        }
+        fft.process(&mut buf);
+        for (p, c) in power.iter_mut().zip(&buf) {
+            *p += c.norm_sqr();
         }
         segments += 1;
         start += segment / 2;
@@ -141,8 +109,19 @@ mod tests {
     fn rejects_too_little_data() {
         assert!(spectrum(&[0, 1000], &[1.0, 2.0], 512).is_none());
         assert!(
-            spectrum(&[0; 600], &[0.0; 600], 500).is_none(),
-            "not a power of two"
+            spectrum(&[0; 600], &[0.0; 600], 4).is_none(),
+            "segment too short"
         );
+    }
+
+    #[test]
+    fn any_segment_length_works() {
+        // 1 kHz, 100 Hz tone; a 1000-sample segment gives exactly 1 Hz bins.
+        let t: Vec<u64> = (0..3000).map(|i| i * 1000).collect();
+        let v: Vec<f64> = (0..3000)
+            .map(|i| (2.0 * PI * 100.0 * i as f64 / 1000.0).sin())
+            .collect();
+        let s = spectrum(&t, &v, 1000).unwrap();
+        assert_eq!(peaks(&s, 10.0, 1)[0].0.round(), 100.0);
     }
 }

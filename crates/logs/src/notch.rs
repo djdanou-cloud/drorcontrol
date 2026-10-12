@@ -61,7 +61,7 @@ fn longest_steady_run(log: &Log) -> Option<(u64, u64, f64)> {
 }
 
 /// Suggest a throttle-based notch from `msg.field` (IMU `imu`) during the longest steady
-/// flight; `segment` samples per FFT segment (power of two); peaks below `min_hz` ignored.
+/// flight; `segment` samples per FFT segment; peaks below `min_hz` ignored.
 pub fn suggest(
     log: &Log,
     msg: &str,

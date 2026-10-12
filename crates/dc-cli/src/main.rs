@@ -400,7 +400,7 @@ enum LogCmd {
         /// IMU instance.
         #[arg(long, default_value_t = 0)]
         imu: u8,
-        /// Samples per FFT segment (power of two).
+        /// Samples per FFT segment (any length; powers of two are fastest).
         #[arg(long, default_value_t = 1024)]
         segment: usize,
         /// Ignore peaks below this frequency, Hz (body motion, not vibration).
@@ -463,7 +463,7 @@ enum LogCmd {
         /// IMU instance.
         #[arg(long, default_value_t = 0)]
         imu: u8,
-        /// Samples per FFT segment (power of two).
+        /// Samples per FFT segment (any length; powers of two are fastest).
         #[arg(long, default_value_t = 1024)]
         segment: usize,
     },
