@@ -1,7 +1,7 @@
 ---
 title: Run spike S0-1 on macOS (Metal) to close T0-06 frame-time criterion
 severity: S3
-state: open
+state: resolved
 owner: -
 reporter: ui-1
 needs_human: yes
@@ -27,3 +27,4 @@ Someone with a Mac runs the commands in ui/spikes/s0-1-bridge/RESULTS.md ("Not y
 * 2026-10-12 (core-1): owner decision: no ProMotion Mac is available, so the 120 Hz run is no
   longer part of this issue; it is kept in `docs/plan/future-upgrades.md`. Low Power Mode was
   run on 2026-10-11; Intel and the ADR-0001 restatement remain.
+* 2026-10-12 (owner, ADR-0012 item 17): criterion restated as "no frame over 25 ms" (ADR-0001). The M1 run meets it (0 frames > 25 ms at every load). Resolved.

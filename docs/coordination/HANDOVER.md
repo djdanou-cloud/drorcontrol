@@ -62,6 +62,28 @@ and the code are newer. Where either disagrees with an owner instruction, the ow
     * command lifetimes: RTL/Land 30 s, mode change 2–3 s, others 10 s;
     * reboot is blocked while armed;
     * props-off attestation is required for every vehicle type.
+  * **Field-operations posture, owner, 2026-10-12 (ADR-0012)**: a lean, permissive tool for
+    expert operators; no typed confirmations, no blocking on certification paperwork.
+    * Parameter writes for all parameters (failsafe, arming, fence, board safety included):
+      a single-click confirmation, no typed text.
+    * In-flight mission upload: one confirmation ("Update mission on active vehicle?").
+    * CLI mission upload with no state lock.
+    * Fence and rally upload on the ground and in flight, with read-back verification.
+    * Camera trigger commands in generated missions.
+    * Log erase without a prior download.
+    * Hazard log: I1–I3 signed off (I3 amended by in-flight upload), H14 accepted, review
+      approved.
+    * Unchanged (not decided): ADR-0011 D2–D5 (two-stage in-flight disarm, reboot,
+      termination; reboot blocked while armed; props-off for motor test), force-arm typed.
+    * Closed source, clean-room; MAVLink XML/generated code and pymavlink approved;
+      permissive licences (BSD/MIT/Apache-2.0) approved; prefer mature crates.
+    * Trademark deferred; font Inter (OFL); Hebrew/RTL P3; no Mac App Store build.
+    * The fleet runs ArduPilot 4.6.x: 4.6 SITL scenarios in CI.
+    * **Never commit field logs with real-world positions**; only synthetic, sanitised or SITL
+      logs. (The 4.6.2 corpus fixture has no GPS or position records.)
+    * UI frame criterion: no frame over 25 ms (ADR-0001).
+    * gRPC: configurable bind address (all interfaces allowed), with a pre-shared bearer key.
+    * CI: full 4-OS SITL matrices on releases and schedules; lean checks on pushes and PRs.
 
 ## 3. Environment facts and traps
 
@@ -160,48 +182,26 @@ and the code are newer. Where either disagrees with an owner instruction, the ow
 | Item | Where | Needed from |
 |------|-------|-------------|
 | Mac session, remaining: T0-05 hardware matrix, T0-10 "Open Anyway" step, T0-09 re-run once a no-hold decode path exists (M1 results of 2026-10-11 are in the spike RESULTS.md files) | Mac runbook | Owner (hardware) |
-| Per-hazard rating review; interpretations I1–I3; acceptance of the H14 residual risk | `docs/safety/hazards.md` §3, §7 | Flight Operations & Systems Safety Lead |
-| Licence of the vendored MAVLink XML and the generated code | `issues/20261010T213905Z-…` | Owner / legal |
-| MapLibre Native third-party licence inventory before shipping | `ui/spikes/s0-3-map/RESULTS.md` | Owner / legal |
-| GitHub Actions minutes budget | — | Owner |
+| Windows bench test with a 4.6.3 flight controller | `docs/dev/windows-bench-test.md` | Owner (hardware) |
+| Force-arm (typed) and parameter reset confirmations: not covered by ADR-0012 | ADR-0011 | Owner |
 
 ## 7. Next tasks, in priority order
 
-The backlog rows were added in [`backlog.md`](backlog.md), T0-17 onwards.
+From the owner's decisions of 2026-10-12 (ADR-0012). Each lands with tests, SITL evidence where a
+vehicle is involved, and the audit log:
 
-1. **T0-17 — done 2026-10-12:** `spike-map` green on 19bb613 (run 38214160233): Metal on the
-   macOS VM, warm 59.24 fps, p99 27.9 ms; recorded in `ui/spikes/s0-3-map/RESULTS.md`.
-2. **T0-18 — core implementation local (core-2):**
-   * The owner approved requiring a recent, explicitly disarmed autopilot heartbeat.
-     The core uses a fixed 1.5 s freshness limit before starting writes, and stops further
-     writes on arming or heartbeat gaps/staleness; a later disarmed report never revives
-     an interrupted write transaction automatically. Read-only preparation can see gaps.
-   * `Core::write_params` validates a complete baseline and batch, persists a new snapshot
-     before any set, then verifies values/types by an explicit read request with a bounded
-     10 s lifetime per parameter. Mismatches/timeouts stop the remaining batch.
-   * `Core::rollback_params` restores only selected parameters to their original values,
-     with a new recovery baseline and the same state, risk and read-back checks. It refuses
-     parameters that disappeared or changed type; it never starts automatic rollback.
-   * Failsafe/fence/arming/board-safety parameters are flagged dangerous and refused until
-     dedicated typed confirmation exists. These conservative labels are not a full metadata
-     catalog. Dangerous writes remain a follow-up, not implicitly authorized by disarming.
-   * Each vehicle's last valid autopilot `FS_EKF_THRESH` updates `NavThresholds.ekf_fail`.
-   * Ten offline tests, ten scripted-vehicle integration tests and the navigation-threshold
-     source/value test cover the implementation. A real SITL `WP_SPD` write and restoration
-     pass through 30% bidirectional loss (2,952 frames dropped in the initial run). The SITL
-     test requests 5 Hz heartbeats; the production freshness rule is not weakened.
-   * See [`../dev/parameter-changes.md`](../dev/parameter-changes.md). Changes are local only;
-     the owner's instruction remains **do not push**. Safety review is required before merge.
-3. **T0-19 — class C confirmation for an in-flight mission upload** (plan 08 §4.1, ADR-0011
-   I3). It is refused today. This changes the command pipeline, so it needs owner/safety-lead
-   approval first.
-4. **T0-20 — implemented locally (devops-2):** the video-spike job moved from `ci.yml` to
-   `.github/workflows/spike-video.yml`. Pushes to `main` and pull requests run it only when
-   `ui/spikes/s0-5-video/**` or the new workflow changes; manual dispatch remains available.
-   Actionlint 1.7.12 and 12 local trigger scenarios passed; the job steps and other CI jobs
-   are unchanged. GitHub execution remains unverified until the owner authorizes a push.
-5. Phase 1, once the Mac results are in: plan 07 roadmap; the Qt shell can start after the
-   T0-06 / T0-07 verdicts (ADR-0001 / ADR-0003).
+1. **CI:** lean checks on pushes and PRs; the full 4-OS SITL matrix on a schedule and on
+   releases; **an ArduCopter 4.6 SITL build and scenarios** next to 4.7.1.
+2. **Parameter writes for all parameters** (T0-18 follow-up): drop the dangerous-parameter
+   refusal; a single confirmation, no typed text. Keep the disarmed-heartbeat freshness and
+   read-back verification unless the owner says otherwise. Expose through gRPC and the CLI.
+3. **Mission upload:** in flight with one confirmation (T0-19); from the CLI without a state lock.
+4. **Fence and rally upload** (ground and in flight) with read-back verification.
+5. **Log erase** (`LOG_ERASE`) as a command, audited.
+6. **Camera trigger commands** in generated surveys.
+7. **gRPC:** configurable bind address and a pre-shared bearer key.
+8. Replace the custom FFT with a mature crate; switch the UI font to Inter.
+9. Phase 1 (Qt shell) once the above are in.
 
 ## 8. Where things are (code map)
 

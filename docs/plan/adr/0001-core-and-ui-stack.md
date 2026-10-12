@@ -24,7 +24,10 @@ We will implement protocol, state, logs, geo and video-pipeline management in Ru
 ## Validation — spike S0-1 (2026-10-10, Linux, software GL; see `ui/spikes/s0-1-bridge/RESULTS.md`)
 * PASS: real ingest path sustains 200 k msg/s (and 400 k) with achieved = offered; 0 frames > 25 ms.
 * PASS: cxx-qt bridge + snapshot read ≈ 5 µs (p99 26 µs), independent of ingest rate.
-* OPEN: frame-interval p99 17.7 ms (> 16.7 ms) in a GPU-less shared container; re-measure on macOS/Metal.
+* Frame-time criterion (owner, 2026-10-12, ADR-0012): **no frame over 25 ms** (a 40+ fps baseline);
+  idle sub-frame jitter is not a target. Linux software GL: met.
+* macOS/Metal (M1 MacBook Air, 2026-10-11): 0 frames > 25 ms at 0 / 200 k / 400 k msg/s (p99 17.8–19.5 ms):
+  the criterion is met.
 * FINDING: QML binding re-evaluation (~0.7 ms/frame) dominates UI cost regardless of ingest → instruments
   as custom scene-graph/QRhi items (plan 04 §4), confirmed as a requirement.
 * Recommendation: keep this ADR (Rust core + Qt/QML + cxx-qt); accept at M0 after the macOS run.

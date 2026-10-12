@@ -135,13 +135,11 @@ Columns:
 | Date | Reviewer | Scope | Result |
 |------|----------|-------|--------|
 | 2026-10-11 | Flight Operations & Systems Safety Lead | Operational profile (§1); risk targets (§2); command decisions D1–D6 (§3) | Directive issued; baselined in this log and ADR-0011 |
+| 2026-10-12 | Owner (DrorAero) | Interpretations I1–I3; H14 residual risk; hazard-log review; field-operations posture (ADR-0012) | I1–I3 signed off, I3 amended: mission upload while armed needs a single-click confirmation, not two-stage. H14 residual risk accepted. Review approved. Accepted with ADR-0012: parameter writes for all parameters (failsafe, arming, fence, board safety included) with a single confirmation and no typed text; in-flight mission, fence and rally upload with one confirmation and read-back verification; log erase without prior download. Residual risks accepted: a wrong safety-relevant value or an in-flight plan change takes effect after one click; erased logs cannot be recovered. |
 
 ## 7. Open items
 
-* Review of every hazard's severity and probability rating by the safety lead (the T0-15 exit
-  criterion).
-* Confirm or overturn interpretations I1–I3 (§3).
-* Accept or reduce the residual risk of H14 (target D / Medium).
+* (Closed 2026-10-12, §6: hazard-log review approved, I1–I3 signed off, H14 accepted.)
 * Open hazards still need controls built and tested: H4, H6, H9, H16, and signing for H10.
 * UI-phase evidence: time-to-command for each class B path; the alert on mode-change expiry;
   hotkey focus rules.

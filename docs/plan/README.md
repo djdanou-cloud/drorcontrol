@@ -55,14 +55,14 @@ A cross-platform ground control station (GCS) for ArduPilot vehicles that:
 | Cold start | ≤ 2.0 s to interactive window |
 | Time to GA | ~22 months from kickoff (±30 %), private alpha at month 5 |
 
-## 5. Open decisions (need owner sign-off before Phase 0 ends)
+## 5. Decisions (owner, 2026-10-12; ADR-0012)
 
-1. **Licence & IP posture.** Mission Planner is GPLv3. The plan assumes a *clean-room* implementation from public specs and behavioural observation (reading GPL source to learn protocol behaviour is fine; copying code is not). Qt (LGPL, dynamic link), GStreamer (LGPL) permit a proprietary build; ArduPilot-derived assets (parameter metadata, SITL) are GPLv3 but consumed as *data/separate processes*. **Legal must confirm** before any MP source is imported. If DrorAero prefers GPLv3 for the GCS itself, code reuse from MP becomes possible and schedule drops ~8 %.
-2. **Trademark clearance** for "DrorControl" (name confirmed; search/registration pending). Avoid "Mission Planner" in product marketing — it is an ArduPilot community name.
-3. **Urbane font licence** for redistribution inside the app bundle (fallback: Inter).
+1. **Licence & IP posture:** closed source, clean-room implementation; no GPL code is brought in. Reading GPL source to learn protocol behaviour stays fine; copying code does not. MAVLink XML and generated code are in the repository; pymavlink is a dev/test tool. Permissive third-party licences (BSD, MIT, Apache-2.0, e.g. MapLibre) are approved; prefer mature crates over custom primitives.
+2. **Trademark** search/registration for "DrorControl": deferred, low priority.
+3. **Font:** Inter (OFL) replaces Urbane.
 4. ~~Apple multicast networking entitlement~~ Not needed: no Apple credentials, unsandboxed app (ADR-0010).
-5. **Hebrew/RTL** is specified here as P1 (DrorAero is Israel-based) — confirm.
-6. **Sandboxed Mac App Store** distribution desired at all? (v1 plan: no.)
+5. **Hebrew/RTL:** P3. English is the primary operational interface.
+6. **Sandboxed Mac App Store** distribution: no (serial, USB modems and local sockets need an unsandboxed app).
 
 ## 6. Conventions
 

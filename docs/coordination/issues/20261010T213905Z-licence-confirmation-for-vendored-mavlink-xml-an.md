@@ -1,7 +1,7 @@
 ---
 title: Licence confirmation for vendored MAVLink XML and pymavlink test tool
 severity: S3
-state: open
+state: resolved
 owner: -
 reporter: mavlink-1
 needs_human: yes
@@ -20,3 +20,4 @@ pymavlink (LGPLv3) is used only as a dev-time reference tool to generate test ve
 Owner/legal confirms (a) vendoring the XML in this repository and shipping code generated from it is acceptable under the intended product licence (docs/plan/README.md §5, open decision 1), and (b) dev-only use of pymavlink is acceptable. Nothing has been distributed; the vendoring is reversible.
 
 ## Updates
+* 2026-10-12 (owner, ADR-0012 item 9): approved. The MAVLink XML and generated code stay in the repository; pymavlink is a dev/test tool. Resolved.
