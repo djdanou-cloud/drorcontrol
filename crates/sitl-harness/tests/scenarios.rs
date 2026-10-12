@@ -864,6 +864,7 @@ async fn auto_mission_flight_reports_progress_to_landing() {
     )
     .await;
 
+    let mut events = core.events();
     let mode = |name| dc_core::Firmware::Copter.mode_number(name).unwrap();
     let s = command(
         &core,
@@ -962,6 +963,23 @@ async fn auto_mission_flight_reports_progress_to_landing() {
             .is_some_and(|m| m.value.state == MissionState::Complete)
     })
     .await;
+    // The same progress arrived as events, for a UI that does not poll.
+    let mut seen = Vec::new();
+    while let Ok(e) = events.try_recv() {
+        if let dc_core::CoreEvent::Mission { change, .. } = e {
+            seen.push(change);
+        }
+    }
+    use dc_core::MissionChange::{Current, ItemReached, State};
+    for want in [
+        ItemReached(2),
+        ItemReached(3),
+        Current(4),
+        State(MissionState::Active),
+        State(MissionState::Complete),
+    ] {
+        assert!(seen.contains(&want), "{want:?} not in {seen:?}");
+    }
 }
 
 /// Test setup only: put a list on the vehicle with the raw mission protocol (the product has

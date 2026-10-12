@@ -526,6 +526,21 @@ impl CoreApi for CoreService {
                         attempts: st.attempts,
                         summary: st.summary(),
                     }),
+                    Ok(CoreEvent::Mission { sysid, change }) => {
+                        use pb::mission_event::Change;
+                        Kind::Mission(pb::MissionEvent {
+                            sysid: u32::from(sysid),
+                            change: Some(match change {
+                                dc_core::MissionChange::ItemReached(s) => {
+                                    Change::ItemReached(u32::from(s))
+                                }
+                                dc_core::MissionChange::Current(s) => Change::Current(u32::from(s)),
+                                dc_core::MissionChange::State(st) => {
+                                    Change::State(mission_state_to_pb(st) as i32)
+                                }
+                            }),
+                        })
+                    }
                     Ok(CoreEvent::Alert { sysid, level, text }) => {
                         use pb::alert_event::Level;
                         Kind::Alert(pb::AlertEvent {

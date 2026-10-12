@@ -175,6 +175,17 @@ impl fmt::Display for LinkSpec {
     }
 }
 
+/// A change in mission progress.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MissionChange {
+    /// The vehicle reported reaching this item (`MISSION_ITEM_REACHED`).
+    ItemReached(u16),
+    /// The item being executed changed.
+    Current(u16),
+    /// The mission state changed (e.g. to Active, Paused or Complete).
+    State(MissionState),
+}
+
 /// Camera geotags kept per vehicle.
 pub const GEOTAG_LIMIT: usize = 20_000;
 
@@ -375,6 +386,13 @@ impl Default for CoreConfig {
 /// Things worth telling the user about.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CoreEvent {
+    /// Mission progress changed (from `MISSION_CURRENT` / `MISSION_ITEM_REACHED`).
+    Mission {
+        /// System id.
+        sysid: u8,
+        /// What changed.
+        change: MissionChange,
+    },
     /// First heartbeat from a vehicle.
     VehicleSeen {
         /// System id.
@@ -758,6 +776,11 @@ impl Core {
                 .load()
                 .get(sysid)
                 .is_none_or(|v| v.heartbeat.is_none());
+        let mission_before = self
+            .fleet
+            .load()
+            .get(sysid)
+            .and_then(|v| v.mission.as_ref().map(|m| (m.value.current, m.value.state)));
         let mut text = None;
         self.fleet.rcu(|f| {
             let mut f = Fleet::clone(f);
@@ -793,6 +816,29 @@ impl Core {
         }
         if let Message::CameraFeedback(c) = &msg {
             self.record_geotag(sysid, c);
+        }
+        if compid == vehicle::AUTOPILOT_COMPID {
+            let mission_event = |change| {
+                let _ = self.events.send(CoreEvent::Mission { sysid, change });
+            };
+            match &msg {
+                Message::MissionItemReached(r) => mission_event(MissionChange::ItemReached(r.seq)),
+                Message::MissionCurrent(_) => {
+                    let now_m = self
+                        .fleet()
+                        .get(sysid)
+                        .and_then(|v| v.mission.as_ref().map(|m| (m.value.current, m.value.state)));
+                    if let Some((cur, state)) = now_m {
+                        if mission_before.map(|b| b.0) != Some(cur) {
+                            mission_event(MissionChange::Current(cur));
+                        }
+                        if mission_before.map(|b| b.1) != Some(state) {
+                            mission_event(MissionChange::State(state));
+                        }
+                    }
+                }
+                _ => {}
+            }
         }
         if let Some(text) = text {
             // The firmware's version banner confirms it: from now on mode changes are named.

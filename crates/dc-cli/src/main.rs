@@ -470,6 +470,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                         Ok(CoreEvent::Recorder { stopped, detail }) => {
                             eprintln!("tlog {}: {detail}", if stopped { "STOPPED" } else { "warning" })
                         }
+                        Ok(CoreEvent::Mission { sysid, change }) => println!("[{sysid}] mission: {change:?}"),
                         Err(_) => {}
                     },
                 }

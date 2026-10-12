@@ -395,6 +395,17 @@ message Event {
     RecorderEvent recorder = 5;
     CommandEvent command = 6;
     AlertEvent alert = 7;
+    MissionEvent mission = 8;
+  }
+}
+
+// Mission progress changed (MISSION_CURRENT / MISSION_ITEM_REACHED).
+message MissionEvent {
+  uint32 sysid = 1;
+  oneof change {
+    uint32 item_reached = 2;
+    uint32 current = 3;
+    MissionState state = 4;
   }
 }
 
