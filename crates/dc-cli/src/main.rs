@@ -314,6 +314,31 @@ enum MissionCmd {
         #[arg(long)]
         fence: Option<std::path::PathBuf>,
     },
+    /// Fly the route backwards (offline): home, TAKEOFF and the final RTL/LAND stay in place.
+    Reverse {
+        /// The .waypoints file.
+        file: std::path::PathBuf,
+        /// Output file (default: print).
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
+    /// Move every located item by metres north/east (offline); home stays unless --home.
+    Shift {
+        /// The .waypoints file.
+        file: std::path::PathBuf,
+        /// Metres north (negative: south).
+        #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
+        north: f64,
+        /// Metres east (negative: west).
+        #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
+        east: f64,
+        /// Move home (item 0) too.
+        #[arg(long)]
+        home: bool,
+        /// Output file (default: print).
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
     /// Compare two mission files (offline); exits with failure on any difference.
     Diff {
         /// First .waypoints file.
@@ -2010,6 +2035,32 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
                 );
             }
             Ok(())
+        }
+        MissionCmd::Reverse { file, out } => {
+            let items = read_mission(file)?;
+            let r = protocols::mission::reverse(&items).map_err(|e| e.to_string())?;
+            print_stats(&r);
+            write_or_print(
+                out.as_deref(),
+                &protocols::wpl::to_string(&r),
+                &format!("{} items reversed", r.len()),
+            )
+        }
+        MissionCmd::Shift {
+            file,
+            north,
+            east,
+            home,
+            out,
+        } => {
+            let items = read_mission(file)?;
+            let s = protocols::mission::shift(&items, *north, *east, *home);
+            print_stats(&s);
+            write_or_print(
+                out.as_deref(),
+                &protocols::wpl::to_string(&s),
+                &format!("{} items, moved {north} m north, {east} m east", s.len()),
+            )
         }
         MissionCmd::Diff { a, b, with_home } => {
             let (ma, mb) = (read_mission(a)?, read_mission(b)?);

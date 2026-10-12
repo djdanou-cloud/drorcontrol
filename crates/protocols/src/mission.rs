@@ -683,6 +683,72 @@ pub fn stats(items: &[MissionItem]) -> MissionStats {
     s
 }
 
+/// Why a mission edit is refused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EditError {
+    /// `DO_JUMP` targets item numbers, which the edit would invalidate.
+    HasJumps,
+    /// Nothing to edit (no items after home).
+    Empty,
+}
+
+impl std::fmt::Display for EditError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            EditError::HasJumps => "the mission has DO_JUMP items, whose targets would break",
+            EditError::Empty => "the mission has no items after home",
+        })
+    }
+}
+
+/// The route flown backwards: home (item 0), a leading `TAKEOFF` and a trailing `RTL` or
+/// `LAND` stay where they are; every item between them is reversed in order. Commands that
+/// configure what follows (speed, camera, servo) move with the reversal, so review them.
+pub fn reverse(items: &[MissionItem]) -> Result<Vec<MissionItem>, EditError> {
+    if items.len() < 2 {
+        return Err(EditError::Empty);
+    }
+    if items.iter().any(|i| i.command == MAV_CMD_DO_JUMP) {
+        return Err(EditError::HasJumps);
+    }
+    let start = if items[1].command == 22 { 2 } else { 1 };
+    let end = if matches!(items.last().map(|i| i.command), Some(20 | 21)) && items.len() > start {
+        items.len() - 1
+    } else {
+        items.len()
+    };
+    let mut out = items.to_vec();
+    out[start..end].reverse();
+    Ok(out)
+}
+
+/// Every item with a location moved `north_m` and `east_m` metres (home, item 0, too when
+/// `include_home`). Items without a location, or at 0, 0 (meaning "here"), are unchanged.
+pub fn shift(
+    items: &[MissionItem],
+    north_m: f64,
+    east_m: f64,
+    include_home: bool,
+) -> Vec<MissionItem> {
+    const R: f64 = 6_371_008.8;
+    items
+        .iter()
+        .enumerate()
+        .map(|(k, i)| {
+            let mut i = *i;
+            if (k > 0 || include_home) && has_location(i.command) && !(i.x == 0 && i.y == 0) {
+                let lat = f64::from(i.x) * 1e-7;
+                let lon = f64::from(i.y) * 1e-7;
+                let nlat = lat + (north_m / R).to_degrees();
+                let nlon = lon + (east_m / (R * lat.to_radians().cos())).to_degrees();
+                i.x = (nlat * 1e7).round() as i32;
+                i.y = (nlon * 1e7).round() as i32;
+            }
+            i
+        })
+        .collect()
+}
+
 /// One corner of a mission's flight path.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PathPoint {
@@ -976,6 +1042,64 @@ pub fn estimate_time(items: &[MissionItem], sp: &Speeds) -> TimeEstimate {
         }
     }
     e
+}
+
+#[cfg(test)]
+mod edit_tests {
+    use super::*;
+
+    fn it(command: u16, lat: f64) -> MissionItem {
+        MissionItem {
+            frame: 3,
+            command,
+            params: [0.0; 4],
+            x: (lat * 1e7).round() as i32,
+            y: if lat == 0.0 { 0 } else { 1_490_000_000 },
+            z: 20.0,
+            autocontinue: true,
+        }
+    }
+
+    #[test]
+    fn reverse_keeps_home_takeoff_and_rtl() {
+        let m = [
+            it(16, -35.0),
+            it(22, 0.0),
+            it(16, -34.999),
+            it(16, -34.998),
+            it(16, -34.997),
+            it(20, 0.0),
+        ];
+        let r = reverse(&m).unwrap();
+        let lats: Vec<i32> = r.iter().map(|i| i.x).collect();
+        assert_eq!(
+            lats,
+            [m[0].x, 0, m[4].x, m[3].x, m[2].x, 0],
+            "home, takeoff, the three waypoints backwards, RTL"
+        );
+        assert_eq!(r[1].command, 22);
+        assert_eq!(r[5].command, 20);
+        let mut jump = m.to_vec();
+        jump.insert(3, it(177, 0.0));
+        assert_eq!(reverse(&jump), Err(EditError::HasJumps));
+    }
+
+    #[test]
+    fn shift_moves_located_items_by_metres() {
+        let m = [it(16, -35.0), it(22, 0.0), it(16, -35.0)];
+        let s = shift(&m, 111.19, 0.0, false);
+        assert_eq!(s[0], m[0], "home stays");
+        assert_eq!(s[1], m[1], "takeoff at 0, 0 stays");
+        assert!(
+            (f64::from(s[2].x - m[2].x) * 1e-7 - 0.001).abs() < 1e-6,
+            "{:?}",
+            s[2]
+        );
+        let e = shift(&m, 0.0, 100.0, true);
+        let dlon = f64::from(e[0].y - m[0].y) * 1e-7;
+        let metres = dlon.to_radians() * 6_371_008.8 * (-35f64).to_radians().cos();
+        assert!((metres - 100.0).abs() < 0.05, "{metres}");
+    }
 }
 
 #[cfg(test)]
