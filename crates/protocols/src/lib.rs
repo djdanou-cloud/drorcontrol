@@ -5,6 +5,7 @@
 
 pub mod audit;
 pub mod command;
+pub mod cot;
 pub mod fence;
 pub mod kml;
 pub mod log_transfer;

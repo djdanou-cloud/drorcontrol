@@ -146,6 +146,22 @@ enum Cmd {
         #[command(subcommand)]
         what: TlogCmd,
     },
+    /// Cursor-on-Target position events for every vehicle (ATAK/WinTAK/TAK), printed or
+    /// sent over UDP (e.g. the ATAK multicast 239.2.3.1:6969).
+    Cot {
+        /// Link to open.
+        #[arg(long)]
+        connect: LinkSpec,
+        /// Send each event as one UDP datagram to this address instead of printing it.
+        #[arg(long)]
+        udp: Option<std::net::SocketAddr>,
+        /// Events per second per vehicle.
+        #[arg(long, default_value_t = 1.0)]
+        rate: f64,
+        /// Stop after this many seconds (0: until interrupted).
+        #[arg(long, default_value_t = 0)]
+        seconds: u64,
+    },
     /// Print a telemetry summary once per second.
     Telemetry {
         /// Link to open.
@@ -808,6 +824,73 @@ async fn run(cli: Cli) -> Result<(), String> {
             baud,
             seconds,
         } => soak(tx, rx.as_deref().unwrap_or(tx), *baud, *seconds),
+        Cmd::Cot {
+            connect,
+            udp,
+            rate,
+            seconds,
+        } => {
+            if !(rate.is_finite() && *rate > 0.0 && *rate <= 20.0) {
+                return Err("--rate must be between 0 and 20 events per second".into());
+            }
+            let core = start(&cli, connect).await?;
+            let sock = match udp {
+                Some(addr) => {
+                    let bind: std::net::SocketAddr = if addr.is_ipv4() {
+                        "0.0.0.0:0".parse().unwrap()
+                    } else {
+                        "[::]:0".parse().unwrap()
+                    };
+                    let s = tokio::net::UdpSocket::bind(bind)
+                        .await
+                        .map_err(|e| format!("udp: {e}"))?;
+                    Some((s, *addr))
+                }
+                None => None,
+            };
+            let mut tick = tokio::time::interval(Duration::from_secs_f64(1.0 / rate));
+            let end = (*seconds > 0).then(|| Instant::now() + Duration::from_secs(*seconds));
+            let mut sent = 0u64;
+            loop {
+                tokio::select! {
+                    _ = tick.tick() => {}
+                    _ = shutdown_signal() => break,
+                }
+                if end.is_some_and(|e| Instant::now() >= e) {
+                    break;
+                }
+                let now_us = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_micros() as u64);
+                for v in core.fleet().vehicles() {
+                    let Some(p) = &v.position else { continue };
+                    let p = &p.value;
+                    let (vn, ve) = (f64::from(p.vel_ned[0]), f64::from(p.vel_ned[1]));
+                    let track = protocols::cot::CotTrack {
+                        uid: format!("DrorControl-sys{}", v.sysid),
+                        callsign: format!("UAV {}", v.sysid),
+                        rotary: v.confirmed_firmware() != Some(dc_core::Firmware::Plane),
+                        lat: p.lat_deg,
+                        lon: p.lon_deg,
+                        alt_m: f64::from(p.alt_msl_m),
+                        course_deg: ve.atan2(vn).to_degrees(),
+                        speed_ms: vn.hypot(ve),
+                    };
+                    let xml = protocols::cot::event(&track, now_us, 10);
+                    match &sock {
+                        Some((s, addr)) => {
+                            s.send_to(xml.as_bytes(), addr)
+                                .await
+                                .map_err(|e| format!("udp {addr}: {e}"))?;
+                        }
+                        None => println!("{xml}"),
+                    }
+                    sent += 1;
+                }
+            }
+            eprintln!("{sent} CoT events");
+            Ok(())
+        }
         Cmd::Telemetry { connect, seconds } => {
             let core = start(&cli, connect).await?;
             let mut events = core.events();
