@@ -1252,6 +1252,7 @@ version = "0.0.0"
 dependencies = [
  "dc-core",
  "mavlink-codec",
+ "protocols",
  "tokio",
 ]
 
