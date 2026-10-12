@@ -234,9 +234,20 @@ enum MissionCmd {
         /// with a minus sign).
         #[arg(long, allow_hyphen_values = true)]
         polygon: String,
-        /// Distance between lines, m.
+        /// Distance between lines, m (or worked out from --camera and --sidelap).
+        #[arg(long, required_unless_present = "camera")]
+        spacing: Option<f64>,
+        /// Camera as "sensor_w_mm,sensor_h_mm,focal_mm,image_w_px,image_h_px": prints the
+        /// ground resolution and photo distance, and sets the line spacing from the overlap.
+        /// The mission does not trigger the camera.
         #[arg(long)]
-        spacing: f64,
+        camera: Option<String>,
+        /// Side overlap between lines, % (with --camera).
+        #[arg(long, default_value_t = 70.0)]
+        sidelap: f64,
+        /// Front overlap between photos, % (with --camera).
+        #[arg(long, default_value_t = 80.0)]
+        frontlap: f64,
         /// Line direction, degrees clockwise from north.
         #[arg(long, default_value_t = 0.0)]
         angle: f64,
@@ -932,10 +943,50 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
         MissionCmd::Survey {
             polygon,
             spacing,
+            camera,
+            sidelap,
+            frontlap,
             angle,
             alt,
             out,
         } => {
+            let fp = match camera {
+                Some(c) => {
+                    let v: Vec<f64> = c
+                        .split(',')
+                        .map(|t| t.trim().parse::<f64>())
+                        .collect::<Result<_, _>>()
+                        .map_err(|_| format!("--camera {c:?}: expected 5 numbers"))?;
+                    let [w, h, f, px_w, px_h] = v[..] else {
+                        return Err(format!("--camera {c:?}: expected 5 numbers"));
+                    };
+                    let cam = protocols::survey::Camera {
+                        sensor_w_mm: w,
+                        sensor_h_mm: h,
+                        focal_mm: f,
+                        image_w_px: px_w as u32,
+                        image_h_px: px_h as u32,
+                    };
+                    let fp = protocols::survey::footprint(
+                        &cam,
+                        f64::from(*alt),
+                        sidelap / 100.0,
+                        frontlap / 100.0,
+                    )
+                    .ok_or("camera, altitude or overlaps out of range (overlaps 0 to <100 %)")?;
+                    eprintln!(
+                        "ground resolution {:.2} cm/px; each photo covers {:.0} x {:.0} m (flat ground)",
+                        fp.gsd_cm, fp.across_m, fp.along_m
+                    );
+                    Some(fp)
+                }
+                None => None,
+            };
+            let spacing = match (spacing, fp) {
+                (Some(s), _) => *s,
+                (None, Some(fp)) => fp.spacing_m,
+                (None, None) => return Err("--spacing or --camera is needed".into()),
+            };
             let polygon = polygon
                 .split(';')
                 .map(|v| {
@@ -952,12 +1003,29 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
                 .collect::<Result<Vec<_>, String>>()?;
             let items = protocols::survey::mission(&protocols::survey::SurveyConfig {
                 polygon,
-                spacing_m: *spacing,
+                spacing_m: spacing,
                 angle_deg: *angle,
                 alt_m: *alt,
             })
             .map_err(|e| e.to_string())?;
             print_stats(&items);
+            if let Some(fp) = fp {
+                let points: Vec<(f64, f64)> = items[2..items.len() - 1]
+                    .iter()
+                    .map(|i| (f64::from(i.x) * 1e-7, f64::from(i.y) * 1e-7))
+                    .collect();
+                let lines = points.len() / 2;
+                let length = protocols::survey::line_length_m(&points);
+                eprintln!(
+                    "lines {spacing:.1} m apart ({sidelap:.0} % side overlap); a photo every {:.1} m ({frontlap:.0} % front overlap): about {} photos over {length:.0} m of lines",
+                    fp.trigger_m,
+                    (length / fp.trigger_m).floor() as usize + lines
+                );
+                eprintln!(
+                    "the mission does not trigger the camera: set it to {:.1} m (distance) on the camera or autopilot",
+                    fp.trigger_m
+                );
+            }
             let text = protocols::wpl::to_string(&items);
             write_or_print(out.as_deref(), &text, &format!("{} items", items.len()))
         }

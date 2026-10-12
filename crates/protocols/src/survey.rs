@@ -132,6 +132,71 @@ pub fn grid(cfg: &SurveyConfig) -> Result<Vec<(f64, f64)>, SurveyError> {
     Ok(out)
 }
 
+/// A camera, for working out line spacing and photo distance from the overlap wanted.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Camera {
+    /// Sensor width and height, mm.
+    pub sensor_w_mm: f64,
+    /// See `sensor_w_mm`.
+    pub sensor_h_mm: f64,
+    /// Focal length, mm.
+    pub focal_mm: f64,
+    /// Image width and height, pixels.
+    pub image_w_px: u32,
+    /// See `image_w_px`.
+    pub image_h_px: u32,
+}
+
+/// What one photo covers on flat ground straight below, with the image width across the
+/// survey lines (pinhole camera, nadir).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Footprint {
+    /// Ground sample distance (ground size of one pixel), cm.
+    pub gsd_cm: f64,
+    /// Ground covered across the lines (image width), m.
+    pub across_m: f64,
+    /// Ground covered along the lines (image height), m.
+    pub along_m: f64,
+    /// Distance between lines for the side overlap, m.
+    pub spacing_m: f64,
+    /// Distance between photos along a line for the front overlap, m.
+    pub trigger_m: f64,
+}
+
+/// Footprint at `alt_m` above the ground, with side and front overlap as fractions (0..1).
+pub fn footprint(cam: &Camera, alt_m: f64, side: f64, front: f64) -> Option<Footprint> {
+    let ok = |v: f64| v.is_finite() && v > 0.0;
+    if !(ok(cam.sensor_w_mm) && ok(cam.sensor_h_mm) && ok(cam.focal_mm) && ok(alt_m))
+        || cam.image_w_px == 0
+        || cam.image_h_px == 0
+        || !(0.0..1.0).contains(&side)
+        || !(0.0..1.0).contains(&front)
+    {
+        return None;
+    }
+    let across_m = cam.sensor_w_mm * alt_m / cam.focal_mm;
+    let along_m = cam.sensor_h_mm * alt_m / cam.focal_mm;
+    Some(Footprint {
+        gsd_cm: across_m * 100.0 / f64::from(cam.image_w_px),
+        across_m,
+        along_m,
+        spacing_m: across_m * (1.0 - side),
+        trigger_m: along_m * (1.0 - front),
+    })
+}
+
+/// Length flown along the survey lines (not the turns between them), m: pairs of points.
+pub fn line_length_m(points: &[(f64, f64)]) -> f64 {
+    points
+        .chunks_exact(2)
+        .map(|l| {
+            let plane = Plane::new(l[0]);
+            let (x, y) = plane.to_xy(l[1]);
+            x.hypot(y)
+        })
+        .sum()
+}
+
 /// A complete mission for the survey: home placeholder (item 0, replaced by the vehicle),
 /// TAKEOFF to the survey altitude, the grid waypoints, RTL.
 pub fn mission(cfg: &SurveyConfig) -> Result<Vec<MissionItem>, SurveyError> {
@@ -258,6 +323,36 @@ mod tests {
         .unwrap();
         // y = -40: one segment; y = 0 and 40: two each.
         assert_eq!(pts.len(), 2 + 4 + 4);
+    }
+
+    #[test]
+    fn camera_footprint_and_overlaps() {
+        // A 1-inch 20 MP camera (13.2 x 8.8 mm, 8.8 mm lens, 5472 x 3648) at 100 m.
+        let cam = Camera {
+            sensor_w_mm: 13.2,
+            sensor_h_mm: 8.8,
+            focal_mm: 8.8,
+            image_w_px: 5472,
+            image_h_px: 3648,
+        };
+        let f = footprint(&cam, 100.0, 0.7, 0.8).unwrap();
+        assert!((f.across_m - 150.0).abs() < 1e-9 && (f.along_m - 100.0).abs() < 1e-9);
+        assert!((f.gsd_cm - 2.741).abs() < 0.001, "{f:?}");
+        assert!((f.spacing_m - 45.0).abs() < 1e-9 && (f.trigger_m - 20.0).abs() < 1e-9);
+        assert_eq!(
+            footprint(&cam, 100.0, 1.0, 0.8),
+            None,
+            "100 % overlap never advances"
+        );
+        assert_eq!(footprint(&cam, 0.0, 0.7, 0.8), None);
+        // Line length of the 100 m square's 4 lines.
+        let cfg = SurveyConfig {
+            polygon: square(-35.36, 149.16, 100.0),
+            spacing_m: 25.0,
+            angle_deg: 0.0,
+            alt_m: 50.0,
+        };
+        assert!((line_length_m(&grid(&cfg).unwrap()) - 400.0).abs() < 0.5);
     }
 
     #[test]
