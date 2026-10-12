@@ -700,3 +700,171 @@ async fn flight_with_gcs_failsafe_on_link_loss() {
         "ON_GROUND"
     );
 }
+
+/// Plan 08 §2 "Flight" with a mission: upload (verified by read-back), arm and climb in GUIDED,
+/// then AUTO flies the mission: take off to 20 m, two waypoints, RTL. The GCS's mission
+/// progress (`MISSION_CURRENT`, `MISSION_ITEM_REACHED`) follows the vehicle through every item,
+/// and the vehicle lands at home and disarms by itself.
+#[tokio::test(flavor = "multi_thread")]
+async fn auto_mission_flight_reports_progress_to_landing() {
+    use dc_core::MissionState;
+    use dc_core::{Command, CommandState, MissionItem, PositionTrust};
+    let Some(cfg) = SitlConfig::copter_or_skip() else {
+        return;
+    };
+    let sitl = Sitl::start(&cfg).unwrap();
+    let core = core_on(sitl.addr()).await;
+    assert_eq!(
+        core.wait_for_vehicle(Duration::from_secs(60)).await,
+        Some(1)
+    );
+    until(Duration::from_secs(90), "position good (EKF)", || {
+        core.nav_health(1).trust == PositionTrust::Good
+    })
+    .await;
+    until(Duration::from_secs(20), "firmware banner, booted", || {
+        core.fleet().get(1).is_some_and(|v| {
+            v.confirmed_firmware().is_some()
+                && v.heartbeat
+                    .as_ref()
+                    .is_some_and(|h| h.value.system_status != 1)
+        })
+    })
+    .await;
+
+    let (lat0, lon0) = core
+        .fleet()
+        .get(1)
+        .and_then(|v| v.position.clone())
+        .map(|p| (p.value.lat_deg, p.value.lon_deg))
+        .expect("position");
+    let item = |command: u16, frame: u8, lat: f64, lon: f64, alt: f32| MissionItem {
+        frame,
+        command,
+        params: [0.0; 4],
+        x: (lat * 1e7) as i32,
+        y: (lon * 1e7) as i32,
+        z: alt,
+        autocontinue: true,
+    };
+    // Home (slot 0), TAKEOFF, two waypoints about 55 m apart, RTL.
+    let mission = vec![
+        item(16, 0, lat0, lon0, 0.0),
+        item(22, 3, 0.0, 0.0, 20.0),
+        item(16, 3, lat0 + 0.0005, lon0, 20.0),
+        item(16, 3, lat0 + 0.0005, lon0 + 0.0006, 20.0),
+        item(20, 2, 0.0, 0.0, 0.0),
+    ];
+    let report = core.upload_mission((1, 1), mission.clone()).await.unwrap();
+    assert!(report.verified(), "{:?}", report.mismatches);
+    until(
+        Duration::from_secs(10),
+        "MISSION_CURRENT shows the mission",
+        || {
+            core.fleet()
+                .get(1)
+                .and_then(|v| v.mission.clone())
+                .is_some_and(|m| m.value.total == Some(4))
+        },
+    )
+    .await;
+
+    let mode = |name| dc_core::Firmware::Copter.mode_number(name).unwrap();
+    let s = command(
+        &core,
+        Command::SetMode {
+            custom_mode: mode("GUIDED"),
+        },
+    )
+    .await;
+    assert_eq!(s.state, CommandState::Verified, "{}", s.summary());
+    let t0 = Instant::now();
+    loop {
+        let s = command(&core, Command::Arm).await;
+        if s.state == CommandState::Verified {
+            break;
+        }
+        assert!(
+            t0.elapsed() < Duration::from_secs(60),
+            "never armed: {}",
+            s.summary()
+        );
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+    let s = command(&core, Command::Takeoff { alt_m: 10.0 }).await;
+    assert!(
+        matches!(s.state, CommandState::Verified | CommandState::Accepted),
+        "{}",
+        s.summary()
+    );
+    let alt = || {
+        core.fleet()
+            .get(1)
+            .and_then(|v| v.position.clone())
+            .map_or(0.0, |p| p.value.alt_rel_m)
+    };
+    until(Duration::from_secs(60), "climb to 8 m", || alt() > 8.0).await;
+    let s = command(
+        &core,
+        Command::SetMode {
+            custom_mode: mode("AUTO"),
+        },
+    )
+    .await;
+    assert_eq!(s.state, CommandState::Verified, "{}", s.summary());
+
+    // Follow the mission until the vehicle is down and disarmed, recording what the GCS saw.
+    let (mut max_current, mut reached, mut active) = (0u16, Vec::<u16>::new(), false);
+    let t0 = Instant::now();
+    while core.facts(1).armed != Some(false) {
+        assert!(
+            t0.elapsed() < Duration::from_secs(240),
+            "mission not finished"
+        );
+        let v = core.fleet().get(1).unwrap().clone();
+        if let Some(m) = v.mission {
+            if m.value.current > max_current {
+                eprintln!(
+                    "{:5.1} s: item {} ({:?}), {:.1} m",
+                    t0.elapsed().as_secs_f32(),
+                    m.value.current,
+                    m.value.state,
+                    alt()
+                );
+            }
+            max_current = max_current.max(m.value.current);
+            active |=
+                m.value.state == MissionState::Active && m.value.in_mission_mode == Some(true);
+        }
+        if let Some(r) = v.mission_reached
+            && reached.last() != Some(&r.value)
+        {
+            reached.push(r.value);
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    eprintln!(
+        "disarmed after {:.1} s; reached {reached:?}",
+        t0.elapsed().as_secs_f32()
+    );
+    assert!(active, "MISSION_STATE_ACTIVE in mission mode never seen");
+    assert_eq!(max_current, 4, "progress reached the RTL item");
+    for wp in [2, 3] {
+        assert!(
+            reached.contains(&wp),
+            "waypoint {wp} reported reached: {reached:?}"
+        );
+    }
+    assert_eq!(
+        core.facts(1).landed_state.map(|(s, _)| s),
+        Some(1),
+        "ON_GROUND"
+    );
+    until(Duration::from_secs(5), "MISSION_STATE_COMPLETE", || {
+        core.fleet()
+            .get(1)
+            .and_then(|v| v.mission.clone())
+            .is_some_and(|m| m.value.state == MissionState::Complete)
+    })
+    .await;
+}

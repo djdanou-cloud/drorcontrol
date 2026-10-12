@@ -236,6 +236,55 @@ pub struct Extended {
     pub vtol: VtolState,
 }
 
+/// `MISSION_STATE` from `MISSION_CURRENT`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MissionState {
+    /// Not reported (`MISSION_STATE_UNKNOWN`, a MAVLink 1 sender, or a value we do not know).
+    Unknown,
+    /// No mission on the vehicle.
+    NoMission,
+    /// A mission is loaded and has not started.
+    NotStarted,
+    /// Running.
+    Active,
+    /// Paused (vehicle left the mission mode, or the mission was paused).
+    Paused,
+    /// Finished.
+    Complete,
+}
+
+impl MissionState {
+    /// From the MAVLink value.
+    pub fn from_mavlink(v: u8) -> Self {
+        match v {
+            1 => MissionState::NoMission,
+            2 => MissionState::NotStarted,
+            3 => MissionState::Active,
+            4 => MissionState::Paused,
+            5 => MissionState::Complete,
+            _ => MissionState::Unknown,
+        }
+    }
+}
+
+/// Mission progress from `MISSION_CURRENT` (autopilot component only).
+///
+/// `current` is the vehicle's sequence number, as uploaded: on ArduPilot item 0 is home, so the
+/// first uploaded mission item is 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MissionProgress {
+    /// Item being executed (or to execute next).
+    pub current: u16,
+    /// Items in the mission, excluding a home item; `None` if not reported (0 or a MAVLink 1
+    /// sender), `Some(0)` if the vehicle has no mission (`UINT16_MAX`).
+    pub total: Option<u16>,
+    /// Mission state machine state.
+    pub state: MissionState,
+    /// In a mode that runs the mission (`Some(true)`), suspended (`Some(false)`), or not
+    /// reported (`None`).
+    pub in_mission_mode: Option<bool>,
+}
+
 /// Everything known about one system.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct VehicleState {
@@ -257,6 +306,10 @@ pub struct VehicleState {
     pub extended: Option<Timed<Extended>>,
     /// EKF status (see [`nav`]).
     pub ekf: Option<Timed<Ekf>>,
+    /// Mission progress.
+    pub mission: Option<Timed<MissionProgress>>,
+    /// Last mission item the vehicle reported reached (`MISSION_ITEM_REACHED`).
+    pub mission_reached: Option<Timed<u16>>,
     /// Firmware family and how it was identified (see [`modes`]).
     pub firmware: Option<(Firmware, FirmwareSource)>,
     /// Messages applied, by message id.
@@ -422,6 +475,28 @@ impl Fleet {
                         vtol: VtolState::from_mavlink(e.vtol_state),
                     },
                 );
+            }
+            Message::MissionCurrent(m) if compid == AUTOPILOT_COMPID => {
+                v.mission = timed(
+                    now,
+                    MissionProgress {
+                        current: m.seq,
+                        total: match m.total {
+                            0 => None,
+                            u16::MAX => Some(0),
+                            n => Some(n),
+                        },
+                        state: MissionState::from_mavlink(m.mission_state),
+                        in_mission_mode: match m.mission_mode {
+                            1 => Some(true),
+                            2 => Some(false),
+                            _ => None,
+                        },
+                    },
+                );
+            }
+            Message::MissionItemReached(m) if compid == AUTOPILOT_COMPID => {
+                v.mission_reached = timed(now, m.seq);
             }
             Message::Statustext(s) => {
                 let end = s.text.iter().position(|&b| b == 0).unwrap_or(s.text.len());
@@ -631,5 +706,54 @@ mod tests {
             "banner wins, and sticks"
         );
         assert_eq!(v.mode_name(), Some("FLY_BY_WIRE_A"), "not LOITER");
+    }
+
+    #[test]
+    fn mission_progress_from_the_autopilot() {
+        use mavlink_codec::messages::{MissionCurrent, MissionItemReached};
+        let mut f = Fleet::new();
+        let now = Instant::now();
+        let cur = |seq, total, mission_state, mission_mode| {
+            Message::MissionCurrent(MissionCurrent {
+                seq,
+                total,
+                mission_state,
+                mission_mode,
+            })
+        };
+        // A camera's MISSION_CURRENT is not the vehicle's.
+        f.apply(1, 100, &cur(4, 9, 3, 1), now);
+        assert_eq!(f.get(1).unwrap().mission, None);
+        f.apply(1, 1, &cur(2, 5, 3, 1), now);
+        f.apply(
+            1,
+            1,
+            &Message::MissionItemReached(MissionItemReached { seq: 1 }),
+            now,
+        );
+        let v = f.get(1).unwrap();
+        assert_eq!(
+            v.mission.as_ref().unwrap().value,
+            MissionProgress {
+                current: 2,
+                total: Some(5),
+                state: MissionState::Active,
+                in_mission_mode: Some(true),
+            }
+        );
+        assert_eq!(v.mission_reached.as_ref().unwrap().value, 1);
+        // MAVLink 1 sender: extension fields read as zero.
+        f.apply(1, 1, &cur(0, 0, 0, 0), now);
+        let m = f.get(1).unwrap().mission.as_ref().unwrap().value;
+        assert_eq!(
+            (m.total, m.state, m.in_mission_mode),
+            (None, MissionState::Unknown, None)
+        );
+        f.apply(1, 1, &cur(0, u16::MAX, 1, 2), now);
+        let m = f.get(1).unwrap().mission.as_ref().unwrap().value;
+        assert_eq!(
+            (m.total, m.state, m.in_mission_mode),
+            (Some(0), MissionState::NoMission, Some(false))
+        );
     }
 }

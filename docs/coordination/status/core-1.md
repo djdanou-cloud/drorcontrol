@@ -3,8 +3,8 @@ agent: core-1
 role: workstream-agent
 workstream: WS-CORE
 state: idle
-task: -
-updated: 2026-10-12T05:25:01Z
+task: H4-progress
+updated: 2026-10-12T07:11:25Z
 ---
 
 ## Current focus
@@ -30,3 +30,5 @@ updated: 2026-10-12T05:25:01Z
 - 2026-10-11T09:23:22Z — serial reopen done
 
 - 2026-10-11T11:11:01Z — handover written: docs/coordination/HANDOVER.md; next tasks T0-17..T0-20
+
+- 2026-10-12T06:58:01Z — mission progress + AUTO flight scenario
