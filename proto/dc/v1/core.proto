@@ -71,6 +71,23 @@ message Vehicle {
   repeated TrafficState traffic = 12;
   // Batteries from BATTERY_STATUS, by id (PowerState is the SYS_STATUS summary).
   repeated BatteryState batteries = 13;
+  optional VibrationState vibration = 14;
+  optional WindState wind = 15;
+}
+
+// From VIBRATION: the autopilot's accelerometer vibration levels (as logged in VIBE).
+message VibrationState {
+  uint32 age_ms = 1;
+  repeated float levels_ms2 = 2;  // x, y, z
+  repeated uint32 clipping = 3;   // per accelerometer, cumulative since boot
+}
+
+// From WIND (ArduPilot): the autopilot's wind estimate.
+message WindState {
+  uint32 age_ms = 1;
+  float from_deg = 2;  // direction the wind comes from
+  float speed_ms = 3;
+  float speed_z_ms = 4;
 }
 
 message BatteryState {

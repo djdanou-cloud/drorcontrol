@@ -392,6 +392,27 @@ impl Battery {
     }
 }
 
+/// `VIBRATION` (autopilot component): ArduPilot's accelerometer vibration levels, the same
+/// values its dataflash log records as `VIBE` (`AP_InertialSensor::get_vibration_levels`).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Vibration {
+    /// X, Y, Z levels, m/s².
+    pub levels: [f32; 3],
+    /// Clipping count per accelerometer (cumulative since boot).
+    pub clipping: [u32; 3],
+}
+
+/// `WIND` (ArduPilot, autopilot component): the autopilot's wind estimate.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Wind {
+    /// Direction the wind comes from, degrees.
+    pub from_deg: f32,
+    /// Horizontal speed, m/s.
+    pub speed_ms: f32,
+    /// Vertical speed, m/s.
+    pub speed_z_ms: f32,
+}
+
 /// `MISSION_STATE` from `MISSION_CURRENT`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MissionState {
@@ -464,6 +485,10 @@ pub struct VehicleState {
     pub ekf: Option<Timed<Ekf>>,
     /// Home position.
     pub home: Option<Timed<Home>>,
+    /// Vibration levels and clipping.
+    pub vibration: Option<Timed<Vibration>>,
+    /// Wind estimate.
+    pub wind: Option<Timed<Wind>>,
     /// Batteries from `BATTERY_STATUS`, by id.
     pub batteries: BTreeMap<u8, Timed<Battery>>,
     /// ADS-B traffic reported through this vehicle, by ICAO address (forgotten after
@@ -678,6 +703,25 @@ impl Fleet {
                     Timed {
                         value: Battery::from_mavlink(b),
                         at: now,
+                    },
+                );
+            }
+            Message::Vibration(m) if compid == AUTOPILOT_COMPID => {
+                v.vibration = timed(
+                    now,
+                    Vibration {
+                        levels: [m.vibration_x, m.vibration_y, m.vibration_z],
+                        clipping: [m.clipping_0, m.clipping_1, m.clipping_2],
+                    },
+                );
+            }
+            Message::Wind(w) if compid == AUTOPILOT_COMPID => {
+                v.wind = timed(
+                    now,
+                    Wind {
+                        from_deg: w.direction,
+                        speed_ms: w.speed,
+                        speed_z_ms: w.speed_z,
                     },
                 );
             }
@@ -1031,6 +1075,37 @@ mod tests {
         let mut f = Fleet::new();
         f.apply(1, 1, &Message::BatteryStatus(cells), Instant::now());
         assert_eq!(f.get(1).unwrap().batteries.len(), 1);
+    }
+
+    #[test]
+    fn vibration_and_wind_from_the_autopilot() {
+        use mavlink_codec::messages::{Vibration as Vib, Wind as W};
+        let mut f = Fleet::new();
+        let now = Instant::now();
+        let vib = Message::Vibration(Vib {
+            vibration_x: 3.5,
+            vibration_y: 4.0,
+            vibration_z: 12.0,
+            clipping_0: 2,
+            ..Default::default()
+        });
+        f.apply(1, 50, &vib, now);
+        assert!(f.get(1).unwrap().vibration.is_none(), "autopilot only");
+        f.apply(1, 1, &vib, now);
+        f.apply(
+            1,
+            1,
+            &Message::Wind(W {
+                direction: 270.0,
+                speed: 6.5,
+                speed_z: -0.2,
+            }),
+            now,
+        );
+        let v = f.get(1).unwrap();
+        let vb = v.vibration.as_ref().unwrap().value;
+        assert_eq!((vb.levels, vb.clipping), ([3.5, 4.0, 12.0], [2, 0, 0]));
+        assert_eq!(v.wind.as_ref().unwrap().value.from_deg, 270.0);
     }
 
     #[test]

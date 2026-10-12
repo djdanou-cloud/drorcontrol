@@ -195,6 +195,17 @@ pub fn vehicle_to_pb(v: &VehicleState, now: Instant) -> pb::Vehicle {
                 fault_bitmask: b.value.fault_bitmask,
             })
             .collect(),
+        vibration: v.vibration.as_ref().map(|t| pb::VibrationState {
+            age_ms: ms(t.age(now)),
+            levels_ms2: t.value.levels.to_vec(),
+            clipping: t.value.clipping.to_vec(),
+        }),
+        wind: v.wind.as_ref().map(|t| pb::WindState {
+            age_ms: ms(t.age(now)),
+            from_deg: t.value.from_deg,
+            speed_ms: t.value.speed_ms,
+            speed_z_ms: t.value.speed_z_ms,
+        }),
         home: v.home.as_ref().map(|h| pb::HomeState {
             age_ms: ms(h.age(now)),
             lat_deg: h.value.lat_deg,

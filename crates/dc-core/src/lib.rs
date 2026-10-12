@@ -57,7 +57,7 @@ use tokio::sync::broadcast;
 
 pub use vehicle::{
     Battery, Extended, Firmware, FirmwareSource, Fleet, Home, LandedState, MissionProgress,
-    MissionState, StatusText, Traffic, VehicleState, VtolState,
+    MissionState, StatusText, Traffic, VehicleState, Vibration, VtolState, Wind,
 };
 pub use vehicle::{NavHealth, NavThresholds, PositionTrust};
 
@@ -302,6 +302,9 @@ impl Default for CoreConfig {
                 (246, 5.0),
                 // BATTERY_STATUS: ArduPilot sends one battery per interval, round robin.
                 (147, 2.0),
+                // VIBRATION, WIND
+                (241, 2.0),
+                (168, 1.0),
             ],
             link_stale: Duration::from_millis(1500),
             link_lost: Duration::from_secs(5),

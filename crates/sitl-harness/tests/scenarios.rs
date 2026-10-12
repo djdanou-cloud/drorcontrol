@@ -80,6 +80,21 @@ async fn connect_detects_the_vehicle_and_receives_telemetry() {
         },
     )
     .await;
+    // VIBRATION is requested and arrives (a copter on the ground: low levels, no clipping).
+    until(Duration::from_secs(20), "VIBRATION", || {
+        core.fleet().get(1).is_some_and(|v| v.vibration.is_some())
+    })
+    .await;
+    let vib = core
+        .fleet()
+        .get(1)
+        .unwrap()
+        .vibration
+        .clone()
+        .unwrap()
+        .value;
+    assert!(vib.levels.iter().all(|l| *l < 30.0), "{vib:?}");
+    // WIND is requested too, but a copter on the ground has no wind estimate to send yet.
     let b = core.fleet().get(1).unwrap().batteries[&0].value.clone();
     assert!(
         b.voltage_v.is_some_and(|v| (v - 12.6).abs() < 0.5) && b.cells_v.is_empty(),
