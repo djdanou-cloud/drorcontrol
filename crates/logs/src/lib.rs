@@ -21,6 +21,7 @@ pub mod export;
 pub mod flight;
 pub mod gps;
 pub mod health;
+pub mod lanes;
 pub mod motors;
 pub mod notch;
 mod params;

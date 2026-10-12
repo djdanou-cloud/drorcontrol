@@ -448,6 +448,11 @@ enum LogCmd {
         /// Path to the .bin log.
         path: std::path::PathBuf,
     },
+    /// EKF lane switches (primary core changes), flagged when armed.
+    Lanes {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+    },
     /// Battery cell balance while flying (packs that report cell voltages).
     Cells {
         /// Path to the .bin log.
@@ -1133,6 +1138,25 @@ fn print_params_review(params: &std::collections::BTreeMap<String, f64>) {
         };
         println!("{tag}  {:<16} {}", f.param, f.text);
     }
+}
+
+fn print_log_lanes(log: &logs::Log) -> Result<(), String> {
+    if log.format_by_name("XKF4").is_none() {
+        return Err("no XKF4 records (EKF3 not logged)".into());
+    }
+    let s = logs::lanes::lane_switches(log);
+    let armed = s.iter().filter(|l| l.armed).count();
+    println!("{} lane switches ({armed} while armed)", s.len());
+    for l in s {
+        println!(
+            "  {:.1} s  core {} -> {}{}",
+            l.time_us as f64 / 1e6,
+            l.from,
+            l.to,
+            if l.armed { "  ARMED" } else { "" }
+        );
+    }
+    Ok(())
 }
 
 fn print_log_cells(log: &logs::Log) -> Result<(), String> {
@@ -2169,6 +2193,7 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                 ("Autopilot performance", Box::new(|| print_log_perf(&log))),
                 ("Wind", Box::new(|| print_log_wind(&log))),
                 ("GPS", Box::new(|| print_log_gps(&log))),
+                ("EKF lane switches", Box::new(|| print_log_lanes(&log))),
                 ("Altitude sources", Box::new(|| print_log_altitude(&log))),
                 ("Flow and rangefinder", Box::new(|| print_log_sensors(&log))),
                 ("RC link", Box::new(|| print_log_rc(&log))),
@@ -2235,6 +2260,7 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
         LogCmd::Esc { path } => print_log_esc(&open(path)?)?,
         LogCmd::Perf { path } => print_log_perf(&open(path)?)?,
         LogCmd::Cells { path } => print_log_cells(&open(path)?)?,
+        LogCmd::Lanes { path } => print_log_lanes(&open(path)?)?,
         LogCmd::Gps { path } => print_log_gps(&open(path)?)?,
         LogCmd::Compass { path, instance } => print_log_compass(&open(path)?, instance)?,
         LogCmd::Battery { path, instance } => print_log_battery(&open(path)?, instance)?,
