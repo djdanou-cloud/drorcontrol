@@ -325,6 +325,12 @@ enum LogCmd {
         #[arg(long)]
         out: std::path::PathBuf,
     },
+    /// Every analysis at once: summary, health, motors, attitude, battery, compass, wind,
+    /// sensors, RC link, notch advice and parameter changes.
+    Report {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+    },
     /// Flight summary: armed time, highest altitude, top speed, distance, battery used.
     Summary {
         /// Path to the .bin log.
@@ -689,6 +695,344 @@ async fn run(cli: Cli) -> Result<(), String> {
             Ok(())
         }
     }
+}
+
+fn print_log_summary(log: &logs::Log) -> Result<(), String> {
+    let s = logs::flight::summary(log);
+    println!("flights: {}", s.armed.len());
+    for p in &s.armed {
+        let end = p.end_us.map_or("log end".to_string(), |e| {
+            format!("{:.1} s", e as f64 / 1e6)
+        });
+        println!("  armed {:.1} s -> {end}", p.start_us as f64 / 1e6);
+    }
+    println!("armed time: {:.1} s", s.armed_s);
+    let opt =
+        |v: Option<f64>, unit: &str| v.map_or("not logged".into(), |v| format!("{v:.1} {unit}"));
+    println!("highest above home: {}", opt(s.max_alt_rel_m, "m"));
+    println!("top ground speed: {}", opt(s.max_speed_ms, "m/s"));
+    println!("distance flown: {:.0} m", s.distance_m);
+    println!("furthest from home: {}", opt(s.max_from_home_m, "m"));
+    println!(
+        "fastest climb: {}, fastest descent: {}",
+        opt(s.max_climb_ms, "m/s"),
+        opt(s.max_descent_ms, "m/s")
+    );
+    println!("battery used: {}", opt(s.used_mah, "mAh"));
+    println!("lowest battery voltage: {}", opt(s.min_voltage, "V"));
+    let fw = log_firmware(&logs::flight::events(log));
+    let modes: Vec<(u8, f64)> = logs::flight::mode_times(log)
+        .into_iter()
+        .filter(|(_, t)| *t >= 0.05)
+        .collect();
+    if !modes.is_empty() {
+        println!("armed time per mode:");
+        for (m, t) in modes {
+            println!("  {:<12} {t:7.1} s", mode_label(fw, m));
+        }
+    }
+    Ok(())
+}
+
+fn print_log_motors(log: &logs::Log) -> Result<(), String> {
+    if let Some(h) = logs::motors::hover_throttle(log) {
+        let pct = |v: Option<f64>| v.map_or("-".into(), |v| format!("{:.1} %", v * 100.0));
+        println!(
+            "hover throttle: learned {} (MOT_THST_HOVER {}), level flight {} over {} samples{}",
+            pct(h.learned),
+            pct(h.param),
+            pct(h.mean_level),
+            h.samples,
+            match h.at_limit {
+                Some("upper") => " -- at the upper learning limit: underpowered or overloaded?",
+                Some(_) => " -- at the lower learning limit: very overpowered",
+                None => "",
+            }
+        );
+    }
+    let m = logs::motors::motor_balance(log)
+        .ok_or("no motor outputs in flight (SERVOn_FUNCTION motors and RCOU needed)")?;
+    println!(
+        "{} samples while {}",
+        m.samples,
+        if m.land_detector {
+            "flying (land detector)"
+        } else {
+            "armed (no land-detector events)"
+        }
+    );
+    for o in &m.motors {
+        println!(
+            "  motor {:2} (SERVO{:<2}) {:6.0} us  {:5.1} %",
+            o.motor,
+            o.channel,
+            o.mean_pwm,
+            o.mean_output * 100.0
+        );
+    }
+    if let Some((motor, dev)) = m.worst() {
+        println!(
+            "largest deviation: motor {motor} {:+.1} % from the mean",
+            dev * 100.0
+        );
+    }
+    if let Some(d) = m.cw_minus_ccw {
+        println!(
+            "quad: clockwise motors (3, 4) {:+.1} points of output vs counter-clockwise (1, 2)",
+            d * 100.0
+        );
+    }
+    Ok(())
+}
+
+fn print_log_rc(log: &logs::Log) -> Result<(), String> {
+    let l = logs::rc::rc_link(log);
+    let mm = |v: Option<(f64, f64)>| {
+        v.map_or("not reported".into(), |(m, lo)| {
+            format!("mean {m:.0} %, lowest {lo:.0} %")
+        })
+    };
+    println!(
+        "while armed ({} samples): RSSI {}; link quality {}",
+        l.rssi_samples,
+        mm(l.rssi_pct),
+        mm(l.lq_pct)
+    );
+    println!(
+        "radio failsafes: {}; late frames: {}",
+        l.failsafes.len(),
+        l.late_frames
+    );
+    for (start, end) in &l.failsafes {
+        println!(
+            "  failsafe at {:.1} s, {}",
+            *start as f64 / 1e6,
+            end.map_or("not resolved by the end of the log".into(), |e| format!(
+                "resolved after {:.1} s",
+                (e - start) as f64 / 1e6
+            ))
+        );
+    }
+    Ok(())
+}
+
+fn print_log_sensors(log: &logs::Log) -> Result<(), String> {
+    let pct = |x: f64| x * 100.0;
+    match logs::sensors::flow(log) {
+        Some(f) => println!(
+            "optical flow: {} samples, quality mean {:.0} (lowest {:.0}); usable by the EKF {:.1} %, quality 0 {:.1} %, rate >= 4.2 rad/s {:.1} %",
+            f.samples,
+            f.mean_quality,
+            f.min_quality,
+            pct(f.usable),
+            pct(f.zero_quality),
+            pct(f.too_fast)
+        ),
+        None => println!("optical flow: no OF samples in flight"),
+    }
+    let rf = logs::sensors::rangefinders(log);
+    if rf.is_empty() {
+        println!("rangefinder: no RFND samples in flight");
+    }
+    for r in rf {
+        let s = r.status_share;
+        println!(
+            "rangefinder {} (orientation {}): {} samples; good {:.1} %, out of range low {:.1} %, high {:.1} %, no data {:.1} %, not connected {:.1} %{}",
+            r.instance,
+            r.orientation,
+            r.samples,
+            pct(s[4]),
+            pct(s[2]),
+            pct(s[3]),
+            pct(s[1]),
+            pct(s[0]),
+            r.good_range_m.map_or(String::new(), |(a, b)| format!(
+                "; good readings {a:.2} to {b:.2} m"
+            ))
+        );
+    }
+    Ok(())
+}
+
+fn print_log_wind(log: &logs::Log) -> Result<(), String> {
+    let w = logs::wind::wind(log).ok_or(
+        "no wind estimate in flight (a multicopter's EKF estimates wind only with drag fusion: EK3_DRAG_BCOEF_X/Y)",
+    )?;
+    println!(
+        "mean wind {:.1} m/s from {:.0} deg; strongest {:.1} m/s at {:.1} s ({} samples)",
+        w.mean_speed_ms,
+        w.mean_from_deg,
+        w.max_speed_ms,
+        w.max_at_us as f64 / 1e6,
+        w.samples
+    );
+    Ok(())
+}
+
+fn print_log_attitude(log: &logs::Log) -> Result<(), String> {
+    let a = logs::tuning::attitude_tracking(log).ok_or("no ATT samples in flight")?;
+    println!(
+        "{} samples while {}",
+        a.samples,
+        if a.land_detector {
+            "flying (land detector)"
+        } else {
+            "armed (no land-detector events)"
+        }
+    );
+    for (name, e) in [("roll", a.roll), ("pitch", a.pitch), ("yaw", a.yaw)] {
+        println!(
+            "  {name:<5} error rms {:5.2} deg, max {:6.2} deg at {:.1} s",
+            e.rms_deg,
+            e.max_deg,
+            e.max_at_us as f64 / 1e6
+        );
+    }
+    Ok(())
+}
+
+fn print_log_changes(log: &logs::Log) -> Result<(), String> {
+    let changes = logs::flight::param_changes(log);
+    for c in &changes {
+        println!(
+            "{:10.3} s  {} {} -> {}{}",
+            c.time_us as f64 / 1e6,
+            c.name,
+            c.old as f32,
+            c.new as f32,
+            if c.automatic {
+                "  (updated by the autopilot)"
+            } else {
+                ""
+            }
+        );
+    }
+    eprintln!("{} changes", changes.len());
+    Ok(())
+}
+
+fn print_log_health(log: &logs::Log) -> Result<(), String> {
+    let findings = logs::health::assess(log);
+    if findings.is_empty() {
+        println!("no checks apply: the log has no VIBE, BAT, XKF4 or ERR records");
+    }
+    for f in &findings {
+        let at = f
+            .at_us
+            .map_or_else(String::new, |t| format!(" at {:.1} s", t as f64 / 1e6));
+        println!(
+            "{:<8} {:<10} {}{at}",
+            format!("{:?}", f.level).to_uppercase(),
+            f.check,
+            f.text
+        );
+    }
+    let worst = findings.iter().map(|f| f.level).max();
+    println!(
+        "overall: {}",
+        worst.map_or("n/a".into(), |l| format!("{l:?}").to_uppercase())
+    );
+    Ok(())
+}
+
+fn print_log_battery(log: &logs::Log, instance: &u8) -> Result<(), String> {
+    let b = logs::battery::battery_use(log, *instance)
+        .ok_or("no battery voltage and current while flying")?;
+    let opt = |v: Option<f64>, unit: &str, digits: usize| {
+        v.map_or("not logged".into(), |v| format!("{v:.digits$} {unit}"))
+    };
+    println!(
+        "{} samples over {:.1} s {}",
+        b.samples,
+        b.flying_s,
+        if b.land_detector {
+            "of flight (land detector)"
+        } else {
+            "armed (no land-detector events)"
+        }
+    );
+    println!(
+        "current: max {:.1} A, mean {:.1} A",
+        b.max_current_a, b.mean_current_a
+    );
+    println!(
+        "power: max {:.0} W, mean {:.0} W",
+        b.max_power_w, b.mean_power_w
+    );
+    println!(
+        "voltage: lowest {:.2} V under load, largest sag {}",
+        b.min_voltage,
+        opt(b.max_sag_v, "V", 2)
+    );
+    println!(
+        "used: {}, {} ({})",
+        opt(b.used_mah, "mAh", 0),
+        opt(b.used_wh, "Wh", 1),
+        opt(b.mah_per_min(), "mAh/min", 0)
+    );
+    println!(
+        "internal resistance: logged {}, fitted {}",
+        opt(b.logged_resistance_ohm.map(|r| r * 1000.0), "mOhm", 1),
+        opt(b.fitted_resistance_ohm.map(|r| r * 1000.0), "mOhm", 1)
+    );
+    Ok(())
+}
+
+fn print_log_compass(log: &logs::Log, instance: &u8) -> Result<(), String> {
+    let c = logs::compass::compass_interference(log, *instance)
+        .ok_or("needs MAG and BAT current while flying, with the current varying")?;
+    println!(
+        "compass {}: {} samples, mean field {:.0} mGauss",
+        c.instance, c.samples, c.mean_field_mgauss
+    );
+    println!(
+        "field strength changes {:+.2} mGauss per A (correlation {:+.2}); at the highest current ({:.1} A): {:+.1} % of the field",
+        c.mgauss_per_amp, c.correlation, c.max_current_a, c.change_at_max_pct
+    );
+    println!("(field strength only, a lower bound of the on-ground compassmot figure)");
+    Ok(())
+}
+
+fn print_log_notch(
+    log: &logs::Log,
+    field: &str,
+    imu: &u8,
+    segment: &usize,
+    min_hz: &f64,
+) -> Result<(), String> {
+    let (msg, fld) = field
+        .split_once('.')
+        .ok_or_else(|| format!("--field {field:?}: expected MSG.FIELD"))?;
+    let n = logs::notch::suggest(log, msg, fld, *imu, *segment, *min_hz)
+        .ok_or("no steady flight with enough samples (needs CTUN while flying and raw IMU data)")?;
+    println!(
+        "steady flight analysed: {:.1} s, {} samples of {field}",
+        n.span_s, n.samples
+    );
+    println!("suggested throttle-based harmonic notch (review before use; nothing is written):");
+    println!("  INS_HNTCH_ENABLE 1");
+    println!("  INS_HNTCH_MODE   1  (throttle)");
+    println!(
+        "  INS_HNTCH_FREQ   {:.0}  (Hz, peak at the reference throttle)",
+        n.freq_hz
+    );
+    println!(
+        "  INS_HNTCH_BW     {:.0}  (Hz, half the frequency)",
+        n.bw_hz
+    );
+    println!(
+        "  INS_HNTCH_REF    {:.2}  (throttle during the measurement)",
+        n.ref_throttle
+    );
+    if !n.current.is_empty() {
+        let cur: Vec<String> = n
+            .current
+            .iter()
+            .map(|(k, v)| format!("{k} {}", *v as f32))
+            .collect();
+        println!("currently: {}", cur.join(", "));
+    }
+    Ok(())
 }
 
 /// The firmware that wrote a log, from its version banner (modes are named only then).
@@ -1402,94 +1746,37 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                 println!("  peak {freq:7.1} Hz  power {p:.3e}");
             }
         }
-        LogCmd::Summary { path } => {
+        LogCmd::Summary { path } => print_log_summary(&open(path)?)?,
+        LogCmd::Report { path } => {
             let log = open(path)?;
-            let s = logs::flight::summary(&log);
-            println!("flights: {}", s.armed.len());
-            for p in &s.armed {
-                let end = p.end_us.map_or("log end".to_string(), |e| {
-                    format!("{:.1} s", e as f64 / 1e6)
-                });
-                println!("  armed {:.1} s -> {end}", p.start_us as f64 / 1e6);
-            }
-            println!("armed time: {:.1} s", s.armed_s);
-            let opt = |v: Option<f64>, unit: &str| {
-                v.map_or("not logged".into(), |v| format!("{v:.1} {unit}"))
-            };
-            println!("highest above home: {}", opt(s.max_alt_rel_m, "m"));
-            println!("top ground speed: {}", opt(s.max_speed_ms, "m/s"));
-            println!("distance flown: {:.0} m", s.distance_m);
-            println!("furthest from home: {}", opt(s.max_from_home_m, "m"));
-            println!(
-                "fastest climb: {}, fastest descent: {}",
-                opt(s.max_climb_ms, "m/s"),
-                opt(s.max_descent_ms, "m/s")
-            );
-            println!("battery used: {}", opt(s.used_mah, "mAh"));
-            println!("lowest battery voltage: {}", opt(s.min_voltage, "V"));
-            let fw = log_firmware(&logs::flight::events(&log));
-            let modes: Vec<(u8, f64)> = logs::flight::mode_times(&log)
-                .into_iter()
-                .filter(|(_, t)| *t >= 0.05)
-                .collect();
-            if !modes.is_empty() {
-                println!("armed time per mode:");
-                for (m, t) in modes {
-                    println!("  {:<12} {t:7.1} s", mode_label(fw, m));
+            type Section<'a> = (&'a str, Box<dyn Fn() -> Result<(), String> + 'a>);
+            let sections: Vec<Section> = vec![
+                ("Flight summary", Box::new(|| print_log_summary(&log))),
+                ("Health checks", Box::new(|| print_log_health(&log))),
+                ("Motors and hover", Box::new(|| print_log_motors(&log))),
+                ("Attitude tracking", Box::new(|| print_log_attitude(&log))),
+                ("Battery", Box::new(|| print_log_battery(&log, &0))),
+                (
+                    "Compass interference",
+                    Box::new(|| print_log_compass(&log, &0)),
+                ),
+                ("Wind", Box::new(|| print_log_wind(&log))),
+                ("Flow and rangefinder", Box::new(|| print_log_sensors(&log))),
+                ("RC link", Box::new(|| print_log_rc(&log))),
+                (
+                    "Harmonic notch (advice)",
+                    Box::new(|| print_log_notch(&log, "ACC.AccX", &0, &1024, &20.0)),
+                ),
+                ("Parameter changes", Box::new(|| print_log_changes(&log))),
+            ];
+            for (title, run) in sections {
+                println!("\n== {title} ==");
+                if let Err(e) = run() {
+                    println!("not available: {e}");
                 }
             }
         }
-        LogCmd::Motors { path } => {
-            let log = open(path)?;
-            if let Some(h) = logs::motors::hover_throttle(&log) {
-                let pct = |v: Option<f64>| v.map_or("-".into(), |v| format!("{:.1} %", v * 100.0));
-                println!(
-                    "hover throttle: learned {} (MOT_THST_HOVER {}), level flight {} over {} samples{}",
-                    pct(h.learned),
-                    pct(h.param),
-                    pct(h.mean_level),
-                    h.samples,
-                    match h.at_limit {
-                        Some("upper") =>
-                            " -- at the upper learning limit: underpowered or overloaded?",
-                        Some(_) => " -- at the lower learning limit: very overpowered",
-                        None => "",
-                    }
-                );
-            }
-            let m = logs::motors::motor_balance(&log)
-                .ok_or("no motor outputs in flight (SERVOn_FUNCTION motors and RCOU needed)")?;
-            println!(
-                "{} samples while {}",
-                m.samples,
-                if m.land_detector {
-                    "flying (land detector)"
-                } else {
-                    "armed (no land-detector events)"
-                }
-            );
-            for o in &m.motors {
-                println!(
-                    "  motor {:2} (SERVO{:<2}) {:6.0} us  {:5.1} %",
-                    o.motor,
-                    o.channel,
-                    o.mean_pwm,
-                    o.mean_output * 100.0
-                );
-            }
-            if let Some((motor, dev)) = m.worst() {
-                println!(
-                    "largest deviation: motor {motor} {:+.1} % from the mean",
-                    dev * 100.0
-                );
-            }
-            if let Some(d) = m.cw_minus_ccw {
-                println!(
-                    "quad: clockwise motors (3, 4) {:+.1} points of output vs counter-clockwise (1, 2)",
-                    d * 100.0
-                );
-            }
-        }
+        LogCmd::Motors { path } => print_log_motors(&open(path)?)?,
         LogCmd::Geotags { path, trig, out } => {
             let log = open(path)?;
             let msg = if *trig { "TRIG" } else { "CAM" };
@@ -1524,202 +1811,13 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
             imu,
             segment,
             min_hz,
-        } => {
-            let log = open(path)?;
-            let (msg, fld) = field
-                .split_once('.')
-                .ok_or_else(|| format!("--field {field:?}: expected MSG.FIELD"))?;
-            let n = logs::notch::suggest(&log, msg, fld, *imu, *segment, *min_hz).ok_or(
-                "no steady flight with enough samples (needs CTUN while flying and raw IMU data)",
-            )?;
-            println!(
-                "steady flight analysed: {:.1} s, {} samples of {field}",
-                n.span_s, n.samples
-            );
-            println!(
-                "suggested throttle-based harmonic notch (review before use; nothing is written):"
-            );
-            println!("  INS_HNTCH_ENABLE 1");
-            println!("  INS_HNTCH_MODE   1  (throttle)");
-            println!(
-                "  INS_HNTCH_FREQ   {:.0}  (Hz, peak at the reference throttle)",
-                n.freq_hz
-            );
-            println!(
-                "  INS_HNTCH_BW     {:.0}  (Hz, half the frequency)",
-                n.bw_hz
-            );
-            println!(
-                "  INS_HNTCH_REF    {:.2}  (throttle during the measurement)",
-                n.ref_throttle
-            );
-            if !n.current.is_empty() {
-                let cur: Vec<String> = n
-                    .current
-                    .iter()
-                    .map(|(k, v)| format!("{k} {}", *v as f32))
-                    .collect();
-                println!("currently: {}", cur.join(", "));
-            }
-        }
-        LogCmd::Rc { path } => {
-            let log = open(path)?;
-            let l = logs::rc::rc_link(&log);
-            let mm = |v: Option<(f64, f64)>| {
-                v.map_or("not reported".into(), |(m, lo)| {
-                    format!("mean {m:.0} %, lowest {lo:.0} %")
-                })
-            };
-            println!(
-                "while armed ({} samples): RSSI {}; link quality {}",
-                l.rssi_samples,
-                mm(l.rssi_pct),
-                mm(l.lq_pct)
-            );
-            println!(
-                "radio failsafes: {}; late frames: {}",
-                l.failsafes.len(),
-                l.late_frames
-            );
-            for (start, end) in &l.failsafes {
-                println!(
-                    "  failsafe at {:.1} s, {}",
-                    *start as f64 / 1e6,
-                    end.map_or("not resolved by the end of the log".into(), |e| format!(
-                        "resolved after {:.1} s",
-                        (e - start) as f64 / 1e6
-                    ))
-                );
-            }
-        }
-        LogCmd::Sensors { path } => {
-            let log = open(path)?;
-            let pct = |x: f64| x * 100.0;
-            match logs::sensors::flow(&log) {
-                Some(f) => println!(
-                    "optical flow: {} samples, quality mean {:.0} (lowest {:.0}); usable by the EKF {:.1} %, quality 0 {:.1} %, rate >= 4.2 rad/s {:.1} %",
-                    f.samples,
-                    f.mean_quality,
-                    f.min_quality,
-                    pct(f.usable),
-                    pct(f.zero_quality),
-                    pct(f.too_fast)
-                ),
-                None => println!("optical flow: no OF samples in flight"),
-            }
-            let rf = logs::sensors::rangefinders(&log);
-            if rf.is_empty() {
-                println!("rangefinder: no RFND samples in flight");
-            }
-            for r in rf {
-                let s = r.status_share;
-                println!(
-                    "rangefinder {} (orientation {}): {} samples; good {:.1} %, out of range low {:.1} %, high {:.1} %, no data {:.1} %, not connected {:.1} %{}",
-                    r.instance,
-                    r.orientation,
-                    r.samples,
-                    pct(s[4]),
-                    pct(s[2]),
-                    pct(s[3]),
-                    pct(s[1]),
-                    pct(s[0]),
-                    r.good_range_m.map_or(String::new(), |(a, b)| format!(
-                        "; good readings {a:.2} to {b:.2} m"
-                    ))
-                );
-            }
-        }
-        LogCmd::Wind { path } => {
-            let log = open(path)?;
-            let w = logs::wind::wind(&log).ok_or(
-                "no wind estimate in flight (a multicopter's EKF estimates wind only with drag fusion: EK3_DRAG_BCOEF_X/Y)",
-            )?;
-            println!(
-                "mean wind {:.1} m/s from {:.0} deg; strongest {:.1} m/s at {:.1} s ({} samples)",
-                w.mean_speed_ms,
-                w.mean_from_deg,
-                w.max_speed_ms,
-                w.max_at_us as f64 / 1e6,
-                w.samples
-            );
-        }
-        LogCmd::Compass { path, instance } => {
-            let log = open(path)?;
-            let c = logs::compass::compass_interference(&log, *instance)
-                .ok_or("needs MAG and BAT current while flying, with the current varying")?;
-            println!(
-                "compass {}: {} samples, mean field {:.0} mGauss",
-                c.instance, c.samples, c.mean_field_mgauss
-            );
-            println!(
-                "field strength changes {:+.2} mGauss per A (correlation {:+.2}); at the highest current ({:.1} A): {:+.1} % of the field",
-                c.mgauss_per_amp, c.correlation, c.max_current_a, c.change_at_max_pct
-            );
-            println!("(field strength only, a lower bound of the on-ground compassmot figure)");
-        }
-        LogCmd::Battery { path, instance } => {
-            let log = open(path)?;
-            let b = logs::battery::battery_use(&log, *instance)
-                .ok_or("no battery voltage and current while flying")?;
-            let opt = |v: Option<f64>, unit: &str, digits: usize| {
-                v.map_or("not logged".into(), |v| format!("{v:.digits$} {unit}"))
-            };
-            println!(
-                "{} samples over {:.1} s {}",
-                b.samples,
-                b.flying_s,
-                if b.land_detector {
-                    "of flight (land detector)"
-                } else {
-                    "armed (no land-detector events)"
-                }
-            );
-            println!(
-                "current: max {:.1} A, mean {:.1} A",
-                b.max_current_a, b.mean_current_a
-            );
-            println!(
-                "power: max {:.0} W, mean {:.0} W",
-                b.max_power_w, b.mean_power_w
-            );
-            println!(
-                "voltage: lowest {:.2} V under load, largest sag {}",
-                b.min_voltage,
-                opt(b.max_sag_v, "V", 2)
-            );
-            println!(
-                "used: {}, {} ({})",
-                opt(b.used_mah, "mAh", 0),
-                opt(b.used_wh, "Wh", 1),
-                opt(b.mah_per_min(), "mAh/min", 0)
-            );
-            println!(
-                "internal resistance: logged {}, fitted {}",
-                opt(b.logged_resistance_ohm.map(|r| r * 1000.0), "mOhm", 1),
-                opt(b.fitted_resistance_ohm.map(|r| r * 1000.0), "mOhm", 1)
-            );
-        }
-        LogCmd::Attitude { path } => {
-            let log = open(path)?;
-            let a = logs::tuning::attitude_tracking(&log).ok_or("no ATT samples in flight")?;
-            println!(
-                "{} samples while {}",
-                a.samples,
-                if a.land_detector {
-                    "flying (land detector)"
-                } else {
-                    "armed (no land-detector events)"
-                }
-            );
-            for (name, e) in [("roll", a.roll), ("pitch", a.pitch), ("yaw", a.yaw)] {
-                println!(
-                    "  {name:<5} error rms {:5.2} deg, max {:6.2} deg at {:.1} s",
-                    e.rms_deg,
-                    e.max_deg,
-                    e.max_at_us as f64 / 1e6
-                );
-            }
-        }
+        } => print_log_notch(&open(path)?, field, imu, segment, min_hz)?,
+        LogCmd::Rc { path } => print_log_rc(&open(path)?)?,
+        LogCmd::Sensors { path } => print_log_sensors(&open(path)?)?,
+        LogCmd::Wind { path } => print_log_wind(&open(path)?)?,
+        LogCmd::Compass { path, instance } => print_log_compass(&open(path)?, instance)?,
+        LogCmd::Battery { path, instance } => print_log_battery(&open(path)?, instance)?,
+        LogCmd::Attitude { path } => print_log_attitude(&open(path)?)?,
         LogCmd::Events { path } => {
             let log = open(path)?;
             let ev = logs::flight::events(&log);
@@ -1743,25 +1841,7 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                 println!("{:10.3} s  {text}", *t as f64 / 1e6);
             }
         }
-        LogCmd::Changes { path } => {
-            let log = open(path)?;
-            let changes = logs::flight::param_changes(&log);
-            for c in &changes {
-                println!(
-                    "{:10.3} s  {} {} -> {}{}",
-                    c.time_us as f64 / 1e6,
-                    c.name,
-                    c.old as f32,
-                    c.new as f32,
-                    if c.automatic {
-                        "  (updated by the autopilot)"
-                    } else {
-                        ""
-                    }
-                );
-            }
-            eprintln!("{} changes", changes.len());
-        }
+        LogCmd::Changes { path } => print_log_changes(&open(path)?)?,
         LogCmd::Csv { path, msg, out } => {
             let log = open(path)?;
             let text = logs::export::csv(&log, msg)
@@ -1806,29 +1886,7 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                 }
             }
         }
-        LogCmd::Health { path } => {
-            let log = open(path)?;
-            let findings = logs::health::assess(&log);
-            if findings.is_empty() {
-                println!("no checks apply: the log has no VIBE, BAT, XKF4 or ERR records");
-            }
-            for f in &findings {
-                let at = f
-                    .at_us
-                    .map_or_else(String::new, |t| format!(" at {:.1} s", t as f64 / 1e6));
-                println!(
-                    "{:<8} {:<10} {}{at}",
-                    format!("{:?}", f.level).to_uppercase(),
-                    f.check,
-                    f.text
-                );
-            }
-            let worst = findings.iter().map(|f| f.level).max();
-            println!(
-                "overall: {}",
-                worst.map_or("n/a".into(), |l| format!("{l:?}").to_uppercase())
-            );
-        }
+        LogCmd::Health { path } => print_log_health(&open(path)?)?,
         LogCmd::Plot {
             path,
             msg,
