@@ -477,16 +477,20 @@ impl Fleet {
                 );
             }
             Message::MissionCurrent(m) if compid == AUTOPILOT_COMPID => {
+                let state = MissionState::from_mavlink(m.mission_state);
                 v.mission = timed(
                     now,
                     MissionProgress {
                         current: m.seq,
+                        // 0 means "not supported", except with NO_MISSION (ArduPilot 4.7.1
+                        // reports an empty mission so).
                         total: match m.total {
+                            0 if state == MissionState::NoMission => Some(0),
                             0 => None,
                             u16::MAX => Some(0),
                             n => Some(n),
                         },
-                        state: MissionState::from_mavlink(m.mission_state),
+                        state,
                         in_mission_mode: match m.mission_mode {
                             1 => Some(true),
                             2 => Some(false),
@@ -749,6 +753,9 @@ mod tests {
             (m.total, m.state, m.in_mission_mode),
             (None, MissionState::Unknown, None)
         );
+        f.apply(1, 1, &cur(0, 0, 1, 0), now);
+        let m = f.get(1).unwrap().mission.as_ref().unwrap().value;
+        assert_eq!(m.total, Some(0), "ArduPilot: total 0 with NO_MISSION");
         f.apply(1, 1, &cur(0, u16::MAX, 1, 2), now);
         let m = f.get(1).unwrap().mission.as_ref().unwrap().value;
         assert_eq!(

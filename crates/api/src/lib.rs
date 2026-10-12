@@ -54,6 +54,18 @@ fn ms(d: Duration) -> u32 {
     u32::try_from(d.as_millis()).unwrap_or(u32::MAX)
 }
 
+fn mission_state_to_pb(s: dc_core::MissionState) -> pb::MissionState {
+    use dc_core::MissionState as M;
+    match s {
+        M::Unknown => pb::MissionState::Unknown,
+        M::NoMission => pb::MissionState::NoMission,
+        M::NotStarted => pb::MissionState::NotStarted,
+        M::Active => pb::MissionState::Active,
+        M::Paused => pb::MissionState::Paused,
+        M::Complete => pb::MissionState::Complete,
+    }
+}
+
 /// Convert core state to the wire type.
 pub fn vehicle_to_pb(v: &VehicleState, now: Instant) -> pb::Vehicle {
     pb::Vehicle {
@@ -65,6 +77,7 @@ pub fn vehicle_to_pb(v: &VehicleState, now: Instant) -> pb::Vehicle {
             custom_mode: h.value.custom_mode,
             armed: h.value.armed(),
             system_status: u32::from(h.value.system_status),
+            mode_name: v.mode_name().map(str::to_string),
         }),
         attitude: v.attitude.as_ref().map(|a| pb::AttitudeState {
             age_ms: ms(a.age(now)),
@@ -91,6 +104,18 @@ pub fn vehicle_to_pb(v: &VehicleState, now: Instant) -> pb::Vehicle {
             fix_type: u32::from(g.value.fix_type),
             satellites: g.value.satellites.map(u32::from),
             hdop: g.value.hdop,
+        }),
+        mission: v.mission.as_ref().map(|m| pb::MissionProgress {
+            age_ms: ms(m.age(now)),
+            current: u32::from(m.value.current),
+            total: m.value.total.map(u32::from),
+            state: mission_state_to_pb(m.value.state) as i32,
+            in_mission_mode: m.value.in_mission_mode,
+            last_reached: v.mission_reached.as_ref().map(|r| u32::from(r.value)),
+        }),
+        landed: v.extended.as_ref().map(|e| pb::LandedState {
+            age_ms: ms(e.age(now)),
+            landed_state: u32::from(e.value.landed.to_mavlink()),
         }),
     }
 }
@@ -300,4 +325,83 @@ pub async fn serve_on(
         .add_service(CoreServer::new(CoreService::new(core)))
         .serve_with_incoming(incoming)
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dc_core::Fleet;
+    use mavlink_codec::Message;
+    use mavlink_codec::messages::{
+        ExtendedSysState, Heartbeat, MissionCurrent, MissionItemReached, Statustext,
+    };
+
+    #[test]
+    fn vehicle_carries_mode_name_mission_and_landed_state() {
+        let now = Instant::now();
+        let mut f = Fleet::new();
+        let hb = Message::Heartbeat(Heartbeat {
+            r#type: 2,
+            autopilot: 3,
+            custom_mode: 3, // Copter AUTO
+            ..Default::default()
+        });
+        f.apply(1, 1, &hb, now);
+        let pb = vehicle_to_pb(f.get(1).unwrap(), now);
+        assert_eq!(pb.heartbeat.unwrap().mode_name, None, "no banner, no name");
+        assert!(pb.mission.is_none() && pb.landed.is_none());
+
+        let mut text = [0u8; 50];
+        text[..23].copy_from_slice(b"ArduCopter V4.7.1 (abc)");
+        f.apply(
+            1,
+            1,
+            &Message::Statustext(Statustext {
+                severity: 6,
+                text,
+                ..Default::default()
+            }),
+            now,
+        );
+        f.apply(
+            1,
+            1,
+            &Message::MissionCurrent(MissionCurrent {
+                seq: 2,
+                total: 4,
+                mission_state: 3,
+                mission_mode: 1,
+            }),
+            now,
+        );
+        f.apply(
+            1,
+            1,
+            &Message::MissionItemReached(MissionItemReached { seq: 1 }),
+            now,
+        );
+        f.apply(
+            1,
+            1,
+            &Message::ExtendedSysState(ExtendedSysState {
+                vtol_state: 0,
+                landed_state: 2,
+            }),
+            now,
+        );
+        let pb = vehicle_to_pb(f.get(1).unwrap(), now);
+        assert_eq!(pb.heartbeat.unwrap().mode_name.as_deref(), Some("AUTO"));
+        let m = pb.mission.unwrap();
+        assert_eq!(
+            (
+                m.current,
+                m.total,
+                m.state(),
+                m.in_mission_mode,
+                m.last_reached
+            ),
+            (2, Some(4), pb::MissionState::Active, Some(true), Some(1))
+        );
+        assert_eq!(pb.landed.unwrap().landed_state, 2);
+    }
 }

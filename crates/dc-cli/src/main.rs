@@ -827,9 +827,12 @@ fn print_fleet(core: &Core) {
     let now = Instant::now();
     for v in fleet.vehicles() {
         let hb = v.heartbeat.as_ref().map(|h| {
+            // A mode is named only when the firmware is confirmed by its banner.
+            let mode = v
+                .mode_name()
+                .map_or_else(|| h.value.custom_mode.to_string(), str::to_string);
             format!(
-                "mode {} {}",
-                h.value.custom_mode,
+                "mode {mode} {}",
                 if h.value.armed() { "ARMED" } else { "disarmed" }
             )
         });
@@ -857,7 +860,11 @@ fn print_fleet(core: &Core) {
             .as_ref()
             .map(|h| h.age(now).as_secs_f32())
             .unwrap_or(f32::NAN);
-        let parts: Vec<String> = [hb, att, pos, bat].into_iter().flatten().collect();
+        let mission = v.mission.as_ref().map(|m| match m.value.total {
+            Some(t) => format!("mission {}/{t} {:?}", m.value.current, m.value.state),
+            None => format!("mission item {} {:?}", m.value.current, m.value.state),
+        });
+        let parts: Vec<String> = [hb, att, pos, bat, mission].into_iter().flatten().collect();
         println!(
             "sys {:3} | {} | hb age {:.1} s",
             v.sysid,

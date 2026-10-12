@@ -56,6 +56,8 @@ message Vehicle {
   optional PositionState position = 4;
   optional PowerState power = 5;
   optional GpsState gps = 6;
+  optional MissionProgress mission = 7;
+  optional LandedState landed = 8;
 }
 
 message HeartbeatState {
@@ -65,6 +67,9 @@ message HeartbeatState {
   uint32 custom_mode = 4;   // ArduPilot flight mode number
   bool armed = 5;
   uint32 system_status = 6;
+  // Flight mode name, only when the firmware is confirmed by its version banner (a guess
+  // from MAV_TYPE never names a mode).
+  optional string mode_name = 7;
 }
 
 message AttitudeState {
@@ -95,6 +100,33 @@ message GpsState {
   uint32 fix_type = 2;
   optional uint32 satellites = 3;
   optional float hdop = 4;
+}
+
+// From MISSION_CURRENT and MISSION_ITEM_REACHED (autopilot component). Item numbers are the
+// vehicle's: on ArduPilot item 0 is home and the first mission item is 1.
+message MissionProgress {
+  uint32 age_ms = 1;
+  uint32 current = 2;               // item being executed, or next to execute
+  optional uint32 total = 3;        // items excluding home; absent if not reported, 0 if no mission
+  MissionState state = 4;
+  optional bool in_mission_mode = 5; // absent if not reported
+  optional uint32 last_reached = 6;  // last MISSION_ITEM_REACHED
+}
+
+// MAVLink MISSION_STATE values.
+enum MissionState {
+  MISSION_STATE_UNKNOWN = 0;
+  MISSION_STATE_NO_MISSION = 1;
+  MISSION_STATE_NOT_STARTED = 2;
+  MISSION_STATE_ACTIVE = 3;
+  MISSION_STATE_PAUSED = 4;
+  MISSION_STATE_COMPLETE = 5;
+}
+
+// From EXTENDED_SYS_STATE (autopilot component).
+message LandedState {
+  uint32 age_ms = 1;
+  uint32 landed_state = 2;  // MAV_LANDED_STATE: 0 undefined, 1 on ground, 2 in air, 3 takeoff, 4 landing
 }
 
 message GetParamsRequest {
