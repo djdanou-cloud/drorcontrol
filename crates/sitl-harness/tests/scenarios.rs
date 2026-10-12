@@ -67,6 +67,24 @@ async fn connect_detects_the_vehicle_and_receives_telemetry() {
     let ext = core.fleet().get(1).unwrap().extended.clone().unwrap().value;
     assert_eq!(ext.landed, dc_core::LandedState::OnGround);
     assert_eq!(core.facts(1).landed_state.map(|(s, _)| s), Some(1));
+    // BATTERY_STATUS: SITL's simulated analog monitor measures the pack, not cells. Right
+    // after boot it reports charge state UNHEALTHY with no voltage; wait for a reading.
+    until(
+        Duration::from_secs(30),
+        "BATTERY_STATUS with a voltage",
+        || {
+            core.fleet()
+                .get(1)
+                .and_then(|v| v.batteries.get(&0).cloned())
+                .is_some_and(|b| b.value.voltage_v.is_some())
+        },
+    )
+    .await;
+    let b = core.fleet().get(1).unwrap().batteries[&0].value.clone();
+    assert!(
+        b.voltage_v.is_some_and(|v| (v - 12.6).abs() < 0.5) && b.cells_v.is_empty(),
+        "{b:?}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

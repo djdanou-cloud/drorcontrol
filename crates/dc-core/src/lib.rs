@@ -56,8 +56,8 @@ pub use protocols::params::{Param, SetStatus};
 use tokio::sync::broadcast;
 
 pub use vehicle::{
-    Extended, Firmware, FirmwareSource, Fleet, Home, LandedState, MissionProgress, MissionState,
-    StatusText, Traffic, VehicleState, VtolState,
+    Battery, Extended, Firmware, FirmwareSource, Fleet, Home, LandedState, MissionProgress,
+    MissionState, StatusText, Traffic, VehicleState, VtolState,
 };
 pub use vehicle::{NavHealth, NavThresholds, PositionTrust};
 
@@ -300,6 +300,8 @@ impl Default for CoreConfig {
                 // ADSB_VEHICLE: ArduPilot sends one aircraft per interval and nothing without
                 // traffic (AP_ADSB::send_adsb_vehicle), so this costs nothing until there is some.
                 (246, 5.0),
+                // BATTERY_STATUS: ArduPilot sends one battery per interval, round robin.
+                (147, 2.0),
             ],
             link_stale: Duration::from_millis(1500),
             link_lost: Duration::from_secs(5),

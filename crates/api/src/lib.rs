@@ -175,6 +175,26 @@ pub fn vehicle_to_pb(v: &VehicleState, now: Instant) -> pb::Vehicle {
                 simulated: t.value.simulated,
             })
             .collect(),
+        batteries: v
+            .batteries
+            .values()
+            .map(|b| pb::BatteryState {
+                age_ms: ms(b.age(now)),
+                id: u32::from(b.value.id),
+                function: u32::from(b.value.function),
+                chemistry: u32::from(b.value.chemistry),
+                temperature_c: b.value.temperature_c,
+                voltage_v: b.value.voltage_v,
+                cells_v: b.value.cells_v.clone(),
+                current_a: b.value.current_a,
+                consumed_mah: b.value.consumed_mah,
+                consumed_j: b.value.consumed_j,
+                remaining_pct: b.value.remaining_pct.map(u32::from),
+                time_remaining_s: b.value.time_remaining_s,
+                charge_state: u32::from(b.value.charge_state),
+                fault_bitmask: b.value.fault_bitmask,
+            })
+            .collect(),
         home: v.home.as_ref().map(|h| pb::HomeState {
             age_ms: ms(h.age(now)),
             lat_deg: h.value.lat_deg,
@@ -525,6 +545,28 @@ mod tests {
                 ..Default::default()
             }),
             now,
+        );
+        let mut volts = [u16::MAX; 10];
+        volts[0] = 12_600;
+        f.apply(
+            1,
+            1,
+            &Message::BatteryStatus(mavlink_codec::messages::BatteryStatus {
+                id: 0,
+                voltages: volts,
+                temperature: i16::MAX,
+                current_battery: -1,
+                current_consumed: -1,
+                energy_consumed: -1,
+                battery_remaining: 80,
+                ..Default::default()
+            }),
+            now,
+        );
+        let b = &vehicle_to_pb(f.get(1).unwrap(), now).batteries[0];
+        assert_eq!(
+            (b.voltage_v, b.cells_v.len(), b.remaining_pct, b.current_a),
+            (Some(12.6), 0, Some(80), None)
         );
         let traffic = vehicle_to_pb(f.get(1).unwrap(), now).traffic;
         assert_eq!(traffic.len(), 1);

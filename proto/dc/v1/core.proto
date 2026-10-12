@@ -69,6 +69,25 @@ message Vehicle {
   optional HomeState home = 11;
   // ADS-B traffic reported through this vehicle (forgotten after 60 s without a report).
   repeated TrafficState traffic = 12;
+  // Batteries from BATTERY_STATUS, by id (PowerState is the SYS_STATUS summary).
+  repeated BatteryState batteries = 13;
+}
+
+message BatteryState {
+  uint32 age_ms = 1;
+  uint32 id = 2;
+  uint32 function = 3;               // MAV_BATTERY_FUNCTION
+  uint32 chemistry = 4;              // MAV_BATTERY_TYPE
+  optional float temperature_c = 5;
+  optional float voltage_v = 6;      // pack voltage
+  repeated float cells_v = 7;        // empty unless the monitor measures cells
+  optional float current_a = 8;
+  optional int32 consumed_mah = 9;
+  optional double consumed_j = 10;
+  optional uint32 remaining_pct = 11;
+  optional uint32 time_remaining_s = 12;
+  uint32 charge_state = 13;          // MAV_BATTERY_CHARGE_STATE
+  uint32 fault_bitmask = 14;         // MAV_BATTERY_FAULT
 }
 
 // One aircraft from ADSB_VEHICLE. Optional fields are absent unless the message's own

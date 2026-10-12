@@ -313,6 +313,85 @@ impl Traffic {
     }
 }
 
+/// One battery from `BATTERY_STATUS` (autopilot component). Unknown values are `None`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Battery {
+    /// Battery id (instance).
+    pub id: u8,
+    /// `MAV_BATTERY_FUNCTION`.
+    pub function: u8,
+    /// `MAV_BATTERY_TYPE` (chemistry).
+    pub chemistry: u8,
+    /// Temperature, °C.
+    pub temperature_c: Option<f32>,
+    /// Pack voltage, V: the sum of the valid entries (see [`Battery::from_mavlink`]).
+    pub voltage_v: Option<f32>,
+    /// Cell voltages, V, when the monitor measures cells.
+    pub cells_v: Vec<f32>,
+    /// Current, A.
+    pub current_a: Option<f32>,
+    /// Charge consumed, mAh.
+    pub consumed_mah: Option<i32>,
+    /// Energy consumed, J.
+    pub consumed_j: Option<f64>,
+    /// Remaining, percent.
+    pub remaining_pct: Option<u8>,
+    /// Remaining time estimate, s.
+    pub time_remaining_s: Option<u32>,
+    /// `MAV_BATTERY_CHARGE_STATE` (0 undefined, 1 OK, 2 low, 3 critical, 4 emergency, …).
+    pub charge_state: u8,
+    /// `MAV_BATTERY_FAULT` bits.
+    pub fault_bitmask: u32,
+}
+
+/// `UINT16_MAX` - 1: the largest value one voltage entry holds. ArduPilot (and the MAVLink
+/// definition) splits a pack voltage above it across entries; no cell reads 65.534 V.
+const VOLTAGE_ENTRY_MAX_MV: u16 = 0xFFFE;
+
+impl Battery {
+    /// From `BATTERY_STATUS`. Voltages follow ArduPilot's `send_battery_status` (4.7.1) and
+    /// the MAVLink definition: with cell measurement the entries are cells; without it the
+    /// pack voltage is in entry 0 (overflowing into entry 1 above 65.534 V). Either way the
+    /// pack voltage is the sum of the valid entries. Entries are read as cells only when two
+    /// or more are valid and none is the overflow value; a single entry is the pack.
+    pub fn from_mavlink(b: &mavlink_codec::messages::BatteryStatus) -> Battery {
+        let valid: Vec<u16> = b
+            .voltages
+            .iter()
+            .copied()
+            .filter(|&mv| mv != u16::MAX)
+            .chain(
+                b.voltages_ext
+                    .iter()
+                    .copied()
+                    .filter(|&mv| mv != 0 && mv != u16::MAX),
+            )
+            .collect();
+        let voltage_v = (!valid.is_empty())
+            .then(|| valid.iter().map(|&mv| f32::from(mv)).sum::<f32>() / 1000.0);
+        let cells_v = if valid.len() >= 2 && !valid.contains(&VOLTAGE_ENTRY_MAX_MV) {
+            valid.iter().map(|&mv| f32::from(mv) / 1000.0).collect()
+        } else {
+            Vec::new()
+        };
+        Battery {
+            id: b.id,
+            function: b.battery_function,
+            chemistry: b.r#type,
+            temperature_c: (b.temperature != i16::MAX).then(|| f32::from(b.temperature) / 100.0),
+            voltage_v,
+            cells_v,
+            current_a: (b.current_battery != -1).then(|| f32::from(b.current_battery) / 100.0),
+            consumed_mah: (b.current_consumed != -1).then_some(b.current_consumed),
+            consumed_j: (b.energy_consumed != -1).then(|| f64::from(b.energy_consumed) * 100.0),
+            remaining_pct: u8::try_from(b.battery_remaining).ok(),
+            time_remaining_s: u32::try_from(b.time_remaining).ok().filter(|&s| s > 0),
+            charge_state: b.charge_state,
+            fault_bitmask: b.fault_bitmask,
+        }
+    }
+}
+
 /// `MISSION_STATE` from `MISSION_CURRENT`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MissionState {
@@ -385,6 +464,8 @@ pub struct VehicleState {
     pub ekf: Option<Timed<Ekf>>,
     /// Home position.
     pub home: Option<Timed<Home>>,
+    /// Batteries from `BATTERY_STATUS`, by id.
+    pub batteries: BTreeMap<u8, Timed<Battery>>,
     /// ADS-B traffic reported through this vehicle, by ICAO address (forgotten after
     /// [`TRAFFIC_FORGET`] without a report).
     pub traffic: BTreeMap<u32, Timed<Traffic>>,
@@ -590,6 +671,15 @@ impl Fleet {
                 if let Some(t) = Traffic::from_mavlink(a) {
                     v.traffic.insert(t.icao, Timed { value: t, at: now });
                 }
+            }
+            Message::BatteryStatus(b) if compid == AUTOPILOT_COMPID => {
+                v.batteries.insert(
+                    b.id,
+                    Timed {
+                        value: Battery::from_mavlink(b),
+                        at: now,
+                    },
+                );
             }
             Message::HomePosition(h) if compid == AUTOPILOT_COMPID => {
                 v.home = timed(
@@ -873,6 +963,74 @@ mod tests {
             t0 + Duration::from_secs(122),
         );
         assert!(f.get(1).unwrap().traffic.is_empty());
+    }
+
+    #[test]
+    fn battery_status_cells_or_pack() {
+        use mavlink_codec::messages::BatteryStatus;
+        let unknown = BatteryStatus {
+            temperature: i16::MAX,
+            voltages: [u16::MAX; 10],
+            current_battery: -1,
+            current_consumed: -1,
+            energy_consumed: -1,
+            battery_remaining: -1,
+            ..Default::default()
+        };
+        // No cell measurement: the pack voltage is in entry 0 (ArduPilot).
+        let mut pack = unknown.clone();
+        pack.voltages[0] = 16_020;
+        let b = Battery::from_mavlink(&pack);
+        assert_eq!((b.voltage_v, b.cells_v.len()), (Some(16.02), 0));
+        assert_eq!(
+            (
+                b.temperature_c,
+                b.current_a,
+                b.remaining_pct,
+                b.time_remaining_s
+            ),
+            (None, None, None, None)
+        );
+        // A 100 V pack overflows entry 0 into entry 1: still the pack, not two cells.
+        let mut big = unknown.clone();
+        big.voltages[0] = 0xFFFE;
+        big.voltages[1] = 34_466; // 100 000 mV - 65 534 mV
+        let b = Battery::from_mavlink(&big);
+        assert_eq!((b.voltage_v, b.cells_v.len()), (Some(100.0), 0));
+        // 4 measured cells, plus the other fields.
+        let mut cells = unknown;
+        cells.voltages[..4].copy_from_slice(&[4_010, 4_020, 4_000, 4_030]);
+        cells.temperature = 2_550;
+        cells.current_battery = 1_234;
+        cells.current_consumed = 850;
+        cells.energy_consumed = 1_200;
+        cells.battery_remaining = 72;
+        cells.time_remaining = 600;
+        cells.charge_state = 1;
+        let b = Battery::from_mavlink(&cells);
+        assert_eq!(b.cells_v, [4.01, 4.02, 4.0, 4.03]);
+        assert!((b.voltage_v.unwrap() - 16.06).abs() < 1e-4);
+        assert_eq!(
+            (
+                b.temperature_c,
+                b.current_a,
+                b.consumed_mah,
+                b.consumed_j,
+                b.remaining_pct,
+                b.time_remaining_s
+            ),
+            (
+                Some(25.5),
+                Some(12.34),
+                Some(850),
+                Some(120_000.0),
+                Some(72),
+                Some(600)
+            )
+        );
+        let mut f = Fleet::new();
+        f.apply(1, 1, &Message::BatteryStatus(cells), Instant::now());
+        assert_eq!(f.get(1).unwrap().batteries.len(), 1);
     }
 
     #[test]
