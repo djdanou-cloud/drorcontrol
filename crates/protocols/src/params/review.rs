@@ -86,7 +86,7 @@ pub fn review(p: &BTreeMap<String, f64>) -> Vec<Finding> {
             "ARMING_SKIPCHK",
             &format!("pre-arm checks skipped: {}", checks(v as u32, true)),
         ),
-        (None, Some(v)) if v == 0.0 => add(
+        (None, Some(0.0)) => add(
             Level::Off,
             "ARMING_CHECK",
             "all pre-arm checks are disabled",
@@ -140,7 +140,7 @@ pub fn review(p: &BTreeMap<String, f64>) -> Vec<Finding> {
     if get("INS_HNTCH_ENABLE") == Some(0.0) {
         add(Level::Note, "INS_HNTCH_ENABLE", "no harmonic notch filter");
     }
-    out.sort_by(|a, b| b.level.cmp(&a.level));
+    out.sort_by_key(|f| std::cmp::Reverse(f.level));
     out
 }
 
