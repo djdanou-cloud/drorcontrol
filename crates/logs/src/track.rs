@@ -9,7 +9,7 @@
 use crate::dataflash::Log;
 
 /// GPS epoch (1980-01-06) in Unix ms, less the 18 leap seconds (`AP_GPS.h`).
-const UNIX_OFFSET_MSEC: u64 = 17_000 * 86_400 + 52 * 10 * 604_800_000 - 18_000;
+pub(crate) const UNIX_OFFSET_MSEC: u64 = 17_000 * 86_400 + 52 * 10 * 604_800_000 - 18_000;
 /// `GPS_OK_FIX_3D`: the GPS clock is trusted from a 3D fix on.
 const GPS_OK_FIX_3D: f64 = 3.0;
 

@@ -306,6 +306,17 @@ enum LogCmd {
         /// Path to the .bin log.
         path: std::path::PathBuf,
     },
+    /// Photos in the log (CAM records) as CSV for geotagging, with UTC from the GPS time.
+    Geotags {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+        /// Trigger times (TRIG) instead of photos; differs from CAM only with a feedback pin.
+        #[arg(long)]
+        trig: bool,
+        /// Output file (default: print).
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
     /// Compass interference: field strength against battery current while flying.
     Compass {
         /// Path to the .bin log.
@@ -1234,6 +1245,34 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                     d * 100.0
                 );
             }
+        }
+        LogCmd::Geotags { path, trig, out } => {
+            let log = open(path)?;
+            let msg = if *trig { "TRIG" } else { "CAM" };
+            let photos = logs::camera::photos(&log, msg);
+            let mut csv =
+                String::from("cam,img,time_usec,utc,lat,lon,alt_msl_m,alt_rel_m,roll,pitch,yaw\n");
+            for p in &photos {
+                let utc = p.unix_us.map_or(String::new(), crate::tlog::utc);
+                csv += &format!(
+                    "{},{},{},{utc},{:.7},{:.7},{:.2},{:.2},{:.2},{:.2},{:.2}\n",
+                    p.instance,
+                    p.image,
+                    p.unix_us.map_or(String::new(), |u| u.to_string()),
+                    p.lat,
+                    p.lon,
+                    p.alt_msl,
+                    p.alt_rel,
+                    p.roll,
+                    p.pitch,
+                    p.yaw
+                );
+            }
+            write_or_print(
+                out.as_deref(),
+                &csv,
+                &format!("{} {msg} records", photos.len()),
+            )?;
         }
         LogCmd::Compass { path, instance } => {
             let log = open(path)?;
