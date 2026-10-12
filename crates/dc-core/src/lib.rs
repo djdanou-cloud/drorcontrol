@@ -57,7 +57,8 @@ use tokio::sync::broadcast;
 
 pub use vehicle::{
     Battery, Extended, Firmware, FirmwareSource, Fleet, Home, LandedState, MissionProgress,
-    MissionState, StatusText, Traffic, VehicleState, Vibration, VtolState, Wind,
+    MissionState, RcInput, ServoOutputs, StatusText, Traffic, VehicleState, Vibration, VtolState,
+    Wind,
 };
 pub use vehicle::{NavHealth, NavThresholds, PositionTrust};
 
@@ -305,6 +306,10 @@ impl Default for CoreConfig {
                 // VIBRATION, WIND
                 (241, 2.0),
                 (168, 1.0),
+                // RC_CHANNELS, SERVO_OUTPUT_RAW (setup screens, motor checks; 1 Hz keeps slow
+                // radios light)
+                (65, 1.0),
+                (36, 1.0),
             ],
             link_stale: Duration::from_millis(1500),
             link_lost: Duration::from_secs(5),

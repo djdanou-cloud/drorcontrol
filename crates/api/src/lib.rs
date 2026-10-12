@@ -206,6 +206,21 @@ pub fn vehicle_to_pb(v: &VehicleState, now: Instant) -> pb::Vehicle {
             speed_ms: t.value.speed_ms,
             speed_z_ms: t.value.speed_z_ms,
         }),
+        rc: v.rc.as_ref().map(|t| pb::RcState {
+            age_ms: ms(t.age(now)),
+            channels_us: t.value.channels.iter().map(|&c| u32::from(c)).collect(),
+            count: u32::from(t.value.count),
+            rssi: t.value.rssi.map(u32::from),
+        }),
+        servos: v
+            .servos
+            .iter()
+            .map(|(port, t)| pb::ServoState {
+                age_ms: ms(t.age(now)),
+                port: u32::from(*port),
+                outputs_us: t.value.outputs.iter().map(|&o| u32::from(o)).collect(),
+            })
+            .collect(),
         home: v.home.as_ref().map(|h| pb::HomeState {
             age_ms: ms(h.age(now)),
             lat_deg: h.value.lat_deg,

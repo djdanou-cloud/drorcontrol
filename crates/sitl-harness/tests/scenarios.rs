@@ -95,6 +95,26 @@ async fn connect_detects_the_vehicle_and_receives_telemetry() {
         .value;
     assert!(vib.levels.iter().all(|l| *l < 30.0), "{vib:?}");
     // WIND is requested too, but a copter on the ground has no wind estimate to send yet.
+    // RC_CHANNELS and SERVO_OUTPUT_RAW: disarmed, the motor outputs are at minimum.
+    until(
+        Duration::from_secs(20),
+        "RC_CHANNELS and SERVO_OUTPUT_RAW",
+        || {
+            core.fleet()
+                .get(1)
+                .is_some_and(|v| v.rc.is_some() && v.servos.contains_key(&0))
+        },
+    )
+    .await;
+    let v = core.fleet().get(1).unwrap().clone();
+    let rc = v.rc.unwrap().value;
+    assert!(rc.channels.len() >= 4, "{rc:?}");
+    // A quad (+ frame): outputs 1-4 drive the motors, all at the same minimum when disarmed.
+    let out = v.servos[&0].value.outputs;
+    assert!(
+        out[0] > 0 && out[..4].iter().all(|&o| o == out[0]),
+        "{out:?}"
+    );
     let b = core.fleet().get(1).unwrap().batteries[&0].value.clone();
     assert!(
         b.voltage_v.is_some_and(|v| (v - 12.6).abs() < 0.5) && b.cells_v.is_empty(),

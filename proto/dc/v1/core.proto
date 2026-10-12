@@ -73,6 +73,23 @@ message Vehicle {
   repeated BatteryState batteries = 13;
   optional VibrationState vibration = 14;
   optional WindState wind = 15;
+  optional RcState rc = 16;
+  repeated ServoState servos = 17;
+}
+
+// From RC_CHANNELS: what the RC receiver delivers.
+message RcState {
+  uint32 age_ms = 1;
+  repeated uint32 channels_us = 2;  // the channels received (at most 18)
+  uint32 count = 3;                 // channels the receiver reports
+  optional uint32 rssi = 4;         // 0-254, receiver's own scale
+}
+
+// From SERVO_OUTPUT_RAW: outputs 1-16 of one port, us (0 = not driven).
+message ServoState {
+  uint32 age_ms = 1;
+  uint32 port = 2;  // 0 = MAIN
+  repeated uint32 outputs_us = 3;
 }
 
 // From VIBRATION: the autopilot's accelerometer vibration levels (as logged in VIBE).

@@ -402,6 +402,24 @@ pub struct Vibration {
     pub clipping: [u32; 3],
 }
 
+/// `RC_CHANNELS` (autopilot component): what the RC receiver delivers.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RcInput {
+    /// Channel values, µs, for the channels received (at most 18 in this message).
+    pub channels: Vec<u16>,
+    /// Channels the receiver reports (can exceed 18).
+    pub count: u8,
+    /// Signal strength, 0–254 in the receiver's own scale; `None` if unknown (255).
+    pub rssi: Option<u8>,
+}
+
+/// `SERVO_OUTPUT_RAW` (autopilot component): outputs 1–16 of one port, µs (0 = not driven).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct ServoOutputs {
+    /// Output values, µs.
+    pub outputs: [u16; 16],
+}
+
 /// `WIND` (ArduPilot, autopilot component): the autopilot's wind estimate.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Wind {
@@ -489,6 +507,10 @@ pub struct VehicleState {
     pub vibration: Option<Timed<Vibration>>,
     /// Wind estimate.
     pub wind: Option<Timed<Wind>>,
+    /// RC input.
+    pub rc: Option<Timed<RcInput>>,
+    /// Servo/motor outputs by port (0 = MAIN).
+    pub servos: BTreeMap<u8, Timed<ServoOutputs>>,
     /// Batteries from `BATTERY_STATUS`, by id.
     pub batteries: BTreeMap<u8, Timed<Battery>>,
     /// ADS-B traffic reported through this vehicle, by ICAO address (forgotten after
@@ -712,6 +734,64 @@ impl Fleet {
                     Vibration {
                         levels: [m.vibration_x, m.vibration_y, m.vibration_z],
                         clipping: [m.clipping_0, m.clipping_1, m.clipping_2],
+                    },
+                );
+            }
+            Message::RcChannels(r) if compid == AUTOPILOT_COMPID => {
+                let all = [
+                    r.chan1_raw,
+                    r.chan2_raw,
+                    r.chan3_raw,
+                    r.chan4_raw,
+                    r.chan5_raw,
+                    r.chan6_raw,
+                    r.chan7_raw,
+                    r.chan8_raw,
+                    r.chan9_raw,
+                    r.chan10_raw,
+                    r.chan11_raw,
+                    r.chan12_raw,
+                    r.chan13_raw,
+                    r.chan14_raw,
+                    r.chan15_raw,
+                    r.chan16_raw,
+                    r.chan17_raw,
+                    r.chan18_raw,
+                ];
+                v.rc = timed(
+                    now,
+                    RcInput {
+                        channels: all[..usize::from(r.chancount).min(18)].to_vec(),
+                        count: r.chancount,
+                        rssi: (r.rssi != u8::MAX).then_some(r.rssi),
+                    },
+                );
+            }
+            Message::ServoOutputRaw(s) if compid == AUTOPILOT_COMPID => {
+                v.servos.insert(
+                    s.port,
+                    Timed {
+                        value: ServoOutputs {
+                            outputs: [
+                                s.servo1_raw,
+                                s.servo2_raw,
+                                s.servo3_raw,
+                                s.servo4_raw,
+                                s.servo5_raw,
+                                s.servo6_raw,
+                                s.servo7_raw,
+                                s.servo8_raw,
+                                s.servo9_raw,
+                                s.servo10_raw,
+                                s.servo11_raw,
+                                s.servo12_raw,
+                                s.servo13_raw,
+                                s.servo14_raw,
+                                s.servo15_raw,
+                                s.servo16_raw,
+                            ],
+                        },
+                        at: now,
                     },
                 );
             }
@@ -1106,6 +1186,48 @@ mod tests {
         let vb = v.vibration.as_ref().unwrap().value;
         assert_eq!((vb.levels, vb.clipping), ([3.5, 4.0, 12.0], [2, 0, 0]));
         assert_eq!(v.wind.as_ref().unwrap().value.from_deg, 270.0);
+    }
+
+    #[test]
+    fn rc_input_and_servo_outputs() {
+        use mavlink_codec::messages::{RcChannels, ServoOutputRaw};
+        let mut f = Fleet::new();
+        let now = Instant::now();
+        f.apply(
+            1,
+            1,
+            &Message::RcChannels(RcChannels {
+                chancount: 4,
+                chan1_raw: 1500,
+                chan2_raw: 1500,
+                chan3_raw: 1000,
+                chan4_raw: 1500,
+                chan5_raw: 1800,
+                rssi: 255,
+                ..Default::default()
+            }),
+            now,
+        );
+        f.apply(
+            1,
+            1,
+            &Message::ServoOutputRaw(ServoOutputRaw {
+                servo1_raw: 1100,
+                servo4_raw: 1150,
+                ..Default::default()
+            }),
+            now,
+        );
+        let v = f.get(1).unwrap();
+        let rc = &v.rc.as_ref().unwrap().value;
+        assert_eq!(
+            rc.channels,
+            [1500, 1500, 1000, 1500],
+            "only chancount channels"
+        );
+        assert_eq!(rc.rssi, None, "255 = unknown");
+        let out = v.servos[&0].value.outputs;
+        assert_eq!((out[0], out[3], out[15]), (1100, 1150, 0));
     }
 
     #[test]
