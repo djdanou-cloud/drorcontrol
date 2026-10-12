@@ -356,6 +356,11 @@ enum LogCmd {
         #[arg(long)]
         out: Option<std::path::PathBuf>,
     },
+    /// Optical flow and rangefinders while flying: could the EKF use them?
+    Sensors {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+    },
     /// Wind while flying, as the EKF estimated it.
     Wind {
         /// Path to the .bin log.
@@ -1483,6 +1488,43 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                 &csv,
                 &format!("{} {msg} records", photos.len()),
             )?;
+        }
+        LogCmd::Sensors { path } => {
+            let log = open(path)?;
+            let pct = |x: f64| x * 100.0;
+            match logs::sensors::flow(&log) {
+                Some(f) => println!(
+                    "optical flow: {} samples, quality mean {:.0} (lowest {:.0}); usable by the EKF {:.1} %, quality 0 {:.1} %, rate >= 4.2 rad/s {:.1} %",
+                    f.samples,
+                    f.mean_quality,
+                    f.min_quality,
+                    pct(f.usable),
+                    pct(f.zero_quality),
+                    pct(f.too_fast)
+                ),
+                None => println!("optical flow: no OF samples in flight"),
+            }
+            let rf = logs::sensors::rangefinders(&log);
+            if rf.is_empty() {
+                println!("rangefinder: no RFND samples in flight");
+            }
+            for r in rf {
+                let s = r.status_share;
+                println!(
+                    "rangefinder {} (orientation {}): {} samples; good {:.1} %, out of range low {:.1} %, high {:.1} %, no data {:.1} %, not connected {:.1} %{}",
+                    r.instance,
+                    r.orientation,
+                    r.samples,
+                    pct(s[4]),
+                    pct(s[2]),
+                    pct(s[3]),
+                    pct(s[1]),
+                    pct(s[0]),
+                    r.good_range_m.map_or(String::new(), |(a, b)| format!(
+                        "; good readings {a:.2} to {b:.2} m"
+                    ))
+                );
+            }
         }
         LogCmd::Wind { path } => {
             let log = open(path)?;

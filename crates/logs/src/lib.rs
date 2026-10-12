@@ -19,6 +19,7 @@ pub mod flight;
 pub mod health;
 pub mod motors;
 mod params;
+pub mod sensors;
 pub mod spectrum;
 #[cfg(test)]
 mod testlog;

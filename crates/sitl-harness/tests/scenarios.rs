@@ -846,6 +846,12 @@ async fn auto_mission_flight_reports_progress_to_landing() {
         ("EK3_DRAG_BCOEF_X".into(), 9.5),
         ("EK3_DRAG_BCOEF_Y".into(), 9.5),
         ("EK3_DRAG_MCOEF".into(), 0.082),
+        // Simulated optical flow and downward rangefinder (autotest OpticalFlow settings;
+        // RNGFND1_MAX in metres in 4.7.1), for the sensor-quality check.
+        ("SIM_FLOW_ENABLE".into(), 1.0),
+        ("FLOW_TYPE".into(), 10.0),
+        ("RNGFND1_TYPE".into(), 100.0),
+        ("RNGFND1_MAX".into(), 50.0),
     ];
     let sitl = Sitl::start(&cfg).unwrap();
     let core = core_on(sitl.addr()).await;
@@ -1104,6 +1110,19 @@ async fn auto_mission_flight_reports_progress_to_landing() {
     assert!(
         (0.4..1.2).contains(&mag.mgauss_per_amp.abs()) && mag.correlation.abs() > 0.5,
         "{mag:?}"
+    );
+    // Flow and rangefinder worked through the flight.
+    let flow = logs::sensors::flow(&log).expect("OF in flight");
+    eprintln!("flow: {flow:?}");
+    assert!(flow.usable > 0.9, "{flow:?}");
+    let rf = logs::sensors::rangefinders(&log);
+    eprintln!("rangefinders: {rf:?}");
+    assert!(
+        rf.first().is_some_and(|r| r.orientation == 25
+            && r.status_share[4] > 0.8
+            && r.good_range_m
+                .is_some_and(|(_, hi)| (18.0..26.0).contains(&hi))),
+        "{rf:?}"
     );
     // The EKF learned the simulated wind: from the north, about 4 m/s at its strongest.
     let wind = logs::wind::wind(&log).expect("wind estimated with drag fusion");
