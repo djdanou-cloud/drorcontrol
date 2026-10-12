@@ -197,6 +197,19 @@ enum TlogCmd {
         #[arg(long)]
         out: Option<std::path::PathBuf>,
     },
+    /// Every message of one type (e.g. ATTITUDE) as CSV, with receive time and sender.
+    Csv {
+        /// The .tlog file.
+        file: std::path::PathBuf,
+        /// Message name, e.g. GLOBAL_POSITION_INT.
+        msg: String,
+        /// Only this system id (not `--sysid`, which is our own MAVLink id).
+        #[arg(long)]
+        vehicle: Option<u8>,
+        /// Output file (default: print).
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
     /// Export the flight track (GLOBAL_POSITION_INT) as GPX and/or KML.
     Export {
         /// The .tlog file.
@@ -700,6 +713,20 @@ fn load_params(path: &std::path::Path) -> Result<std::collections::BTreeMap<Stri
 fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
     let file = match what {
         TlogCmd::Info { file } => file,
+        TlogCmd::Csv {
+            file,
+            msg,
+            vehicle,
+            out,
+        } => {
+            let f = std::fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()))?;
+            let (text, rows) = tlog::csv(std::io::BufReader::new(f), msg, *vehicle)
+                .map_err(|e| format!("{}: {e}", file.display()))?;
+            if rows == 0 {
+                return Err(format!("{}: no {msg} messages", file.display()));
+            }
+            return write_or_print(out.as_deref(), &text, &format!("{rows} {msg} rows"));
+        }
         TlogCmd::Export {
             file,
             gpx,

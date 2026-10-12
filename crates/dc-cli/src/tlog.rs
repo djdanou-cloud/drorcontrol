@@ -78,6 +78,71 @@ struct Seen {
 
 /// Read a whole `.tlog`. A bad record ends the summary there (reported in `stopped`); what
 /// was read before it is kept.
+/// One CSV cell for a MAVLink field: numbers in their shortest form (floats sent as 32-bit
+/// written as such), text up to its first NUL and quoted, arrays quoted and space-separated.
+fn csv_cell(v: &mavlink_codec::FieldValue) -> String {
+    use mavlink_codec::FieldValue as F;
+    let float = |x: f64| {
+        if f64::from(x as f32) == x {
+            format!("{}", x as f32)
+        } else {
+            format!("{x}")
+        }
+    };
+    let join = |parts: Vec<String>| format!("\"{}\"", parts.join(" "));
+    match v {
+        F::UInt(x) => x.to_string(),
+        F::Int(x) => x.to_string(),
+        F::Float(x) => float(*x),
+        F::UIntArray(a) => join(a.iter().map(u64::to_string).collect()),
+        F::IntArray(a) => join(a.iter().map(i64::to_string).collect()),
+        F::FloatArray(a) => join(a.iter().map(|x| float(*x)).collect()),
+        F::Chars(b) => {
+            let end = b.iter().position(|&c| c == 0).unwrap_or(b.len());
+            format!(
+                "\"{}\"",
+                String::from_utf8_lossy(&b[..end]).replace('"', "\"\"")
+            )
+        }
+    }
+}
+
+/// Every `msg` message (name, any case) in the recording as CSV: receive time (µs since the
+/// Unix epoch), sender, then the message's fields in declaration order. Only messages from
+/// `sysid` when given. Returns the CSV and the row count; a bad record ends the read there.
+pub fn csv(input: impl Read, msg: &str, sysid: Option<u8>) -> io::Result<(String, usize)> {
+    let mut r = TlogReader::new(input);
+    let mut out = String::new();
+    let mut rows = 0;
+    while let Ok(Some(rec)) = r.next_record() {
+        let f = &rec.frame;
+        if sysid.is_some_and(|s| s != f.sysid()) {
+            continue;
+        }
+        let Ok(m) = f.decode() else { continue };
+        if !m.name().eq_ignore_ascii_case(msg) {
+            continue;
+        }
+        let fields = m.fields();
+        if rows == 0 {
+            out.push_str("time_usec,sysid,compid");
+            for (name, _) in &fields {
+                out.push(',');
+                out.push_str(name);
+            }
+            out.push('\n');
+        }
+        out.push_str(&format!("{},{},{}", rec.unix_us, f.sysid(), f.compid()));
+        for (_, v) in &fields {
+            out.push(',');
+            out.push_str(&csv_cell(v));
+        }
+        out.push('\n');
+        rows += 1;
+    }
+    Ok((out, rows))
+}
+
 pub fn summarise(input: impl Read) -> io::Result<Summary> {
     let mut r = TlogReader::new(input);
     let mut s = Summary::default();
@@ -442,6 +507,52 @@ mod tests {
         let mut more = bytes.clone();
         more.extend(tlog(&[(9, 1, count(0))]));
         assert_eq!(mission(&more[..]).unwrap().unwrap().1.len(), 0);
+    }
+
+    #[test]
+    fn exports_one_message_type_as_csv() {
+        let mut text = [0u8; 50];
+        text[..12].copy_from_slice(b"say \"hi\", ok");
+        let st = Message::Statustext(Statustext {
+            severity: 4,
+            text,
+            ..Default::default()
+        });
+        let pos = Message::GlobalPositionInt(GlobalPositionInt {
+            lat: -353_632_610,
+            hdg: 9000,
+            ..Default::default()
+        });
+        let bytes = tlog(&[(10, 1, hb(0, false)), (20, 1, st), (30, 1, pos)]);
+        let (text, rows) = csv(&bytes[..], "statustext", None).unwrap();
+        assert_eq!(rows, 1);
+        let mut lines = text.lines();
+        assert_eq!(
+            lines.next(),
+            Some("time_usec,sysid,compid,severity,text,id,chunk_seq")
+        );
+        assert_eq!(lines.next(), Some("20,1,1,4,\"say \"\"hi\"\", ok\",0,0"));
+        let (text, _) = csv(&bytes[..], "GLOBAL_POSITION_INT", Some(1)).unwrap();
+        assert!(
+            text.lines()
+                .nth(1)
+                .unwrap()
+                .starts_with("30,1,1,0,-353632610,"),
+            "{text}"
+        );
+        assert_eq!(
+            csv(&bytes[..], "HEARTBEAT", Some(2)).unwrap().1,
+            0,
+            "other system"
+        );
+        assert_eq!(
+            csv_cell(&mavlink_codec::FieldValue::Float(f64::from(0.3f32))),
+            "0.3"
+        );
+        assert_eq!(
+            csv_cell(&mavlink_codec::FieldValue::UIntArray(vec![1, 2])),
+            "\"1 2\""
+        );
     }
 
     #[test]
