@@ -43,6 +43,8 @@ pub use protocols::command::{
     Refusal, Request, VehicleFacts,
 };
 use protocols::command::{AuditEvent, CommandPolicy, LinkInfo, LinkState, Target};
+pub use protocols::log_transfer::LogEntry;
+use protocols::log_transfer::{LogDownload, LogList, LogTransferConfig, LogTransferStatus};
 use protocols::mission::{
     self, MISSION_TYPE_MISSION, MissionDownload, MissionUpload, TransferConfig,
 };
@@ -1283,6 +1285,95 @@ impl Core {
     }
 
     /// Run a mission state machine until it finishes.
+    /// The logs on the vehicle (read-only). Refused unless the vehicle is known to be disarmed:
+    /// ArduPilot ignores log requests while armed.
+    pub async fn list_logs(&self, target: (u8, u8)) -> Result<Vec<LogEntry>, String> {
+        self.require_disarmed(target.0)?;
+        let (mut l, first) = LogList::start(target, LogTransferConfig::default(), Instant::now());
+        let mut rx = self.incoming.subscribe();
+        self.send(&first).await;
+        let mut tick = tokio::time::interval(Duration::from_millis(50));
+        while *l.status() == LogTransferStatus::Running {
+            let out = tokio::select! {
+                m = rx.recv() => match m {
+                    Ok(inc) if inc.sysid == target.0 && inc.compid == target.1 => {
+                        l.on_message(&inc.msg, Instant::now());
+                        Vec::new()
+                    }
+                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => Vec::new(),
+                    Err(broadcast::error::RecvError::Closed) => return Err("core stopped".into()),
+                },
+                _ = tick.tick() => l.poll(Instant::now()),
+            };
+            for m in out {
+                self.send(&m).await;
+            }
+        }
+        match l.status() {
+            LogTransferStatus::Failed(why) => Err(why.clone()),
+            _ => Ok(l.entries()),
+        }
+    }
+
+    /// Download one log (read-only; refused unless disarmed). `progress(received, size)` is
+    /// called as data arrives. The whole log is held in memory.
+    pub async fn download_log(
+        &self,
+        target: (u8, u8),
+        entry: LogEntry,
+        mut progress: impl FnMut(u32, u32),
+    ) -> Result<Vec<u8>, String> {
+        self.require_disarmed(target.0)?;
+        let (mut d, first) =
+            LogDownload::start(target, entry, LogTransferConfig::default(), Instant::now());
+        let mut rx = self.incoming.subscribe();
+        for m in first {
+            self.send(&m).await;
+        }
+        let mut tick = tokio::time::interval(Duration::from_millis(50));
+        let mut shown = (u32::MAX, 0);
+        while *d.status() == LogTransferStatus::Running {
+            let out = tokio::select! {
+                m = rx.recv() => match m {
+                    Ok(inc) if inc.sysid == target.0 && inc.compid == target.1 => {
+                        d.on_message(&inc.msg, Instant::now())
+                    }
+                    // A lagged receiver lost LOG_DATA: the gap is re-requested later.
+                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => Vec::new(),
+                    Err(broadcast::error::RecvError::Closed) => return Err("core stopped".into()),
+                },
+                _ = tick.tick() => {
+                    if d.progress() != shown {
+                        shown = d.progress();
+                        progress(shown.0, shown.1);
+                    }
+                    d.poll(Instant::now())
+                }
+            };
+            for m in out {
+                self.send(&m).await;
+            }
+        }
+        match d.status() {
+            LogTransferStatus::Failed(why) => Err(why.clone()),
+            _ => {
+                let (r, s) = d.progress();
+                progress(r, s);
+                Ok(d.data().unwrap_or_default().to_vec())
+            }
+        }
+    }
+
+    fn require_disarmed(&self, sysid: u8) -> Result<(), String> {
+        match self.facts(sysid).armed {
+            Some(false) => Ok(()),
+            Some(true) => {
+                Err("the vehicle is armed: ArduPilot only transfers logs when disarmed".into())
+            }
+            None => Err("no heartbeat from the vehicle yet".into()),
+        }
+    }
+
     async fn drive<M>(
         &self,
         target: (u8, u8),

@@ -1154,3 +1154,64 @@ async fn dataflash_log_gives_a_track_with_gps_time() {
             .collect::<Vec<_>>()
     );
 }
+
+/// Log download over MAVLink (Mission Planner's "Download DataFlash Log Via Mavlink"): the
+/// list shows SITL's log, and the downloaded bytes are identical to the file SITL wrote,
+/// through 10 % frame loss both ways (gaps re-requested).
+#[tokio::test(flavor = "multi_thread")]
+async fn log_download_is_byte_identical_through_loss() {
+    let Some(mut cfg) = SitlConfig::copter_or_skip() else {
+        return;
+    };
+    cfg.params = vec![("LOG_DISARMED".into(), 1.0)];
+    let sitl = Sitl::start(&cfg).unwrap();
+    let chaos = ChaosProxy::start(
+        sitl.addr(),
+        ChaosConfig {
+            drop: 0.10,
+            seed: 0x106,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let core = core_on(chaos.addr()).await;
+    assert_eq!(
+        core.wait_for_vehicle(Duration::from_secs(60)).await,
+        Some(1)
+    );
+    until(Duration::from_secs(20), "disarmed heartbeat", || {
+        core.facts(1).armed == Some(false)
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    let logs = core.list_logs((1, 1)).await.unwrap();
+    let entry = *logs.last().expect("SITL has a log");
+    eprintln!("{} logs; downloading {entry:?}", logs.len());
+    assert!(entry.size > 0);
+    let t0 = Instant::now();
+    let data = core.download_log((1, 1), entry, |_, _| {}).await.unwrap();
+    let secs = t0.elapsed().as_secs_f32();
+    let on_disk = std::fs::read(sitl.dir().join(format!("logs/{:08}.BIN", entry.id))).unwrap();
+    assert!(
+        on_disk.len() >= data.len(),
+        "{} vs {}",
+        on_disk.len(),
+        data.len()
+    );
+    assert!(
+        data == on_disk[..data.len()],
+        "bytes differ from SITL's file"
+    );
+    eprintln!(
+        "{} bytes in {secs:.1} s ({:.0} kB/s) through 10 % loss, identical to the file",
+        data.len(),
+        data.len() as f32 / secs / 1000.0
+    );
+    // The download is a real dataflash log.
+    let path = sitl.dir().join("downloaded.bin");
+    std::fs::write(&path, &data).unwrap();
+    let log = logs::Log::open(&path).unwrap();
+    assert!(log.counts().get("PARM").copied().unwrap_or(0) > 100);
+}

@@ -225,6 +225,23 @@ enum LogCmd {
         /// Path to the .bin log.
         path: std::path::PathBuf,
     },
+    /// List the dataflash logs on the vehicle (over MAVLink; vehicle must be disarmed).
+    List {
+        #[command(flatten)]
+        vehicle: VehicleArgs,
+    },
+    /// Download a dataflash log from the vehicle over MAVLink (vehicle must be disarmed).
+    /// Written to OUT.partial and renamed when complete. Logs are never erased.
+    Download {
+        #[command(flatten)]
+        vehicle: VehicleArgs,
+        /// Log number from `log list` (default: the newest).
+        #[arg(long)]
+        id: Option<u16>,
+        /// Output file.
+        #[arg(long)]
+        out: std::path::PathBuf,
+    },
     /// Automatic checks: vibration and clipping, battery against the vehicle's failsafe
     /// voltages, EKF variances against FS_EKF_THRESH, and the autopilot's ERR records.
     Health {
@@ -416,6 +433,9 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
         Cmd::Remote { grpc, what } => remote(grpc, what).await,
         Cmd::Ports { watch, probe } => ports(*watch, probe.as_deref()),
+        Cmd::Log {
+            what: what @ (LogCmd::List { .. } | LogCmd::Download { .. }),
+        } => log_transfer(&cli, what).await,
         Cmd::Log { what } => log_cmd(what),
         Cmd::Mission { what } => mission_cmd(&cli, what).await,
         Cmd::Tlog { what } => tlog_cmd(what),
@@ -750,6 +770,79 @@ fn params_diff(a: &std::path::Path, b: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 
+async fn log_transfer(cli: &Cli, what: &LogCmd) -> Result<(), String> {
+    let (LogCmd::List { vehicle } | LogCmd::Download { vehicle, .. }) = what else {
+        return Ok(());
+    };
+    let core = start(cli, &vehicle.connect).await?;
+    let sysid = match vehicle.target {
+        Some(t) => t,
+        None => core
+            .wait_for_vehicle(Duration::from_secs(vehicle.wait))
+            .await
+            .ok_or_else(|| {
+                format!(
+                    "no vehicle heartbeat on {} within {} s",
+                    vehicle.connect, vehicle.wait
+                )
+            })?,
+    };
+    // The armed state comes with the heartbeat; give it a moment after detection.
+    let t0 = Instant::now();
+    while core.facts(sysid).armed.is_none() && t0.elapsed() < Duration::from_secs(3) {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let target = (sysid, vehicle.component);
+    let logs = core.list_logs(target).await?;
+    if let LogCmd::List { .. } = what {
+        for e in &logs {
+            let when = if e.time_utc > 0 {
+                tlog::utc(u64::from(e.time_utc) * 1_000_000)
+            } else {
+                "time unknown".into()
+            };
+            println!("{:5}  {:>12} bytes  {when}", e.id, e.size);
+        }
+        eprintln!("vehicle {sysid}: {} logs", logs.len());
+        return Ok(());
+    }
+    let LogCmd::Download { id, out, .. } = what else {
+        return Ok(());
+    };
+    let entry = match id {
+        Some(id) => logs.iter().find(|e| e.id == *id).copied(),
+        None => logs.last().copied(),
+    }
+    .ok_or_else(|| {
+        format!(
+            "no log {} on the vehicle",
+            id.map_or("at all".into(), |i| i.to_string())
+        )
+    })?;
+    eprintln!("downloading log {} ({} bytes)…", entry.id, entry.size);
+    let t0 = Instant::now();
+    let mut last = Instant::now();
+    let data = core
+        .download_log(target, entry, |r, s| {
+            if last.elapsed() > Duration::from_secs(1) {
+                eprintln!("  {r}/{s} bytes");
+                last = Instant::now();
+            }
+        })
+        .await?;
+    let partial = out.with_extension("partial");
+    std::fs::write(&partial, &data).map_err(|e| format!("{}: {e}", partial.display()))?;
+    std::fs::rename(&partial, out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let secs = t0.elapsed().as_secs_f32();
+    eprintln!(
+        "wrote {} ({} bytes in {secs:.1} s, {:.1} kB/s)",
+        out.display(),
+        data.len(),
+        data.len() as f32 / secs.max(0.001) / 1000.0
+    );
+    Ok(())
+}
+
 fn log_cmd(what: &LogCmd) -> Result<(), String> {
     let mem = || match rss_mib() {
         Some((t, a, f, peak)) => {
@@ -775,6 +868,8 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
         Ok::<_, String>(log)
     };
     match what {
+        // Handled by log_transfer (they need a link).
+        LogCmd::List { .. } | LogCmd::Download { .. } => {}
         LogCmd::Info { path } => {
             let log = open(path)?;
             for (name, n) in log.counts() {
