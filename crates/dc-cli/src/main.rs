@@ -582,6 +582,20 @@ async fn run(cli: Cli) -> Result<(), String> {
     }
 }
 
+/// The firmware that wrote a log, from its version banner (modes are named only then).
+fn log_firmware(events: &[(u64, logs::flight::Event)]) -> Option<dc_core::Firmware> {
+    events.iter().find_map(|(_, e)| match e {
+        logs::flight::Event::Text(t) => dc_core::Firmware::from_banner(t),
+        _ => None,
+    })
+}
+
+/// A mode's name if the firmware is known, else its number.
+fn mode_label(fw: Option<dc_core::Firmware>, mode: u8) -> String {
+    fw.and_then(|f| f.mode_name(u32::from(mode)))
+        .map_or(format!("mode {mode}"), str::to_string)
+}
+
 /// Resident memory (Linux): (current total, anonymous, file-backed, peak) in MiB.
 fn rss_mib() -> Option<(f64, f64, f64, f64)> {
     let s = std::fs::read_to_string("/proc/self/status").ok()?;
@@ -1132,22 +1146,26 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
             println!("distance flown: {:.0} m", s.distance_m);
             println!("battery used: {}", opt(s.used_mah, "mAh"));
             println!("lowest battery voltage: {}", opt(s.min_voltage, "V"));
+            let fw = log_firmware(&logs::flight::events(&log));
+            let modes: Vec<(u8, f64)> = logs::flight::mode_times(&log)
+                .into_iter()
+                .filter(|(_, t)| *t >= 0.05)
+                .collect();
+            if !modes.is_empty() {
+                println!("armed time per mode:");
+                for (m, t) in modes {
+                    println!("  {:<12} {t:7.1} s", mode_label(fw, m));
+                }
+            }
         }
         LogCmd::Events { path } => {
             let log = open(path)?;
             let ev = logs::flight::events(&log);
-            // Name modes once the banner says which firmware wrote the log.
-            let fw = ev.iter().find_map(|(_, e)| match e {
-                logs::flight::Event::Text(t) => dc_core::Firmware::from_banner(t),
-                _ => None,
-            });
+            let fw = log_firmware(&ev);
             for (t, e) in &ev {
                 let text = match e {
                     logs::flight::Event::Mode { mode, reason } => {
-                        let name = fw
-                            .and_then(|f| f.mode_name(u32::from(*mode)))
-                            .map_or(format!("mode {mode}"), str::to_string);
-                        format!("MODE {name} (reason {reason})")
+                        format!("MODE {} (reason {reason})", mode_label(fw, *mode))
                     }
                     logs::flight::Event::Arm { armed, forced } => format!(
                         "{}{}",

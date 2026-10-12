@@ -102,13 +102,20 @@ fn distance_m(a: (f64, f64), b: (f64, f64)) -> f64 {
     2.0 * R * h.sqrt().asin()
 }
 
+/// Last timestamp among the records written throughout a log (`POS`, `ATT`), µs.
+fn log_end_us(log: &Log) -> u64 {
+    ["POS", "ATT"]
+        .iter()
+        .filter_map(|m| log.column(m, "TimeUS", None))
+        .filter_map(|c| c.values.last().copied())
+        .reduce(f64::max)
+        .unwrap_or(0.0) as u64
+}
+
 /// Summary of the flight(s) in a log.
 pub fn summary(log: &Log) -> FlightSummary {
     let armed = armed_periods(log);
-    let end_of_log = log
-        .column("POS", "TimeUS", None)
-        .and_then(|c| c.values.last().copied())
-        .unwrap_or(0.0) as u64;
+    let end_of_log = log_end_us(log);
     let in_flight = |t: u64| {
         armed
             .iter()
@@ -164,6 +171,30 @@ pub fn summary(log: &Log) -> FlightSummary {
         used_mah,
         min_voltage,
     }
+}
+
+/// Armed time in each flight mode (`MODE.ModeNum`), s, in order of first use. Time before
+/// the first `MODE` record is not counted (its mode is unknown).
+pub fn mode_times(log: &Log) -> Vec<(u8, f64)> {
+    let Some(modes) = log.column("MODE", "ModeNum", None) else {
+        return Vec::new();
+    };
+    let armed = armed_periods(log);
+    let end = log_end_us(log);
+    let mut out: Vec<(u8, f64)> = Vec::new();
+    for (i, (t, m)) in modes.time_us.iter().zip(&modes.values).enumerate() {
+        let next = modes.time_us.get(i + 1).copied().unwrap_or(end).max(*t);
+        let s = armed.iter().fold(0.0, |s, p| {
+            let (a, b) = (p.start_us.max(*t), p.end_us.unwrap_or(end).min(next));
+            s + b.saturating_sub(a) as f64 / 1e6
+        });
+        let mode = *m as u8;
+        match out.iter_mut().find(|(k, _)| *k == mode) {
+            Some(e) => e.1 += s,
+            None => out.push((mode, s)),
+        }
+    }
+    out
 }
 
 /// One timeline entry.
@@ -324,4 +355,63 @@ pub fn param_changes(log: &Log) -> Vec<ParamChange> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testlog::{
+        LogBuilder,
+        V::{N, T},
+    };
+
+    #[test]
+    fn mode_time_counts_only_armed_time() {
+        let mut b = LogBuilder::default();
+        b.format("ATT", "Qf", "TimeUS,Roll")
+            .format("MODE", "QMBB", "TimeUS,Mode,ModeNum,Rsn")
+            .format("ARM", "QBIBB", "TimeUS,ArmState,ArmChecks,Forced,Method");
+        let s = |x: f64| x * 1e6;
+        // STABILIZE (0) from 1 s; armed at 2 s; LOITER (5) at 5 s; AUTO (3) at 9 s;
+        // disarmed at 12 s; back to STABILIZE at 13 s; log ends at 20 s.
+        b.rec("ATT", &[N(s(0.5)), N(0.0)])
+            .rec("MODE", &[N(s(1.0)), N(0.0), N(0.0), N(0.0)])
+            .rec("ARM", &[N(s(2.0)), N(1.0), N(0.0), N(0.0), N(0.0)])
+            .rec("MODE", &[N(s(5.0)), N(5.0), N(5.0), N(1.0)])
+            .rec("MODE", &[N(s(9.0)), N(3.0), N(3.0), N(1.0)])
+            .rec("ARM", &[N(s(12.0)), N(0.0), N(0.0), N(0.0), N(0.0)])
+            .rec("MODE", &[N(s(13.0)), N(0.0), N(0.0), N(1.0)])
+            .rec("ATT", &[N(s(20.0)), N(0.0)]);
+        let log = b.open();
+        let t = mode_times(&log);
+        let want = [(0u8, 3.0), (5, 4.0), (3, 3.0)];
+        assert_eq!(t.len(), 3, "{t:?}");
+        for ((m, got), (wm, w)) in t.iter().zip(want) {
+            assert_eq!(*m, wm);
+            assert!((got - w).abs() < 1e-6, "{t:?}");
+        }
+        assert!((summary(&log).armed_s - 10.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn param_changes_skip_unchanged_and_mark_automatic() {
+        let mut b = LogBuilder::default();
+        b.format("PARM", "QNff", "TimeUS,Name,Value,Default");
+        for (t, name, v) in [
+            (1.0, "WPNAV_SPEED", 1000.0),
+            (1.0, "STAT_BOOTCNT", 3.0),
+            (5.0, "WPNAV_SPEED", 1000.0),
+            (6.0, "WPNAV_SPEED", 500.0),
+            (7.0, "STAT_BOOTCNT", 4.0),
+        ] {
+            b.rec("PARM", &[N(t * 1e6), T(name), N(v), N(0.0)]);
+        }
+        let c = param_changes(&b.open());
+        assert_eq!(c.len(), 2, "{c:?}");
+        assert_eq!(
+            (c[0].name.as_str(), c[0].old, c[0].new, c[0].automatic),
+            ("WPNAV_SPEED", 1000.0, 500.0, false)
+        );
+        assert!(c[1].automatic && c[1].time_us == 7_000_000);
+    }
 }

@@ -1042,6 +1042,18 @@ async fn auto_mission_flight_reports_progress_to_landing() {
             || matches!(e, logs::flight::Event::Mode { mode, .. } if *mode == auto)),
         "AUTO in the timeline"
     );
+    // Armed time by mode: most of it in AUTO, and the modes add up to the armed time
+    // (ArduPilot logs the current mode when the log starts).
+    let modes = logs::flight::mode_times(&log);
+    eprintln!("armed time per mode: {modes:?}");
+    let in_auto = modes.iter().find(|(m, _)| *m == auto).map_or(0.0, |m| m.1);
+    assert!(in_auto > 20.0, "{modes:?}");
+    let total: f64 = modes.iter().map(|m| m.1).sum();
+    assert!(
+        (total - s.armed_s).abs() < 1.0,
+        "{modes:?} vs {}",
+        s.armed_s
+    );
     // Only values the autopilot updates itself changed (STAT_* counters, the learned
     // MOT_THST_HOVER at disarm). STAT_DISTFLWN counts 3-D distance, so it reads a little
     // more than the horizontal distance computed from POS.

@@ -16,6 +16,8 @@ pub mod flight;
 pub mod health;
 mod params;
 pub mod spectrum;
+#[cfg(test)]
+mod testlog;
 pub mod track;
 
 pub use dataflash::{Column, Format, Log};
