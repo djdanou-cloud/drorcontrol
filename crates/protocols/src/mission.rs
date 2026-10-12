@@ -683,6 +683,116 @@ pub fn stats(items: &[MissionItem]) -> MissionStats {
     s
 }
 
+/// One corner of a mission's flight path.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PathPoint {
+    /// Item it comes from (0 = home).
+    pub seq: u16,
+    /// Latitude and longitude, degrees.
+    pub lat: f64,
+    /// See `lat`.
+    pub lon: f64,
+    /// Height above home, m. MSL altitudes are converted with home's MSL altitude when the
+    /// file has one; heights above terrain are used as they are (approximate).
+    pub alt_rel_m: f64,
+}
+
+/// The path a mission flies, for drawing: home, takeoff straight up, every navigation item
+/// with a location, landing straight down, and RTL back to home at its altitude then down.
+/// `DO_JUMP` repeats are not followed.
+pub fn path(items: &[MissionItem]) -> Vec<PathPoint> {
+    let Some(home) = items.first() else {
+        return Vec::new();
+    };
+    let deg = |i: &MissionItem| (f64::from(i.x) * 1e-7, f64::from(i.y) * 1e-7);
+    let (hlat, hlon) = deg(home);
+    // A downloaded home carries its MSL altitude; a planned file often has 0 there.
+    let home_msl = (home.z != 0.0).then_some(f64::from(home.z));
+    let mut out = vec![PathPoint {
+        seq: 0,
+        lat: hlat,
+        lon: hlon,
+        alt_rel_m: 0.0,
+    }];
+    let mut at = out[0];
+    for (seq, i) in items.iter().enumerate().skip(1) {
+        let seq = seq as u16;
+        let rel = match i.frame {
+            0 | 5 => home_msl.map_or(f64::from(i.z), |h| f64::from(i.z) - h),
+            _ => f64::from(i.z),
+        };
+        let mut push = |p: PathPoint, at: &mut PathPoint| {
+            out.push(p);
+            *at = p;
+        };
+        match i.command {
+            22 => push(
+                PathPoint {
+                    seq,
+                    alt_rel_m: rel,
+                    ..at
+                },
+                &mut at,
+            ),
+            20 => {
+                push(
+                    PathPoint {
+                        seq,
+                        lat: hlat,
+                        lon: hlon,
+                        ..at
+                    },
+                    &mut at,
+                );
+                push(
+                    PathPoint {
+                        seq,
+                        alt_rel_m: 0.0,
+                        ..at
+                    },
+                    &mut at,
+                );
+            }
+            21 => {
+                if i.x != 0 || i.y != 0 {
+                    let (lat, lon) = deg(i);
+                    push(
+                        PathPoint {
+                            seq,
+                            lat,
+                            lon,
+                            ..at
+                        },
+                        &mut at,
+                    );
+                }
+                push(
+                    PathPoint {
+                        seq,
+                        alt_rel_m: 0.0,
+                        ..at
+                    },
+                    &mut at,
+                );
+            }
+            c if c <= MAV_CMD_NAV_LAST && has_location(c) && (i.x != 0 || i.y != 0) => {
+                let (lat, lon) = deg(i);
+                push(
+                    PathPoint {
+                        seq,
+                        lat,
+                        lon,
+                        alt_rel_m: rel,
+                    },
+                    &mut at,
+                );
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 /// Speeds a Copter flies a mission at, for [`estimate_time`]. Defaults are ArduCopter
 /// 4.7.1's (`AC_WPNav.cpp`, `mode_land.cpp`, `ArduCopter/config.h`).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -866,6 +976,47 @@ pub fn estimate_time(items: &[MissionItem], sp: &Speeds) -> TimeEstimate {
         }
     }
     e
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+
+    #[test]
+    fn path_goes_up_out_and_back_down() {
+        let it = |command: u16, frame: u8, lat: f64, lon: f64, z: f32| MissionItem {
+            frame,
+            command,
+            params: [0.0; 4],
+            x: (lat * 1e7).round() as i32,
+            y: (lon * 1e7).round() as i32,
+            z,
+            autocontinue: true,
+        };
+        let m = [
+            it(16, 0, -35.0, 149.0, 584.0),
+            it(22, 3, 0.0, 0.0, 20.0),
+            it(16, 3, -34.999, 149.0, 30.0),
+            it(178, 0, 0.0, 0.0, 0.0),          // DO_CHANGE_SPEED: no point
+            it(16, 0, -34.999, 149.001, 624.0), // MSL: 40 m above home
+            it(20, 0, 0.0, 0.0, 0.0),
+        ];
+        let p: Vec<(u16, f64, f64)> = path(&m)
+            .iter()
+            .map(|p| (p.seq, (p.lat * 1e7).round() / 1e7, p.alt_rel_m))
+            .collect();
+        assert_eq!(
+            p,
+            [
+                (0, -35.0, 0.0),
+                (1, -35.0, 20.0),
+                (2, -34.999, 30.0),
+                (4, -34.999, 40.0),
+                (5, -35.0, 40.0),
+                (5, -35.0, 0.0),
+            ]
+        );
+    }
 }
 
 #[cfg(test)]

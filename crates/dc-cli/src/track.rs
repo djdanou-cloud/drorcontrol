@@ -107,6 +107,12 @@ pub fn gpx(name: &str, points: &[Point]) -> String {
 
 /// KML 2.2 line at absolute altitude (MSL), for Google Earth.
 pub fn kml(name: &str, points: &[Point]) -> String {
+    kml_with(name, points, "absolute")
+}
+
+/// KML 2.2 line; `altitude_mode` is `absolute` (MSL) or `relativeToGround` (`alt_msl`
+/// then holds the height above the ground).
+pub fn kml_with(name: &str, points: &[Point], altitude_mode: &str) -> String {
     let mut s = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
          <kml xmlns=\"http://www.opengis.net/kml/2.2\">\n  <Document>\n",
@@ -114,8 +120,9 @@ pub fn kml(name: &str, points: &[Point]) -> String {
     let _ = writeln!(
         s,
         "    <name>{0}</name>\n    <Placemark>\n      <name>{0}</name>\n      <LineString>\n        \
-         <altitudeMode>absolute</altitudeMode>\n        <coordinates>",
-        xml_escape(name)
+         <altitudeMode>{1}</altitudeMode>\n        <coordinates>",
+        xml_escape(name),
+        altitude_mode
     );
     for p in points {
         // KML order is longitude,latitude,altitude.

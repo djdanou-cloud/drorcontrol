@@ -267,6 +267,17 @@ enum MissionCmd {
         #[arg(long)]
         params: Option<std::path::PathBuf>,
     },
+    /// The mission's flight path as GPX and/or KML (Google Earth), offline.
+    Export {
+        /// The .waypoints file.
+        file: std::path::PathBuf,
+        /// Write a GPX 1.1 track.
+        #[arg(long)]
+        gpx: Option<std::path::PathBuf>,
+        /// Write a KML 2.2 line.
+        #[arg(long)]
+        kml: Option<std::path::PathBuf>,
+    },
     /// Does the vehicle hold exactly this file's mission? Downloads and compares (home, item
     /// 0, is not compared); exits with failure on any difference.
     Compare {
@@ -1065,6 +1076,56 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
             }
             let text = protocols::wpl::to_string(&items);
             write_or_print(out.as_deref(), &text, &format!("{} items", items.len()))
+        }
+        MissionCmd::Export { file, gpx, kml } => {
+            if gpx.is_none() && kml.is_none() {
+                return Err("nothing to write: give --gpx and/or --kml".into());
+            }
+            let items = read_mission(file)?;
+            if items.is_empty() {
+                return Err(format!("{}: no mission items", file.display()));
+            }
+            let path = protocols::mission::path(&items);
+            // With home's MSL altitude in the file the path is absolute; otherwise heights
+            // are above home, drawn relative to the ground.
+            let home_msl = items.first().map(|h| f64::from(h.z)).filter(|z| *z != 0.0);
+            let points: Vec<track::Point> = path
+                .iter()
+                .map(|p| track::Point {
+                    unix_us: None,
+                    lat: p.lat,
+                    lon: p.lon,
+                    alt_msl: home_msl.unwrap_or(0.0) + p.alt_rel_m,
+                })
+                .collect();
+            let name = file
+                .file_stem()
+                .map_or("mission".into(), |s| s.to_string_lossy().into_owned());
+            if let Some(out) = gpx {
+                let text = track::gpx(&name, &points);
+                std::fs::write(out, text).map_err(|e| format!("{}: {e}", out.display()))?;
+                eprintln!(
+                    "wrote {} ({} points{})",
+                    out.display(),
+                    points.len(),
+                    if home_msl.is_some() {
+                        ""
+                    } else {
+                        "; heights above home: the file has no home altitude"
+                    }
+                );
+            }
+            if let Some(out) = kml {
+                let mode = if home_msl.is_some() {
+                    "absolute"
+                } else {
+                    "relativeToGround"
+                };
+                let text = track::kml_with(&name, &points, mode);
+                std::fs::write(out, text).map_err(|e| format!("{}: {e}", out.display()))?;
+                eprintln!("wrote {} ({} points, {mode})", out.display(), points.len());
+            }
+            Ok(())
         }
         MissionCmd::Check { file, params } => {
             let items = read_mission(file)?;
