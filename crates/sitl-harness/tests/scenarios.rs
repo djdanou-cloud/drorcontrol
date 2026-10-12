@@ -1084,6 +1084,13 @@ async fn dataflash_log_gives_a_track_with_gps_time() {
         findings.iter().any(|f| f.check == "vibration"),
         "{findings:?}"
     );
+    // SITL's GPS gets a 3D fix: the GPS check runs on it, within GPS_HDOP_GOOD.
+    assert!(
+        findings.iter().any(|f| f.check == "gps"
+            && f.level == logs::health::Level::Ok
+            && f.text.contains("HDOP")),
+        "{findings:?}"
+    );
     eprintln!(
         "{}: {} track points; health {:?}",
         bin.display(),

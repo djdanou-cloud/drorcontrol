@@ -16,6 +16,12 @@
 //!   `FS_EKF_THRESH` (default 0.8; 0.5 is the GCS's caution level, as in `vehicle::nav`).
 //! * `ERR` = TimeUS, Subsys, ECode: `AP_Logger/LogStructure.h`, subsystem names from
 //!   `LogErrorSubsystem` in `AP_Logger.h`; ECode 0 means resolved.
+//! * `GPS` = TimeUS, I, Status, …, HDop (`AP_GPS/LogStructure.h`); Status 3 is
+//!   `GPS_OK_FIX_3D` (`AP_GPS.h`). Copter refuses to arm when HDOP × 100 is above
+//!   `GPS_HDOP_GOOD` (default 140; `AP_Arming_Copter.cpp`, `ArduCopter/config.h`).
+//! * `POWR` = TimeUS, Vcc, … (`AP_Logger/LogStructure.h`). Arming fails when the board
+//!   voltage is outside `BRD_VBUS_MIN` (default 4.3 V, `AP_BoardConfig.cpp`) to 5.8 V
+//!   (`AP_ARMING_BOARD_VOLTAGE_MAX`, `AP_Arming.cpp`).
 
 use std::collections::BTreeMap;
 
@@ -77,6 +83,29 @@ pub fn ekf_level(v: f64, thresh: f64) -> Level {
         Level::Ok
     }
 }
+
+/// GPS after its first 3D fix: (worst HDOP, fix losses) against `GPS_HDOP_GOOD` (× 100).
+pub fn gps_level(max_hdop: f64, fix_losses: usize, hdop_good: f64) -> Level {
+    if fix_losses > 0 {
+        Level::Warning
+    } else if max_hdop * 100.0 > hdop_good {
+        Level::Caution
+    } else {
+        Level::Ok
+    }
+}
+
+/// Board voltage range against the arming limits.
+pub fn board_voltage_level(min: f64, max: f64, vbus_min: f64) -> Level {
+    if min < vbus_min || max > BOARD_VOLTAGE_MAX {
+        Level::Caution
+    } else {
+        Level::Ok
+    }
+}
+
+/// `AP_ARMING_BOARD_VOLTAGE_MAX`.
+pub const BOARD_VOLTAGE_MAX: f64 = 5.8;
 
 /// `LogErrorSubsystem` name.
 pub fn err_subsystem(s: u8) -> &'static str {
@@ -233,6 +262,89 @@ fn ekf(log: &Log, params: &BTreeMap<String, f64>, out: &mut Vec<Finding>) {
     }
 }
 
+fn gps(log: &Log, params: &BTreeMap<String, f64>, out: &mut Vec<Finding>) {
+    let (good, source) = match params.get("GPS_HDOP_GOOD") {
+        Some(v) => (*v, "GPS_HDOP_GOOD"),
+        None => (140.0, "Copter's default GPS_HDOP_GOOD"),
+    };
+    for inst in instances(log, "GPS", "I") {
+        let i = Some(("I", inst));
+        let (Some(status), Some(hdop)) =
+            (log.column("GPS", "Status", i), log.column("GPS", "HDop", i))
+        else {
+            continue;
+        };
+        let Some(first_fix) = status.values.iter().position(|s| *s >= 3.0) else {
+            out.push(Finding {
+                check: "gps",
+                level: Level::Ok,
+                text: format!("GPS {inst}: no 3D fix in this log; nothing to check"),
+                at_us: None,
+            });
+            continue;
+        };
+        let after = first_fix..status.values.len();
+        // A loss is a step from a 3D fix to below it.
+        let losses: Vec<usize> = after
+            .clone()
+            .skip(1)
+            .filter(|&k| status.values[k] < 3.0 && status.values[k - 1] >= 3.0)
+            .collect();
+        let (max_hdop, t) = after
+            .map(|k| (hdop.values[k], status.time_us.get(k).copied().unwrap_or(0)))
+            .max_by(|a, b| a.0.total_cmp(&b.0))
+            .unwrap_or((0.0, 0));
+        let level = gps_level(max_hdop, losses.len(), good);
+        let text = if losses.is_empty() {
+            format!(
+                "GPS {inst}: highest HDOP {max_hdop:.2} after the first 3D fix ({source} {:.2})",
+                good / 100.0
+            )
+        } else {
+            format!(
+                "GPS {inst}: lost the 3D fix {} times after first having it; highest HDOP {max_hdop:.2}",
+                losses.len()
+            )
+        };
+        out.push(Finding {
+            check: "gps",
+            level,
+            text,
+            at_us: Some(losses.first().map_or(t, |&k| status.time_us[k])),
+        });
+    }
+}
+
+fn board_voltage(log: &Log, params: &BTreeMap<String, f64>, out: &mut Vec<Finding>) {
+    let Some(c) = log.column("POWR", "Vcc", None) else {
+        return;
+    };
+    // Boards without a board-voltage sensor log NaN (seen on a MatekH743, Copter 4.6.2).
+    let measured = || c.values.iter().copied().filter(|v| v.is_finite());
+    let (Some(min), Some(max)) = (
+        measured().min_by(f64::total_cmp),
+        measured().max_by(f64::total_cmp),
+    ) else {
+        out.push(Finding {
+            check: "board",
+            level: Level::Ok,
+            text: "board voltage not measured by this board (logged as NaN)".into(),
+            at_us: None,
+        });
+        return;
+    };
+    let vbus_min = params.get("BRD_VBUS_MIN").copied().unwrap_or(4.3);
+    out.push(Finding {
+        check: "board",
+        level: board_voltage_level(min, max, vbus_min),
+        text: format!(
+            "board voltage {min:.2}–{max:.2} V (arming range BRD_VBUS_MIN {vbus_min:.2} to \
+             {BOARD_VOLTAGE_MAX:.1} V)"
+        ),
+        at_us: None,
+    });
+}
+
 fn errors(log: &Log, out: &mut Vec<Finding>) {
     let (Some(s), Some(e)) = (
         log.column("ERR", "Subsys", None),
@@ -262,6 +374,8 @@ pub fn assess(log: &Log) -> Vec<Finding> {
     vibration(log, &mut out);
     battery(log, &params, &mut out);
     ekf(log, &params, &mut out);
+    gps(log, &params, &mut out);
+    board_voltage(log, &params, &mut out);
     errors(log, &mut out);
     out
 }
@@ -294,5 +408,11 @@ mod tests {
             "failsafe disabled: never Warning"
         );
         assert_eq!(err_subsystem(200), "unknown subsystem");
+        assert_eq!(gps_level(0.9, 0, 140.0), Level::Ok);
+        assert_eq!(gps_level(1.5, 0, 140.0), Level::Caution);
+        assert_eq!(gps_level(0.9, 1, 140.0), Level::Warning);
+        assert_eq!(board_voltage_level(4.9, 5.1, 4.3), Level::Ok);
+        assert_eq!(board_voltage_level(4.2, 5.1, 4.3), Level::Caution);
+        assert_eq!(board_voltage_level(4.9, 5.9, 4.3), Level::Caution);
     }
 }

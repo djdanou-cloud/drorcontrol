@@ -54,4 +54,8 @@ fn real_board_log() {
     let ekf = f.iter().find(|(_, c, _)| *c == "ekf").unwrap();
     assert!(ekf.2.ends_with("(FS_EKF_THRESH 1.00)"), "{}", ekf.2);
     assert!(f.iter().all(|(_, c, _)| *c != "error"), "no ERR records");
+    // This board logs POWR.Vcc as NaN (no sensor): reported, not judged.
+    let board = f.iter().find(|(_, c, _)| *c == "board").unwrap();
+    assert_eq!(board.0, Level::Ok);
+    assert!(board.2.contains("not measured"), "{}", board.2);
 }
