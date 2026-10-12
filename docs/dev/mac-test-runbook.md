@@ -129,9 +129,9 @@ $B --manual --report s03-m1-manual.json     # trackpad pinch/rotate check; close
 Record in `ui/spikes/s0-3-map/RESULTS.md` and ADR-0003. Read the GPU load from the
 "GPU HW active residency" line in `gpu.txt`.
 
-**Status on CI:** the first `spike-map` run built QMapLibre with Metal and the harness, then
-failed at start-up because the QML import path was missing. That is fixed in 0d5834a, but
-the fix has not run on CI yet: re-run the `spike-map` workflow.
+**Status on CI:** the `spike-map` workflow builds QMapLibre with Metal and flies the route on
+a macOS VM (green on 19bb613, 2026-10-12; numbers in `ui/spikes/s0-3-map/RESULTS.md`). VM
+numbers are indicative only; the go / no-go uses the M1 run.
 
 ## T0-09 — 1080p30 H.264 decode on VideoToolbox (spike S0-5)
 

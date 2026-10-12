@@ -128,9 +128,8 @@ and the code are newer. Where either disagrees with an owner instruction, the ow
 
 The backlog rows were added in [`backlog.md`](backlog.md), T0-17 onwards.
 
-1. **T0-17 — re-run `spike-map`** on the macOS runner. This verifies 0d5834a (QML import path)
-   and records the indicative Metal frame timing in `ui/spikes/s0-3-map/RESULTS.md`. If it
-   still fails, read the log and fix it.
+1. **T0-17 — done 2026-10-12:** `spike-map` green on 19bb613 (run 38214160233): Metal on the
+   macOS VM, warm 59.24 fps, p99 27.9 ms; recorded in `ui/spikes/s0-3-map/RESULTS.md`.
 2. **T0-18 — core implementation local (core-2):**
    * The owner approved requiring a recent, explicitly disarmed autopilot heartbeat.
      The core uses a fixed 1.5 s freshness limit before starting writes, and stops further

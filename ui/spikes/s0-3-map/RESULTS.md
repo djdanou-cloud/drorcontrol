@@ -39,8 +39,8 @@ flies the route on a macOS runner (indicative).
 
 | Where | API | Window (px) | Warm fps / p99 interval | Missed vsync | GPU | Verdict |
 |-------|-----|-------------|-------------------------|--------------|-----|---------|
-| macOS CI runner, first run (2026-10-11) | — | — | — | — | — | QMapLibre built with Metal (about 13 min) and the harness compiled; start-up failed: `module "MapLibre" is not installed` (QML import path not given to the engine). Fixed in the next commit; not yet re-run |
-| macOS CI runner (VM) | see the `spike-map` run summary | — | — | — | — | indicative |
+| macOS CI runner, first run (2026-10-11) | — | — | — | — | — | QMapLibre built with Metal (about 13 min) and the harness compiled; start-up failed: `module "MapLibre" is not installed` (QML import path not given to the engine). Fixed in 0d5834a |
+| macOS CI runner (VM, `Apple Virtual` screen), run 38214160233 on 19bb613 (2026-10-12) | `Metal` | 1024×653, DPR 1 | 59.24 / 27.90 ms | 22 / 1185 (1.9 %) | not readable on CI | Import-path fix verified: builds, starts and flies the route with Metal. VM numbers only: no real GPU, 2 × 20 s passes |
 | M1 MacBook Air, built-in Retina, full screen (2026-10-11) | `Metal` | 2880×1800 | 59.98 / 22.63 ms | 19 / 3598 (0.53 %) | ≈ 42 % (mean; max 56 %) | fps, vsync and feel pass; **GPU fails**. **Decides T0-07** |
 
 Pass (go): API `Metal`; warm pass ≥ 59 fps with < 1 % missed vsync, full screen on the built-in Retina display;
