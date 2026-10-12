@@ -1401,6 +1401,12 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
             println!("highest above home: {}", opt(s.max_alt_rel_m, "m"));
             println!("top ground speed: {}", opt(s.max_speed_ms, "m/s"));
             println!("distance flown: {:.0} m", s.distance_m);
+            println!("furthest from home: {}", opt(s.max_from_home_m, "m"));
+            println!(
+                "fastest climb: {}, fastest descent: {}",
+                opt(s.max_climb_ms, "m/s"),
+                opt(s.max_descent_ms, "m/s")
+            );
             println!("battery used: {}", opt(s.used_mah, "mAh"));
             println!("lowest battery voltage: {}", opt(s.min_voltage, "V"));
             let fw = log_firmware(&logs::flight::events(&log));

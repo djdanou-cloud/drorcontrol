@@ -133,6 +133,21 @@ pub fn in_periods(periods: &[ArmedPeriod], t: u64) -> bool {
         .any(|p| t >= p.start_us && p.end_us.is_none_or(|e| t <= e))
 }
 
+/// `CTUN.CRt`, the climb rate, in m/s: Copter 4.7 logs it as float m/s, 4.6 and earlier as
+/// int16 cm/s (the owner's 4.6.2 log).
+pub fn climb_rate(log: &Log) -> Option<crate::dataflash::Column> {
+    let fmt = log.format_by_name("CTUN")?;
+    let scale = match fmt.fields.get(fmt.field("CRt")?)?.kind {
+        Kind::F32 | Kind::F64 => 1.0,
+        _ => 0.01,
+    };
+    let mut c = log.column("CTUN", "CRt", None)?;
+    for v in &mut c.values {
+        *v *= scale;
+    }
+    Some(c)
+}
+
 /// What a flight log says about the flight.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct FlightSummary {
@@ -150,6 +165,13 @@ pub struct FlightSummary {
     pub used_mah: Option<f64>,
     /// Lowest measured battery voltage (first battery), V.
     pub min_voltage: Option<f64>,
+    /// Furthest horizontal distance from home while armed (`POS` against the latest `ORGN`
+    /// home, type 1, at that time), m.
+    pub max_from_home_m: Option<f64>,
+    /// Fastest climb and descent while flying (`CTUN.CRt`), m/s (descent positive).
+    pub max_climb_ms: Option<f64>,
+    /// See `max_climb_ms`.
+    pub max_descent_ms: Option<f64>,
 }
 
 fn distance_m(a: (f64, f64), b: (f64, f64)) -> f64 {
@@ -211,6 +233,57 @@ pub fn summary(log: &Log) -> FlightSummary {
             }
         }
     }
+    // Home: ORGN type 1 (`AP_AHRS::LogOriginType::ahrs_home`); Copter sets it again at arming.
+    let homes: Vec<(u64, (f64, f64))> = match (
+        log.column("ORGN", "Type", None),
+        log.column("ORGN", "Lat", None),
+        log.column("ORGN", "Lng", None),
+    ) {
+        (Some(ty), Some(la), Some(lo)) => ty
+            .time_us
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| ty.values[*i] == 1.0)
+            .map(|(i, t)| (*t, (la.values[i], lo.values[i])))
+            .collect(),
+        _ => Vec::new(),
+    };
+    let mut max_from_home_m: Option<f64> = None;
+    if let (Some(lat), Some(lon)) = (
+        log.column("POS", "Lat", None),
+        log.column("POS", "Lng", None),
+    ) {
+        let mut h = 0;
+        for ((la, lo), t) in lat.values.iter().zip(&lon.values).zip(&lat.time_us) {
+            while h + 1 < homes.len() && homes[h + 1].0 <= *t {
+                h += 1;
+            }
+            let Some(home) = homes.get(h).filter(|home| home.0 <= *t) else {
+                continue;
+            };
+            if in_flight(*t) && !(*la == 0.0 && *lo == 0.0) {
+                let d = distance_m(home.1, (*la, *lo));
+                max_from_home_m = Some(max_from_home_m.map_or(d, |m| m.max(d)));
+            }
+        }
+    }
+    let (flying, _) = flying_periods(log);
+    let rates: Vec<f64> = climb_rate(log)
+        .map(|c| {
+            c.time_us
+                .iter()
+                .zip(&c.values)
+                .filter(|(t, v)| in_periods(&flying, **t) && v.is_finite())
+                .map(|(_, v)| *v)
+                .collect()
+        })
+        .unwrap_or_default();
+    let max_climb_ms = rates.iter().copied().reduce(f64::max).map(|v| v.max(0.0));
+    let max_descent_ms = rates
+        .iter()
+        .copied()
+        .reduce(f64::min)
+        .map(|v| (-v).max(0.0));
     let bat = Some(("Inst", 0.0));
     let used_mah = log.column("BAT", "CurrTot", bat).and_then(|c| {
         let first = c.values.iter().copied().find(|v| v.is_finite())?;
@@ -231,6 +304,9 @@ pub fn summary(log: &Log) -> FlightSummary {
         distance_m: distance_m_total,
         used_mah,
         min_voltage,
+        max_from_home_m,
+        max_climb_ms,
+        max_descent_ms,
     }
 }
 
@@ -474,5 +550,33 @@ mod tests {
             ("WPNAV_SPEED", 1000.0, 500.0, false)
         );
         assert!(c[1].automatic && c[1].time_us == 7_000_000);
+    }
+
+    #[test]
+    fn distance_from_the_latest_home_and_climb_rates() {
+        let mut b = LogBuilder::default();
+        b.format("ARM", "QBIBB", "TimeUS,ArmState,ArmChecks,Forced,Method")
+            .format("EV", "QB", "TimeUS,Id")
+            .format("ORGN", "QBLLe", "TimeUS,Type,Lat,Lng,Alt")
+            .format("POS", "QLLff", "TimeUS,Lat,Lng,Alt,RelHomeAlt")
+            .format("CTUN", "Qh", "TimeUS,CRt"); // 4.6 layout: int16 cm/s
+        let s = |x: f64| x * 1e6;
+        // Home first at -35.0 (boot), set again at -35.001 on arming.
+        b.rec("ORGN", &[N(s(0.5)), N(1.0), N(-35.0), N(149.0), N(584.0)]);
+        b.rec("ORGN", &[N(s(1.0)), N(1.0), N(-35.001), N(149.0), N(584.0)]);
+        b.rec("ARM", &[N(s(1.0)), N(1.0), N(0.0), N(0.0), N(0.0)]);
+        b.rec("EV", &[N(s(1.5)), N(28.0)]);
+        // 0.002 deg north of the new home (about 222 m), then back.
+        for (t, lat) in [(2.0, -35.001), (3.0, -34.999), (4.0, -35.001)] {
+            b.rec("POS", &[N(s(t)), N(lat), N(149.0), N(600.0), N(16.0)]);
+        }
+        for (t, crt) in [(2.0, 250.0), (3.0, 0.0), (4.0, -120.0)] {
+            b.rec("CTUN", &[N(s(t)), N(crt)]);
+        }
+        b.rec("EV", &[N(s(5.0)), N(18.0)]);
+        let sm = summary(&b.open());
+        let d = sm.max_from_home_m.unwrap();
+        assert!((d - 222.4).abs() < 0.5, "{sm:?}");
+        assert_eq!((sm.max_climb_ms, sm.max_descent_ms), (Some(2.5), Some(1.2)));
     }
 }

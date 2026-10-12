@@ -1049,6 +1049,20 @@ async fn auto_mission_flight_reports_progress_to_landing() {
     );
     // Out 55 m, across 55 m, back about 78 m (RTL): about 190 m.
     assert!((150.0..260.0).contains(&s.distance_m), "{s:?}");
+    // The far corner is about 78 m from home; climbs and descents within the default
+    // WP_SPD_UP 2.5 / WP_SPD_DN 1.5 m/s, with some overshoot.
+    assert!(
+        s.max_from_home_m.is_some_and(|d| (70.0..90.0).contains(&d)),
+        "{s:?}"
+    );
+    assert!(
+        s.max_climb_ms.is_some_and(|v| (1.5..3.5).contains(&v)),
+        "{s:?}"
+    );
+    assert!(
+        s.max_descent_ms.is_some_and(|v| (0.3..2.5).contains(&v)),
+        "{s:?}"
+    );
     let auto = dc_core::Firmware::Copter.mode_number("AUTO").unwrap() as u8;
     let ev = logs::flight::events(&log);
     assert!(

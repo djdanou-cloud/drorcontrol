@@ -153,16 +153,10 @@ pub const HOVER_LEARN_RANGE: (f64, f64) = (0.125, 0.6875);
 
 /// Hover throttle while flying; `None` without `CTUN`.
 pub fn hover_throttle(log: &Log) -> Option<HoverThrottle> {
-    let fmt = log.format_by_name("CTUN")?;
-    // Copter 4.7 logs climb rates as float m/s; 4.6 and earlier as int16 cm/s.
-    let crt_scale = match fmt.fields.get(fmt.field("CRt")?)?.kind {
-        crate::dataflash::Kind::F32 | crate::dataflash::Kind::F64 => 1.0,
-        _ => 0.01,
-    };
     let (flying, land_detector) = flying_periods(log);
     let tho = log.column("CTUN", "ThO", None)?;
     let thh = log.column("CTUN", "ThH", None)?;
-    let crt = log.column("CTUN", "CRt", None)?;
+    let crt = crate::flight::climb_rate(log)?;
     let mut sum = 0.0;
     let mut samples = 0;
     let mut learned = None;
@@ -177,7 +171,7 @@ pub fn hover_throttle(log: &Log) -> Option<HoverThrottle> {
             continue;
         }
         learned = Some(*h);
-        if land_detector && (c * crt_scale).abs() < 0.6 {
+        if land_detector && c.abs() < 0.6 {
             sum += o;
             samples += 1;
         }
