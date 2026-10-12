@@ -17,8 +17,15 @@ else
 fi
 [[ -x "$QT_CMAKE" ]] || { echo "qt-cmake not found: set QT_ROOT_DIR to a Qt >= 6.5 install" >&2; exit 1; }
 
+SYSROOT=()
 case "$(uname -s)" in
-  Darwin) BACKEND=(-DMLN_WITH_METAL=ON) ;;
+  Darwin)
+    BACKEND=(-DMLN_WITH_METAL=ON)
+    # Homebrew Qt's toolchain file points CMAKE_OSX_SYSROOT at the Command Line Tools SDK,
+    # which Xcode's linker rejects ("unknown architecture", .tbd stubs; seen on an M1 with
+    # macOS 27). Use the active Xcode/CLT macOS SDK instead.
+    SYSROOT=(-DCMAKE_OSX_SYSROOT="$(xcrun --sdk macosx --show-sdk-path)")
+    ;;
   *)      BACKEND=(-DMLN_WITH_OPENGL=ON) ;;
 esac
 LAUNCHER=()
@@ -36,11 +43,11 @@ fi
 
 "$QT_CMAKE" -S "$SRC" -B "$DEPS/build" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$DEPS/install" \
-  -DMLN_QT_WITH_LOCATION=OFF -DMLN_QT_WITH_WIDGETS=OFF "${BACKEND[@]}" "${LAUNCHER[@]}"
+  -DMLN_QT_WITH_LOCATION=OFF -DMLN_QT_WITH_WIDGETS=OFF "${BACKEND[@]}" "${SYSROOT[@]}" "${LAUNCHER[@]}"
 cmake --build "$DEPS/build"
 cmake --install "$DEPS/build" >/dev/null
 
 "$QT_CMAKE" -S "$HERE" -B "$HERE/build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_PREFIX_PATH="$DEPS/install" "${LAUNCHER[@]}"
+  -DCMAKE_PREFIX_PATH="$DEPS/install" "${SYSROOT[@]}" "${LAUNCHER[@]}"
 cmake --build "$HERE/build"
 echo "built: $(ls -d "$HERE"/build/spike-s0-3-map* | head -1)"

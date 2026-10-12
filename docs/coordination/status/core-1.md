@@ -3,8 +3,8 @@ agent: core-1
 role: workstream-agent
 workstream: WS-CORE
 state: idle
-task: T0-16
-updated: 2026-10-11T11:11:01Z
+task: -
+updated: 2026-10-12T05:25:01Z
 ---
 
 ## Current focus

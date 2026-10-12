@@ -115,12 +115,18 @@ async fn core_talks_to_a_vehicle() {
     }
     assert!(intervals.contains(&30), "ATTITUDE requested");
 
-    // Telemetry lands in the snapshot.
-    let att = core
-        .fleet()
-        .get(1)
-        .and_then(|v| v.attitude.clone())
-        .expect("attitude");
+    // Telemetry lands in the snapshot. ATTITUDE follows the HEARTBEAT that made the vehicle
+    // known, so wait for it rather than assume it was applied already (seen racing on an M1).
+    let att = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Some(a) = core.fleet().get(1).and_then(|v| v.attitude.clone()) {
+                return a;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("attitude within 2 s");
     assert!((att.value.yaw - 1.5).abs() < 1e-6);
 
     // Parameter download recovers the dropped values.

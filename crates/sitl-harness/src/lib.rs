@@ -80,18 +80,97 @@ pub struct Sitl {
     addr: SocketAddr,
     /// `-I` instance number (ports are 5760 + 10 × instance).
     pub instance: u16,
+    /// Released after `Drop::drop` has killed the process, so the next user of the instance
+    /// never meets the old SITL on its ports.
+    _lock: InstanceLock,
 }
 
 static NEXT: AtomicU16 = AtomicU16::new(0);
+
+/// Highest instance used: SITL keeps the instance in 8 bits and ports wrap above 255.
+const MAX_INSTANCE: u16 = 240;
+/// Lock files older than this are from a crashed run and are taken over.
+const STALE_LOCK: Duration = Duration::from_secs(30 * 60);
+/// Start attempts (each on a fresh instance) before giving up.
+const START_ATTEMPTS: u32 = 3;
+
+/// Exclusive use of one SITL instance across all test processes on this machine: a lock
+/// file in the temp directory, removed on drop. Two test binaries (or `cargo xtask ci` and a
+/// separate SITL run) can otherwise pick the same instance; their SITLs then fight over the
+/// ports and a test can talk to another test's vehicle (seen on an M1: an empty mission
+/// read-back and a parameter download that never got its count).
+struct InstanceLock(PathBuf);
+
+impl InstanceLock {
+    fn try_take(instance: u16) -> Option<InstanceLock> {
+        let path = std::env::temp_dir().join(format!("dc-sitl-instance-{instance}.lock"));
+        let stale = std::fs::metadata(&path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > STALE_LOCK);
+        if stale {
+            let _ = std::fs::remove_file(&path);
+        }
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .ok()?;
+        Some(InstanceLock(path))
+    }
+}
+
+impl Drop for InstanceLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// SITL's TCP ports for `instance` (SERIAL0–2) are all free. A port held by something else
+/// (macOS's AirPlay Receiver listens on 7000 = instance 124) makes SITL fail to start.
+fn ports_free(instance: u16) -> bool {
+    [5760, 5762, 5763]
+        .iter()
+        .all(|base| std::net::TcpListener::bind(("0.0.0.0", base + 10 * instance)).is_ok())
+}
+
+/// A free instance, locked for this caller.
+fn take_instance() -> io::Result<(u16, InstanceLock)> {
+    let start = (std::process::id() % 24) as u16 * 10 + NEXT.fetch_add(1, Ordering::Relaxed);
+    for i in 0..MAX_INSTANCE {
+        // Skip 0: a developer's own SITL.
+        let instance = 1 + (start + i) % MAX_INSTANCE;
+        if let Some(lock) = InstanceLock::try_take(instance)
+            && ports_free(instance)
+        {
+            return Ok((instance, lock));
+        }
+    }
+    Err(io::Error::other(
+        "no free SITL instance (all locked or ports in use)",
+    ))
+}
 
 impl Sitl {
     /// Start SITL with wiped EEPROM in a fresh directory; returns once its SERIAL0 TCP port
     /// accepts connections (and immediately closes that probe).
     pub fn start(cfg: &SitlConfig) -> io::Result<Sitl> {
-        // SITL keeps the instance in 8 bits (ports wrap above 255). Spread instances so
-        // parallel tests and parallel test binaries do not collide; skip 0 (a developer's SITL).
-        let instance =
-            1 + ((std::process::id() % 24) as u16 * 10 + NEXT.fetch_add(1, Ordering::Relaxed) % 10);
+        let mut last = None;
+        for _ in 0..START_ATTEMPTS {
+            let (instance, lock) = take_instance()?;
+            match Self::start_on(cfg, instance, lock) {
+                Ok(sitl) => return Ok(sitl),
+                Err(e) => {
+                    eprintln!("SITL instance {instance} did not start ({e}); trying another");
+                    last = Some(e);
+                }
+            }
+        }
+        Err(last.expect("at least one attempt"))
+    }
+
+    fn start_on(cfg: &SitlConfig, instance: u16, lock: InstanceLock) -> io::Result<Sitl> {
         let dir = std::env::temp_dir().join(format!("dc-sitl-{}-{instance}", std::process::id()));
         std::fs::create_dir_all(&dir)?;
         let log = std::fs::File::create(dir.join("sitl.log"))?;
@@ -116,6 +195,7 @@ impl Sitl {
             dir,
             addr: ([127, 0, 0, 1], 5760 + 10 * instance).into(),
             instance,
+            _lock: lock,
         };
         // SITL listens on SERIAL0 and waits for its first client; wait until the port is
         // bound (log line), without connecting, so the test's own connection is the first.
@@ -168,5 +248,29 @@ impl Drop for Sitl {
         let _ = self.child.kill();
         let _ = self.child.wait();
         let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+#[cfg(test)]
+mod instance_tests {
+    use super::*;
+
+    #[test]
+    fn instances_are_exclusive_and_skip_busy_ports() {
+        let (a, lock_a) = take_instance().unwrap();
+        let (b, _lock_b) = take_instance().unwrap();
+        assert_ne!(a, b, "one instance per caller");
+        assert!(
+            InstanceLock::try_take(a).is_none(),
+            "held by the first caller"
+        );
+        drop(lock_a);
+        let again = InstanceLock::try_take(a).expect("free again after release");
+        drop(again);
+        // A port held by someone else (AirPlay on 7000 on a Mac) disqualifies the instance.
+        let (c, lock_c) = take_instance().unwrap();
+        let _busy = std::net::TcpListener::bind(("0.0.0.0", 5760 + 10 * c)).unwrap();
+        assert!(!ports_free(c));
+        drop(lock_c);
     }
 }

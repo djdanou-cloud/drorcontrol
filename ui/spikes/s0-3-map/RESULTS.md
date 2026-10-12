@@ -69,7 +69,7 @@ GPU ≤ 8 %; pinch and rotate feel right in `--manual`.
   Tools SDK (`MacOSX27.sdk` here), which Xcode's linker rejected ("unknown architecture",
   `.tbd` stubs), so `build.sh` failed at CMake's compiler check. The run used the script's
   steps with `-DCMAKE_OSX_SYSROOT=$(xcrun --sdk macosx --show-sdk-path)` added to both
-  `qt-cmake` calls.
+  `qt-cmake` calls. `build.sh` now does this itself on macOS (not yet re-run on a Mac).
 
 ## Run it
 ```bash
