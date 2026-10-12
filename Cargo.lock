@@ -322,6 +322,7 @@ dependencies = [
  "logs",
  "mavlink-codec",
  "protocols",
+ "recorder",
  "serialport",
  "tokio",
  "tonic",

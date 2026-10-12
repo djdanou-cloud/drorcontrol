@@ -1,0 +1,237 @@
+//! `.tlog` review: what a recorded session contains and what happened in it.
+//!
+//! Messages are folded through the same [`dc_core::Fleet`] the live core uses, so mode names
+//! follow the same rule: a mode is named only once the firmware banner confirmed the firmware.
+
+use std::collections::BTreeMap;
+use std::io::{self, Read};
+use std::time::{Duration, Instant};
+
+use dc_core::Fleet;
+use recorder::TlogReader;
+
+/// What happened, at microseconds since the Unix epoch.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Event {
+    /// Time of the record.
+    pub unix_us: u64,
+    /// System id.
+    pub sysid: u8,
+    /// Description.
+    pub text: String,
+}
+
+/// Summary of one `.tlog`.
+#[derive(Debug, Default)]
+pub struct Summary {
+    /// Records read.
+    pub records: u64,
+    /// First and last record time (µs since the Unix epoch).
+    pub span: Option<(u64, u64)>,
+    /// Frames per (sysid, compid).
+    pub sources: BTreeMap<(u8, u8), u64>,
+    /// Messages by name (`#id` for ids the dialect does not know).
+    pub messages: BTreeMap<String, u64>,
+    /// Mode changes, arming, firmware and STATUSTEXT (severity 0–6), in order.
+    pub events: Vec<Event>,
+    /// Highest altitude above home per system, m.
+    pub max_alt_rel_m: BTreeMap<u8, f32>,
+    /// Why reading stopped early (a truncated or corrupt record), if it did.
+    pub stopped: Option<String>,
+}
+
+#[derive(Default, PartialEq)]
+struct Seen {
+    mode: Option<String>,
+    armed: Option<bool>,
+    firmware: bool,
+}
+
+/// Read a whole `.tlog`. A bad record ends the summary there (reported in `stopped`); what
+/// was read before it is kept.
+pub fn summarise(input: impl Read) -> io::Result<Summary> {
+    let mut r = TlogReader::new(input);
+    let mut s = Summary::default();
+    let mut fleet = Fleet::new();
+    let base = Instant::now();
+    let mut seen: BTreeMap<u8, Seen> = BTreeMap::new();
+    loop {
+        let rec = match r.next_record() {
+            Ok(Some(rec)) => rec,
+            Ok(None) => break,
+            Err(e) => {
+                s.stopped = Some(e.to_string());
+                break;
+            }
+        };
+        s.records += 1;
+        let t = rec.unix_us;
+        s.span = Some(s.span.map_or((t, t), |(a, b)| (a.min(t), b.max(t))));
+        let f = &rec.frame;
+        let (sysid, compid) = (f.sysid(), f.compid());
+        *s.sources.entry((sysid, compid)).or_default() += 1;
+        let Ok(msg) = f.decode() else {
+            *s.messages.entry(format!("#{}", f.msgid())).or_default() += 1;
+            continue;
+        };
+        *s.messages.entry(msg.name().to_string()).or_default() += 1;
+        let at = base + Duration::from_micros(t - s.span.map_or(t, |(a, _)| a));
+        let text = fleet.apply(sysid, compid, &msg, at);
+        let mut event = |text: String| {
+            s.events.push(Event {
+                unix_us: t,
+                sysid,
+                text,
+            })
+        };
+        if let Some(st) = text
+            && st.severity <= 6
+        {
+            event(format!("sev{} {}", st.severity, st.text));
+        }
+        let Some(v) = fleet.get(sysid) else { continue };
+        let prev = seen.entry(sysid).or_default();
+        if !prev.firmware
+            && let Some(fw) = v.confirmed_firmware()
+        {
+            prev.firmware = true;
+            event(format!("firmware {fw:?} (banner)"));
+        }
+        if let Some(hb) = &v.heartbeat {
+            let mode = v.mode_name().map_or_else(
+                || format!("number {}", hb.value.custom_mode),
+                str::to_string,
+            );
+            if prev.mode.as_ref() != Some(&mode) {
+                event(format!("mode {mode}"));
+                prev.mode = Some(mode);
+            }
+            let armed = hb.value.armed();
+            if prev.armed != Some(armed) {
+                event(if armed { "ARMED" } else { "disarmed" }.to_string());
+                prev.armed = Some(armed);
+            }
+        }
+        if let Some(p) = &v.position {
+            let m = s.max_alt_rel_m.entry(sysid).or_insert(f32::MIN);
+            *m = m.max(p.value.alt_rel_m);
+        }
+    }
+    Ok(s)
+}
+
+/// `YYYY-MM-DD HH:MM:SS.mmm` UTC.
+pub fn utc(unix_us: u64) -> String {
+    let secs = unix_us / 1_000_000;
+    let ms = (unix_us / 1000) % 1000;
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!(
+        "{y:04}-{m:02}-{d:02} {:02}:{:02}:{:02}.{ms:03}",
+        rem / 3600,
+        (rem / 60) % 60,
+        rem % 60
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mavlink_codec::messages::{GlobalPositionInt, Heartbeat, Statustext};
+    use mavlink_codec::{Header, Message, Version, encode};
+    use recorder::TlogWriter;
+
+    fn tlog(records: &[(u64, u8, Message)]) -> Vec<u8> {
+        let mut w = TlogWriter::new(Vec::new());
+        for (i, (us, compid, m)) in records.iter().enumerate() {
+            let h = Header {
+                seq: i as u8,
+                sysid: 1,
+                compid: *compid,
+            };
+            let f = encode(Version::V2, h, m).unwrap();
+            w.write_raw(*us, f.as_bytes()).unwrap();
+        }
+        w.into_inner().unwrap()
+    }
+
+    fn hb(custom_mode: u32, armed: bool) -> Message {
+        Message::Heartbeat(Heartbeat {
+            r#type: 2,
+            autopilot: 3,
+            base_mode: if armed { 128 } else { 0 },
+            custom_mode,
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn summarises_a_flight() {
+        let mut text = [0u8; 50];
+        text[..23].copy_from_slice(b"ArduCopter V4.7.1 (abc)");
+        let banner = Message::Statustext(Statustext {
+            severity: 6,
+            text,
+            ..Default::default()
+        });
+        let t0 = 1_760_000_000_000_000; // 2025-10-09 08:53:20 UTC
+        let pos = |alt_mm| {
+            Message::GlobalPositionInt(GlobalPositionInt {
+                relative_alt: alt_mm,
+                ..Default::default()
+            })
+        };
+        let bytes = tlog(&[
+            (t0, 1, hb(0, false)),
+            (t0 + 100_000, 1, banner),
+            (t0 + 1_000_000, 1, hb(4, false)),
+            (t0 + 2_000_000, 1, hb(4, true)),
+            (t0 + 3_000_000, 1, pos(15_500)),
+            (t0 + 4_000_000, 1, pos(9_000)),
+            (t0 + 5_000_000, 1, hb(6, true)),
+            (t0 + 9_000_000, 1, hb(6, false)),
+        ]);
+        let s = summarise(&bytes[..]).unwrap();
+        assert_eq!(s.records, 8);
+        assert_eq!(s.span, Some((t0, t0 + 9_000_000)));
+        assert_eq!(s.sources[&(1, 1)], 8);
+        assert_eq!(s.messages["HEARTBEAT"], 5);
+        assert_eq!(s.max_alt_rel_m[&1], 15.5);
+        let texts: Vec<&str> = s.events.iter().map(|e| e.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            [
+                "mode number 0",
+                "disarmed",
+                "sev6 ArduCopter V4.7.1 (abc)",
+                "firmware Copter (banner)",
+                "mode STABILIZE",
+                "mode GUIDED",
+                "ARMED",
+                "mode RTL",
+                "disarmed",
+            ]
+        );
+        assert_eq!(s.stopped, None);
+        assert_eq!(utc(t0), "2025-10-09 08:53:20.000");
+    }
+
+    #[test]
+    fn a_truncated_file_keeps_what_was_read() {
+        let mut bytes = tlog(&[(1, 1, hb(0, false)), (2, 1, hb(0, false))]);
+        bytes.truncate(bytes.len() - 3);
+        let s = summarise(&bytes[..]).unwrap();
+        assert_eq!(s.records, 1);
+        assert!(s.stopped.is_some());
+    }
+}

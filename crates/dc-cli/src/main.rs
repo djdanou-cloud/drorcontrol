@@ -9,10 +9,13 @@
 //! dc-cli mission download --connect tcp:127.0.0.1:5760 [--out plan.waypoints]
 //! dc-cli mission check plan.waypoints
 //! dc-cli mission compare plan.waypoints --connect tcp:127.0.0.1:5760
+//! dc-cli tlog info flight.tlog
 //! ```
 //!
 //! Read-only by design for now: parameter writes and vehicle commands will be exposed only
 //! through the safety interlocks (`CommandPolicy`, plan 08 §4) once they exist.
+
+mod tlog;
 
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
@@ -117,6 +120,11 @@ enum Cmd {
         #[command(subcommand)]
         what: MissionCmd,
     },
+    /// Telemetry logs (.tlog, as recorded with --tlog or by Mission Planner).
+    Tlog {
+        #[command(subcommand)]
+        what: TlogCmd,
+    },
     /// Print a telemetry summary once per second.
     Telemetry {
         /// Link to open.
@@ -143,6 +151,16 @@ struct VehicleArgs {
     /// Seconds to wait for a vehicle heartbeat.
     #[arg(long, default_value_t = 15)]
     wait: u64,
+}
+
+#[derive(Subcommand)]
+enum TlogCmd {
+    /// Time span, systems, message counts, maximum altitude, and a timeline of mode changes,
+    /// arming and STATUSTEXT.
+    Info {
+        /// The .tlog file.
+        file: std::path::PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -345,6 +363,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         Cmd::Ports { watch, probe } => ports(*watch, probe.as_deref()),
         Cmd::Log { what } => log_cmd(what),
         Cmd::Mission { what } => mission_cmd(&cli, what).await,
+        Cmd::Tlog { what } => tlog_cmd(what),
         Cmd::ParamsDiff { a, b } => params_diff(a, b),
         Cmd::Soak {
             tx,
@@ -419,6 +438,49 @@ fn load_params(path: &std::path::Path) -> Result<std::collections::BTreeMap<Stri
         let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
         parse_param_file(&text).map_err(|e| format!("{}: {e}", path.display()))
     }
+}
+
+fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
+    let TlogCmd::Info { file } = what;
+    let f = std::fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()))?;
+    let s = tlog::summarise(std::io::BufReader::new(f))
+        .map_err(|e| format!("{}: {e}", file.display()))?;
+    let Some((first, last)) = s.span else {
+        return Err(format!("{}: no records", file.display()));
+    };
+    println!(
+        "{}: {} records, {} to {} UTC ({:.1} s)",
+        file.display(),
+        s.records,
+        tlog::utc(first),
+        tlog::utc(last),
+        (last - first) as f64 / 1e6
+    );
+    for ((sys, comp), n) in &s.sources {
+        println!("  source {sys}/{comp}: {n} frames");
+    }
+    let mut counts: Vec<_> = s.messages.iter().collect();
+    counts.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+    println!("messages ({} types):", counts.len());
+    for (name, n) in counts {
+        println!("  {n:8}  {name}");
+    }
+    for (sys, alt) in &s.max_alt_rel_m {
+        println!("system {sys}: highest {alt:.1} m above home");
+    }
+    println!("timeline:");
+    for e in &s.events {
+        println!(
+            "  +{:8.1} s  [{}] {}",
+            (e.unix_us - first) as f64 / 1e6,
+            e.sysid,
+            e.text
+        );
+    }
+    if let Some(why) = &s.stopped {
+        eprintln!("warning: stopped early: {why}");
+    }
+    Ok(())
 }
 
 fn read_mission(path: &std::path::Path) -> Result<Vec<dc_core::MissionItem>, String> {

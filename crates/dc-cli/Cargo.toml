@@ -18,6 +18,7 @@ link-serial = { path = "../link-serial" }
 logs = { path = "../logs" }
 mavlink-codec.workspace = true
 protocols = { path = "../protocols" }
+recorder = { path = "../recorder" }
 serialport = { version = "4.10", default-features = false }
 tokio.workspace = true
 tonic = "0.14"
