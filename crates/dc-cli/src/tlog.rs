@@ -42,8 +42,71 @@ pub struct Summary {
     pub max_alt_rel_m: BTreeMap<u8, f32>,
     /// Armed time, ground speed and distance per system.
     pub flights: BTreeMap<u8, FlightStats>,
+    /// Telemetry radio reports (`RADIO_STATUS`) per sender.
+    pub radios: BTreeMap<(u8, u8), RadioStats>,
     /// Why reading stopped early (a truncated or corrupt record), if it did.
     pub stopped: Option<String>,
+}
+
+/// A telemetry radio over the recording, from `RADIO_STATUS`. Signal and noise are in the
+/// radio's own units (MAVLink: "device dependent"; about 2 per dB on SiK radios); 255 means
+/// unknown and is skipped. Local = the radio sending the report, remote = the other end.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct RadioStats {
+    /// Reports.
+    pub reports: u64,
+    /// Lowest and mean local and remote signal.
+    pub rssi: Option<(u8, f64)>,
+    /// See `rssi`.
+    pub remrssi: Option<(u8, f64)>,
+    /// Smallest margin of signal over noise, local and remote (fade margin).
+    pub margin: Option<i16>,
+    /// See `margin`.
+    pub rem_margin: Option<i16>,
+    /// Receive errors and corrected packets during the recording (counters since the radio's
+    /// boot; a reset is counted from zero).
+    pub rx_errors: u64,
+    /// See `rx_errors`.
+    pub fixed: u64,
+    /// Lowest free transmit buffer, %.
+    pub min_txbuf: Option<u8>,
+    sums: (f64, u64, f64, u64),
+    last_counters: Option<(u16, u16)>,
+}
+
+impl RadioStats {
+    fn add(&mut self, r: &mavlink_codec::messages::RadioStatus) {
+        self.reports += 1;
+        let low = |cur: Option<(u8, f64)>, v: u8| cur.map_or(v, |c| c.0.min(v));
+        if r.rssi != u8::MAX {
+            self.sums.0 += f64::from(r.rssi);
+            self.sums.1 += 1;
+            self.rssi = Some((low(self.rssi, r.rssi), self.sums.0 / self.sums.1 as f64));
+            if r.noise != u8::MAX {
+                let m = i16::from(r.rssi) - i16::from(r.noise);
+                self.margin = Some(self.margin.map_or(m, |x| x.min(m)));
+            }
+        }
+        if r.remrssi != u8::MAX {
+            self.sums.2 += f64::from(r.remrssi);
+            self.sums.3 += 1;
+            self.remrssi = Some((
+                low(self.remrssi, r.remrssi),
+                self.sums.2 / self.sums.3 as f64,
+            ));
+            if r.remnoise != u8::MAX {
+                let m = i16::from(r.remrssi) - i16::from(r.remnoise);
+                self.rem_margin = Some(self.rem_margin.map_or(m, |x| x.min(m)));
+            }
+        }
+        let grow = |last: u16, now: u16| u64::from(if now >= last { now - last } else { now });
+        if let Some((e, f)) = self.last_counters {
+            self.rx_errors += grow(e, r.rxerrors);
+            self.fixed += grow(f, r.fixed);
+        }
+        self.last_counters = Some((r.rxerrors, r.fixed));
+        self.min_txbuf = Some(self.min_txbuf.map_or(r.txbuf, |t| t.min(r.txbuf)));
+    }
 }
 
 /// What one vehicle did while armed, from its heartbeats and `GLOBAL_POSITION_INT`.
@@ -174,6 +237,9 @@ pub fn summarise(input: impl Read) -> io::Result<Summary> {
         };
         *s.messages.entry(msg.name().to_string()).or_default() += 1;
         let at = base + Duration::from_micros(t - s.span.map_or(t, |(a, _)| a));
+        if let Message::RadioStatus(r) = &msg {
+            s.radios.entry((sysid, compid)).or_default().add(r);
+        }
         let text = fleet.apply(sysid, compid, &msg, at);
         let mut event = |text: String| {
             s.events.push(Event {
@@ -589,6 +655,35 @@ mod tests {
             csv_cell(&mavlink_codec::FieldValue::UIntArray(vec![1, 2])),
             "\"1 2\""
         );
+    }
+
+    #[test]
+    fn radio_status_over_a_recording() {
+        use mavlink_codec::messages::RadioStatus;
+        let rs = |rssi: u8, remrssi: u8, noise: u8, rxerrors: u16| {
+            Message::RadioStatus(RadioStatus {
+                rssi,
+                remrssi,
+                noise,
+                remnoise: 40,
+                rxerrors,
+                fixed: 0,
+                txbuf: 90,
+            })
+        };
+        let bytes = tlog(&[
+            (1, 68, rs(200, 190, 50, 3)),
+            (2, 68, rs(120, 255, 60, 7)), // remote unknown this time
+            (3, 68, rs(160, 170, 55, 2)), // radio rebooted: counter restarted
+        ]);
+        let s = summarise(&bytes[..]).unwrap();
+        let r = &s.radios[&(1, 68)];
+        assert_eq!(r.reports, 3);
+        assert_eq!(r.rssi, Some((120, 160.0)));
+        assert_eq!(r.remrssi, Some((170, 180.0)));
+        assert_eq!((r.margin, r.rem_margin), (Some(60), Some(130)));
+        assert_eq!(r.rx_errors, 4 + 2);
+        assert_eq!(r.min_txbuf, Some(90));
     }
 
     #[test]

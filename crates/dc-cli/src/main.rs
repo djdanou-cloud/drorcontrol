@@ -1255,6 +1255,25 @@ fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
             });
         println!("  source {sys}/{comp}: {n} frames{loss}");
     }
+    for ((sys, comp), r) in &s.radios {
+        let sig = |v: Option<(u8, f64)>| {
+            v.map_or("unknown".to_string(), |(lo, m)| {
+                format!("mean {m:.0}, lowest {lo}")
+            })
+        };
+        let margin = |v: Option<i16>| v.map_or("unknown".to_string(), |m| m.to_string());
+        println!(
+            "  radio {sys}/{comp}: {} reports; signal local {}, remote {}; smallest margin over noise local {}, remote {} (radio units, about 2 per dB on SiK); {} receive errors, {} corrected; lowest free tx buffer {}",
+            r.reports,
+            sig(r.rssi),
+            sig(r.remrssi),
+            margin(r.margin),
+            margin(r.rem_margin),
+            r.rx_errors,
+            r.fixed,
+            r.min_txbuf.map_or("-".to_string(), |t| format!("{t} %"))
+        );
+    }
     let mut counts: Vec<_> = s.messages.iter().collect();
     counts.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
     println!("messages ({} types):", counts.len());
