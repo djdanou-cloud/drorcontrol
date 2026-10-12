@@ -190,6 +190,34 @@ mod tests {
     }
 
     #[test]
+    fn fence_and_rally_items_round_trip() {
+        // A 3-vertex inclusion polygon (NAV_FENCE_POLYGON_VERTEX_INCLUSION 5001, param1 =
+        // vertex count), an exclusion circle (5004, param1 = radius) and a rally point (5100).
+        let it = |command: u16, p1: f32, lat: f64, lon: f64, z: f32| MissionItem {
+            frame: if command == 5100 { 3 } else { 0 },
+            command,
+            params: [p1, 0.0, 0.0, 0.0],
+            x: (lat * 1e7).round() as i32,
+            y: (lon * 1e7).round() as i32,
+            z,
+            autocontinue: true,
+        };
+        let fence = vec![
+            it(5001, 3.0, -35.36, 149.16, 0.0),
+            it(5001, 3.0, -35.36, 149.17, 0.0),
+            it(5001, 3.0, -35.37, 149.165, 0.0),
+            it(5004, 30.0, -35.365, 149.165, 0.0),
+            it(5100, 0.0, -35.362, 149.163, 25.0),
+        ];
+        let text = to_string(&fence);
+        assert!(
+            text.contains("\t5001\t3\t0\t0\t0\t-35.3600000\t149.1600000\t"),
+            "{text}"
+        );
+        assert_eq!(parse(&text).unwrap(), fence);
+    }
+
+    #[test]
     fn non_location_commands_keep_raw_x_y() {
         // Commands without a location (here DO_SET_SERVO) keep integers in x/y, unscaled.
         let text = "QGC WPL 110\n0\t1\t0\t16\t0\t0\t0\t0\t0\t0\t0\t1\n\

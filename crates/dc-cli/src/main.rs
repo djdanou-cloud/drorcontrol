@@ -236,7 +236,8 @@ enum MissionCmd {
         /// Which list: the mission, the geofence or the rally points.
         #[arg(long = "type", value_enum, default_value_t = ListKind::Mission)]
         kind: ListKind,
-        /// Write a .waypoints file instead of printing (mission only).
+        /// Write a .waypoints file (QGC WPL 110; fence and rally items as the vehicle holds
+        /// them).
         #[arg(long)]
         out: Option<std::path::PathBuf>,
     },
@@ -1450,14 +1451,20 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
                 ListKind::Rally => dc_core::MissionType::Rally,
             };
             if kind != dc_core::MissionType::Mission {
-                // Mission Planner keeps fences and rally points in other file formats; until
-                // those are implemented, only list them.
-                if out.is_some() {
-                    return Err("--out writes .waypoints files, for --type mission only".into());
-                }
                 let items = download_mission(cli, vehicle, kind).await?;
                 eprintln!("{} {kind:?} items", items.len());
                 print_mission(&items);
+                if let Some(path) = out {
+                    // The items as the vehicle holds them (mission protocol), in the same
+                    // QGC WPL 110 text; DrorControl reads it back. Mission Planner's own fence
+                    // and rally file formats are different and are not written here.
+                    let text = protocols::wpl::to_string(&items);
+                    std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+                    eprintln!(
+                        "wrote {} (QGC WPL 110 with {kind:?} items; not Mission Planner's fence/rally format)",
+                        path.display()
+                    );
+                }
                 return Ok(());
             }
             let items = download_mission(cli, vehicle, kind).await?;
