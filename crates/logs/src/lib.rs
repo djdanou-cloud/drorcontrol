@@ -9,6 +9,7 @@
 //! * [`spectrum`]: IMU vibration spectrum (Welch FFT) and its peaks.
 //! * [`track`]: the flight track (EKF position) with UTC from the GPS clock.
 
+pub mod altitude;
 pub mod battery;
 pub mod camera;
 pub mod compass;
@@ -16,6 +17,7 @@ pub mod dataflash;
 pub mod downsample;
 pub mod export;
 pub mod flight;
+pub mod gps;
 pub mod health;
 pub mod motors;
 pub mod notch;

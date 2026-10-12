@@ -417,6 +417,16 @@ enum LogCmd {
         /// Path to the .bin log.
         path: std::path::PathBuf,
     },
+    /// Do the altitude sources agree while flying (barometer vs EKF, GPS vs EKF)?
+    Altitude {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+    },
+    /// GPS quality while armed: satellites, HDOP, fix types, glitches.
+    Gps {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+    },
     /// Wind while flying, as the EKF estimated it.
     Wind {
         /// Path to the .bin log.
@@ -1058,6 +1068,56 @@ fn print_log_notch(
             .map(|(k, v)| format!("{k} {}", *v as f32))
             .collect();
         println!("currently: {}", cur.join(", "));
+    }
+    Ok(())
+}
+
+fn print_log_altitude(log: &logs::Log) -> Result<(), String> {
+    let show = |name: &str, g: Option<logs::altitude::AltGap>| match g {
+        Some(g) => println!(
+            "{name}: mean {:+.2} m, largest {:.2} m at {:.1} s, drift over the flight {:+.2} m ({} samples)",
+            g.mean_m,
+            g.max_abs_m,
+            g.max_at_us as f64 / 1e6,
+            g.drift_m,
+            g.samples
+        ),
+        None => println!("{name}: not logged in flight"),
+    };
+    show("barometer - EKF height", logs::altitude::baro_vs_ekf(log));
+    show("GPS - EKF altitude", logs::altitude::gps_vs_ekf(log));
+    Ok(())
+}
+
+fn print_log_gps(log: &logs::Log) -> Result<(), String> {
+    let q = logs::gps::quality(log).ok_or("no GPS samples while armed")?;
+    println!(
+        "{} samples while armed: satellites mean {:.1}, fewest {:.0}; HDOP mean {:.2}, highest {:.2}; 3D fix or better {:.1} %",
+        q.samples,
+        q.mean_sats,
+        q.min_sats,
+        q.mean_hdop,
+        q.max_hdop,
+        q.fix_3d() * 100.0
+    );
+    let fixes: Vec<String> = q
+        .status_share
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| **s > 0.0)
+        .map(|(i, s)| format!("{} {:.1} %", logs::gps::STATUS_NAMES[i], s * 100.0))
+        .collect();
+    println!("fix types: {}", fixes.join(", "));
+    println!("GPS glitches: {}", q.glitches.len());
+    for (start, end) in &q.glitches {
+        println!(
+            "  at {:.1} s, {}",
+            *start as f64 / 1e6,
+            end.map_or("not resolved by the end of the log".into(), |e| format!(
+                "resolved after {:.1} s",
+                (e - start) as f64 / 1e6
+            ))
+        );
     }
     Ok(())
 }
@@ -1964,6 +2024,8 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                     Box::new(|| print_log_compass(&log, &0)),
                 ),
                 ("Wind", Box::new(|| print_log_wind(&log))),
+                ("GPS", Box::new(|| print_log_gps(&log))),
+                ("Altitude sources", Box::new(|| print_log_altitude(&log))),
                 ("Flow and rangefinder", Box::new(|| print_log_sensors(&log))),
                 ("RC link", Box::new(|| print_log_rc(&log))),
                 (
@@ -2018,6 +2080,8 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
         LogCmd::Rc { path } => print_log_rc(&open(path)?)?,
         LogCmd::Sensors { path } => print_log_sensors(&open(path)?)?,
         LogCmd::Wind { path } => print_log_wind(&open(path)?)?,
+        LogCmd::Altitude { path } => print_log_altitude(&open(path)?)?,
+        LogCmd::Gps { path } => print_log_gps(&open(path)?)?,
         LogCmd::Compass { path, instance } => print_log_compass(&open(path)?, instance)?,
         LogCmd::Battery { path, instance } => print_log_battery(&open(path)?, instance)?,
         LogCmd::Attitude { path } => print_log_attitude(&open(path)?)?,

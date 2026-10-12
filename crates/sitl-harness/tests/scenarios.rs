@@ -1143,6 +1143,20 @@ async fn auto_mission_flight_reports_progress_to_landing() {
     eprintln!("notch: {notch:?}");
     assert!((notch.freq_hz - 37.0).abs() <= 3.0, "{notch:?}");
     assert!((0.25..0.5).contains(&notch.ref_throttle), "{notch:?}");
+    // Altitude sources agree in the simulator, and its GPS is clean.
+    let baro = logs::altitude::baro_vs_ekf(&log).expect("CTUN");
+    let gps_alt = logs::altitude::gps_vs_ekf(&log).expect("GPS and POS");
+    eprintln!("altitude gaps: baro {baro:?}, gps {gps_alt:?}");
+    assert!(
+        baro.max_abs_m < 3.0 && gps_alt.max_abs_m < 5.0,
+        "{baro:?} {gps_alt:?}"
+    );
+    let gq = logs::gps::quality(&log).expect("GPS while armed");
+    eprintln!("gps: {gq:?}");
+    assert!(
+        gq.fix_3d() > 0.99 && gq.min_sats >= 6.0 && gq.glitches.is_empty(),
+        "{gq:?}"
+    );
     // The EKF learned the simulated wind: from the north, about 4 m/s at its strongest.
     let wind = logs::wind::wind(&log).expect("wind estimated with drag fusion");
     eprintln!("wind: {wind:?}");
