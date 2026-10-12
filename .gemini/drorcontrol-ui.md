@@ -50,7 +50,7 @@ Notes:
 
 **Base surfaces (Standard theme — DrorAero brand):** canvas Carbon `#212121`, panels `#333333` (darker than brand Matte Graphite `#424242` so state colours keep ≥ 3:1), text White Smoke `#FAFAFA`, primary accent/selection Bright Azure `#009CFF`, interactive micro-states Vaporwave `#22D3EE`, separators Sonic Silver `#757575`. Daylight canvas `#FAFAFA` with `#101010` text (≥ 7:1). Night-Ops canvas `#000000` with red text `#FF4D4D` (6.4:1, the accepted exception to 7:1). Pure black otherwise appears only in raw video letterboxing. Telemetry text ≥ 7:1 (WCAG AAA); other text ≥ 4.5:1; meaningful graphics ≥ 3:1 — asserted by an automated token-contrast test (`crates/design-tokens`). Use the generated tokens (`ui/tokens/`), never these hex values directly.
 
-Typography: Urbane (headlines/UI; Inter fallback), **Space Grotesk Bold ALL CAPS** for section titles, and a tabular monospaced face (JetBrains Mono or IBM Plex Mono) for all telemetry numerals.
+Typography: Inter (headlines/UI; OFL, owner decision 2026-10-12), **Space Grotesk Bold ALL CAPS** for section titles, and a tabular monospaced face (JetBrains Mono or IBM Plex Mono) for all telemetry numerals.
 
 ---
 

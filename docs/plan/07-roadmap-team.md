@@ -134,7 +134,7 @@ Definition of Done: code + tests + docs (reference, handbook, in-app help) + par
 | R5 | macOS release/notarization breakage (Apple policy changes) | M | M | Nightly dry-run signing; fallback manual notarization runbook |
 | R6 | Local-network/multicast entitlement delay | M | L | Early request; unicast fallback |
 | R7 | CP210x/CH340 driver gaps on some macOS | M | M | Phase 0 matrix; user-space fallback |
-| R8 | Licence/IP issues (GPL contamination, Urbane font) | M | H | Clean-room policy, legal review at M0, SBOM + licence scanner in CI |
+| R8 | Licence/IP issues (GPL contamination; font settled: Inter, OFL) | M | H | Clean-room policy, legal review at M0, SBOM + licence scanner in CI |
 | R9 | Scope creep beyond parity | H | M | Parity governance board; “won't” list needs ADR |
 | R10 | Safety-relevant bug in command path | L | H | Single command pipeline, interlocks, mandatory SITL scenarios, independent review, field-beta restrictions |
 | R11 | Hardware/bench availability | M | M | Procure bench by S3; remote-accessible rigs |

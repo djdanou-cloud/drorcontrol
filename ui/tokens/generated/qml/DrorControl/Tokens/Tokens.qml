@@ -189,8 +189,8 @@ QtObject {
     readonly property color pfdHalo: _t.pfdHalo
 
     // Typography (sizes in pt; Daylight adds typeDelta)
-    readonly property string fontUi: "Urbane"
-    readonly property var fontUiFamilies: ["Urbane", "Inter"]
+    readonly property string fontUi: "Inter"
+    readonly property var fontUiFamilies: ["Inter"]
     readonly property string fontTitle: "Space Grotesk"
     readonly property var fontTitleFamilies: ["Space Grotesk", "Inter"]
     readonly property string fontCaption: "Space Grotesk"

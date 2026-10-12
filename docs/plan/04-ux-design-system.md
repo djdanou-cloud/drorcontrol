@@ -44,7 +44,7 @@ Themes switch at runtime without restart; “Auto” can follow OS appearance an
 ## 2. Typography
 | Role | Font | Notes |
 |------|------|-------|
-| Headlines (H1/H2), main UI | **Urbane** (Heavy for headlines, Medium for UI, Light for accents) | Brand mandated; licence check for bundling (README §5); fallback Inter |
+| Headlines (H1/H2), main UI | **Inter** (Bold/Heavy for headlines, Medium for UI, Light for accents) | SIL Open Font License: bundles without licence friction (owner, 2026-10-12, ADR-0012; replaces Urbane) |
 | Section titles / subheads | **Space Grotesk Bold, ALL CAPS**, +1.5 px tracking | Brand mandated |
 | Technical notes, small captions | Space Grotesk Medium | |
 | **Telemetry numerals** | Monospaced **tabular** face — *JetBrains Mono* or *IBM Plex Mono* (OFL) with slashed zero | Prevents digit jitter in rolling values (tabular figures are non-negotiable); Space Grotesk used only if its `tnum` feature verifies in CI |
