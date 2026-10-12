@@ -127,8 +127,25 @@ pub struct FlightStats {
     pub distance_m: f64,
     /// Highest ground speed, m/s.
     pub max_speed_ms: f32,
+    /// Armed time per flight mode (named once the banner confirms the firmware), s, in order
+    /// of first use.
+    pub mode_s: Vec<(String, f64)>,
+    mode_since: Option<(String, u64)>,
     armed_since: Option<u64>,
     last_pos: Option<(f64, f64)>,
+}
+
+impl FlightStats {
+    /// Close the armed segment in the current mode at `t`.
+    fn close_mode(&mut self, t: u64) {
+        if let Some((m, since)) = self.mode_since.take() {
+            let d = t.saturating_sub(since) as f64 / 1e6;
+            match self.mode_s.iter_mut().find(|(k, _)| *k == m) {
+                Some(e) => e.1 += d,
+                None => self.mode_s.push((m, d)),
+            }
+        }
+    }
 }
 
 fn distance_m(a: (f64, f64), b: (f64, f64)) -> f64 {
@@ -287,9 +304,17 @@ pub fn summarise(input: impl Read) -> io::Result<Summary> {
             );
             if prev.mode.as_ref() != Some(&mode) {
                 event(format!("mode {mode}"));
-                prev.mode = Some(mode);
+                prev.mode = Some(mode.clone());
             }
             let armed = hb.value.armed();
+            if compid == 1 {
+                let f = s.flights.entry(sysid).or_default();
+                let current = armed.then_some(mode);
+                if f.mode_since.as_ref().map(|m| &m.0) != current.as_ref() {
+                    f.close_mode(t);
+                    f.mode_since = current.map(|m| (m, t));
+                }
+            }
             if prev.armed != Some(armed) {
                 event(if armed { "ARMED" } else { "disarmed" }.to_string());
                 prev.armed = Some(armed);
@@ -331,6 +356,7 @@ pub fn summarise(input: impl Read) -> io::Result<Summary> {
             }
         }
         for f in s.flights.values_mut() {
+            f.close_mode(end);
             if let Some(since) = f.armed_since {
                 f.armed_s += end.saturating_sub(since) as f64 / 1e6;
             }
@@ -582,6 +608,11 @@ mod tests {
             (f.arms, f.armed_s),
             (1, 7.0),
             "armed at +2 s, disarmed at +9 s"
+        );
+        // Armed in GUIDED (mode 4) from +2 to +5 s, then RTL (6) to +9 s.
+        assert_eq!(
+            f.mode_s,
+            [("GUIDED".to_string(), 3.0), ("RTL".to_string(), 4.0)]
         );
         let texts: Vec<&str> = s.events.iter().map(|e| e.text.as_str()).collect();
         assert_eq!(

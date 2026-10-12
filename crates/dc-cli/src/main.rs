@@ -1512,6 +1512,16 @@ fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
         tlog::utc(last),
         (last - first) as f64 / 1e6
     );
+    for (sys, f) in &s.flights {
+        if !f.mode_s.is_empty() {
+            let modes: Vec<String> = f
+                .mode_s
+                .iter()
+                .map(|(m, t)| format!("{m} {t:.1} s"))
+                .collect();
+            println!("  vehicle {sys} armed time per mode: {}", modes.join(", "));
+        }
+    }
     for ((sys, comp), n) in &s.sources {
         let loss = s
             .sequences
