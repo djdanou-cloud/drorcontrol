@@ -118,6 +118,11 @@ enum Cmd {
         #[arg(long, default_value_t = 60)]
         seconds: u64,
     },
+    /// Which safety nets a parameter set has switched off (advisory; .param or .bin).
+    ParamsReview {
+        /// A .param file or a .bin log.
+        file: std::path::PathBuf,
+    },
     /// Compare two parameter sets, each a .param file or the parameters recorded in a .bin log.
     ParamsDiff {
         /// Left side (.param or .bin).
@@ -731,6 +736,10 @@ async fn run(cli: Cli) -> Result<(), String> {
         Cmd::Mission { what } => mission_cmd(&cli, what).await,
         Cmd::Tlog { what } => tlog_cmd(what),
         Cmd::ParamsDiff { a, b } => params_diff(a, b),
+        Cmd::ParamsReview { file } => {
+            print_params_review(&load_params(file)?);
+            Ok(())
+        }
         Cmd::Soak {
             tx,
             rx,
@@ -1105,6 +1114,20 @@ fn print_log_notch(
         println!("currently: {}", cur.join(", "));
     }
     Ok(())
+}
+
+fn print_params_review(params: &std::collections::BTreeMap<String, f64>) {
+    let findings = protocols::params::review::review(params);
+    if findings.is_empty() {
+        println!("no safety net switched off among the reviewed parameters");
+    }
+    for f in findings {
+        let tag = match f.level {
+            protocols::params::review::Level::Off => "OFF ",
+            protocols::params::review::Level::Note => "note",
+        };
+        println!("{tag}  {:<16} {}", f.param, f.text);
+    }
 }
 
 fn print_log_perf(log: &logs::Log) -> Result<(), String> {
@@ -2127,6 +2150,13 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                     Box::new(|| print_log_notch(&log, "ACC.AccX", &0, &1024, &20.0)),
                 ),
                 ("Parameter changes", Box::new(|| print_log_changes(&log))),
+                (
+                    "Configuration review",
+                    Box::new(|| {
+                        print_params_review(&log.params());
+                        Ok(())
+                    }),
+                ),
             ];
             for (title, run) in sections {
                 println!("\n== {title} ==");
