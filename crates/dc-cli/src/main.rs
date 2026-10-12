@@ -749,7 +749,14 @@ fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
         (last - first) as f64 / 1e6
     );
     for ((sys, comp), n) in &s.sources {
-        println!("  source {sys}/{comp}: {n} frames");
+        let loss = s
+            .sequences
+            .get(&(*sys, *comp))
+            .and_then(|q| Some((q.lost, q.loss_pct()?)))
+            .map_or(String::new(), |(lost, pct)| {
+                format!(", {lost} lost in transit ({pct:.1} %)")
+            });
+        println!("  source {sys}/{comp}: {n} frames{loss}");
     }
     let mut counts: Vec<_> = s.messages.iter().collect();
     counts.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));

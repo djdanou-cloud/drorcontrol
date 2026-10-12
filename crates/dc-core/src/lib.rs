@@ -200,17 +200,21 @@ impl StreamQuality {
 /// Window for [`StreamQuality::recent_loss_pct`].
 pub const QUALITY_WINDOW: Duration = Duration::from_secs(10);
 
-/// Sequence tracking for one (system, component).
-#[derive(Debug, Default)]
-struct SeqTracker {
+/// Frames received and lost from one MAVLink sender's sequence numbers (sans-I/O; also used
+/// on recordings).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SeqCount {
     last: Option<u8>,
-    total: StreamQuality,
-    /// Per-second buckets: (start, received, lost).
-    buckets: std::collections::VecDeque<(Instant, u32, u32)>,
+    /// Frames counted (duplicates excluded).
+    pub received: u64,
+    /// Frames missing from the sequence.
+    pub lost: u64,
 }
 
-impl SeqTracker {
-    fn on_frame(&mut self, seq: u8, now: Instant) {
+impl SeqCount {
+    /// Count a frame with sequence number `seq`. Returns `None` for a duplicate, else the
+    /// frames newly lost before it and whether it arrived late (one earlier loss taken back).
+    pub fn on_seq(&mut self, seq: u8) -> Option<(u32, bool)> {
         // `last` is the newest sequence number seen. A frame ahead of it by n means n - 1
         // frames lost; a frame behind it (by less than 128) arrived late, after being counted
         // lost, so that loss is taken back; the same number again is a duplicate.
@@ -219,7 +223,7 @@ impl SeqTracker {
             Some(last) => {
                 let ahead = seq.wrapping_sub(last);
                 match ahead {
-                    0 => return, // duplicate
+                    0 => return None,
                     1..=127 => (u32::from(ahead - 1), false),
                     _ => (0, true),
                 }
@@ -228,8 +232,31 @@ impl SeqTracker {
         if !late {
             self.last = Some(seq);
         }
-        self.total.received += 1;
-        self.total.lost = (self.total.lost + u64::from(lost)).saturating_sub(u64::from(late));
+        self.received += 1;
+        self.lost = (self.lost + u64::from(lost)).saturating_sub(u64::from(late));
+        Some((lost, late))
+    }
+
+    /// Lost as a percentage of received plus lost (`None` before any frame).
+    pub fn loss_pct(&self) -> Option<f64> {
+        let n = self.received + self.lost;
+        (n > 0).then(|| self.lost as f64 * 100.0 / n as f64)
+    }
+}
+
+/// Sequence tracking for one (system, component).
+#[derive(Debug, Default)]
+struct SeqTracker {
+    count: SeqCount,
+    /// Per-second buckets: (start, received, lost).
+    buckets: std::collections::VecDeque<(Instant, u32, u32)>,
+}
+
+impl SeqTracker {
+    fn on_frame(&mut self, seq: u8, now: Instant) {
+        let Some((lost, late)) = self.count.on_seq(seq) else {
+            return; // duplicate
+        };
         match self.buckets.back_mut() {
             Some(b) if now.duration_since(b.0) < Duration::from_secs(1) => {
                 b.1 += 1;
@@ -247,7 +274,11 @@ impl SeqTracker {
     }
 
     fn quality(&self, now: Instant) -> StreamQuality {
-        let mut q = self.total;
+        let mut q = StreamQuality {
+            received: self.count.received,
+            lost: self.count.lost,
+            ..Default::default()
+        };
         let recent = self
             .buckets
             .iter()

@@ -31,6 +31,9 @@ pub struct Summary {
     pub span: Option<(u64, u64)>,
     /// Frames per (sysid, compid).
     pub sources: BTreeMap<(u8, u8), u64>,
+    /// Frames received and lost per (sysid, compid), from MAVLink sequence numbers (as the
+    /// live core counts them). Frames our side sent are recorded too.
+    pub sequences: BTreeMap<(u8, u8), dc_core::SeqCount>,
     /// Messages by name (`#id` for ids the dialect does not know).
     pub messages: BTreeMap<String, u64>,
     /// Mode changes, arming, firmware and STATUSTEXT (severity 0–6), in order.
@@ -96,6 +99,10 @@ pub fn summarise(input: impl Read) -> io::Result<Summary> {
         let f = &rec.frame;
         let (sysid, compid) = (f.sysid(), f.compid());
         *s.sources.entry((sysid, compid)).or_default() += 1;
+        s.sequences
+            .entry((sysid, compid))
+            .or_default()
+            .on_seq(f.seq());
         let Ok(msg) = f.decode() else {
             *s.messages.entry(format!("#{}", f.msgid())).or_default() += 1;
             continue;
@@ -435,6 +442,30 @@ mod tests {
         let mut more = bytes.clone();
         more.extend(tlog(&[(9, 1, count(0))]));
         assert_eq!(mission(&more[..]).unwrap().unwrap().1.len(), 0);
+    }
+
+    #[test]
+    fn counts_lost_frames_per_source() {
+        let mut w = TlogWriter::new(Vec::new());
+        // 0, 1, 2, then 5 (3 and 4 lost), 6, then 4 arrives late, then 6 again (duplicate).
+        for (i, seq) in [0u8, 1, 2, 5, 6, 4, 6].iter().enumerate() {
+            let h = Header {
+                seq: *seq,
+                sysid: 1,
+                compid: 1,
+            };
+            let f = encode(Version::V2, h, &hb(0, false)).unwrap();
+            w.write_raw(1_000 + i as u64, f.as_bytes()).unwrap();
+        }
+        let s = summarise(&w.into_inner().unwrap()[..]).unwrap();
+        let q = s.sequences[&(1, 1)];
+        assert_eq!((q.received, q.lost), (6, 1));
+        assert_eq!(
+            s.sources[&(1, 1)],
+            7,
+            "every record is still counted as a frame"
+        );
+        assert!((q.loss_pct().unwrap() - 100.0 / 7.0).abs() < 1e-9);
     }
 
     #[test]
