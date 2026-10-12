@@ -23,6 +23,8 @@ pub struct SurveyConfig {
     /// Photo distance along the lines, m: adds `DO_SET_CAM_TRIGG_DIST` (206) at the first
     /// survey waypoint and switches it off (0) before RTL. `None`: no camera commands.
     pub trigger_m: Option<f64>,
+    /// Fly a second set of lines at 90° to the first (crosshatch), after the first set.
+    pub crosshatch: bool,
 }
 
 /// Why a survey cannot be made.
@@ -208,7 +210,13 @@ pub fn mission(cfg: &SurveyConfig) -> Result<Vec<MissionItem>, SurveyError> {
     if cfg.alt_m.is_nan() || cfg.alt_m <= 0.0 {
         return Err(SurveyError::BadAltitude);
     }
-    let points = grid(cfg)?;
+    let mut points = grid(cfg)?;
+    if cfg.crosshatch {
+        points.extend(grid(&SurveyConfig {
+            angle_deg: cfg.angle_deg + 90.0,
+            ..cfg.clone()
+        })?);
+    }
     let item = |command: u16, frame: u8, (lat, lon): (f64, f64), z: f32| MissionItem {
         frame,
         command,
@@ -263,6 +271,7 @@ mod tests {
             angle_deg: 0.0,
             alt_m: 50.0,
             trigger_m: None,
+            crosshatch: false,
         };
         let pts = grid(&cfg).unwrap();
         assert_eq!(pts.len(), 8, "4 lines, 2 points each");
@@ -300,6 +309,7 @@ mod tests {
             angle_deg: 90.0,
             alt_m: 40.0,
             trigger_m: None,
+            crosshatch: false,
         };
         let m = mission(&cfg).unwrap();
         // home, takeoff, 2 lines x 2 points, RTL
@@ -319,7 +329,7 @@ mod tests {
         // With a photo distance: trigger on at the first survey waypoint, off before RTL.
         let m = mission(&SurveyConfig {
             trigger_m: Some(12.5),
-            ..cfg
+            ..cfg.clone()
         })
         .unwrap();
         assert_eq!(
@@ -330,6 +340,21 @@ mod tests {
         assert_eq!((m[7].params[0], m[7].params[2]), (0.0, 0.0));
         let text = crate::wpl::to_string(&m);
         assert_eq!(crate::wpl::parse(&text).unwrap(), m);
+        // Crosshatch: the east-west lines, then north-south lines over the same square.
+        let x = mission(&SurveyConfig {
+            crosshatch: true,
+            trigger_m: None,
+            ..cfg
+        })
+        .unwrap();
+        assert_eq!(x.iter().filter(|i| i.command == 16).count(), 1 + 4 + 4);
+        let p = Plane::new((-35.36, 149.16));
+        let a = p.to_xy((f64::from(x[6].x) * 1e-7, f64::from(x[6].y) * 1e-7));
+        let b = p.to_xy((f64::from(x[7].x) * 1e-7, f64::from(x[7].y) * 1e-7));
+        assert!(
+            (a.0 - b.0).abs() < 0.05,
+            "second set runs north-south: {a:?} {b:?}"
+        );
     }
 
     #[test]
@@ -355,6 +380,7 @@ mod tests {
             angle_deg: 90.0,
             alt_m: 30.0,
             trigger_m: None,
+            crosshatch: false,
         })
         .unwrap();
         // y = -40: one segment; y = 0 and 40: two each.
@@ -388,6 +414,7 @@ mod tests {
             angle_deg: 0.0,
             alt_m: 50.0,
             trigger_m: None,
+            crosshatch: false,
         };
         assert!((line_length_m(&grid(&cfg).unwrap()) - 400.0).abs() < 0.5);
     }
@@ -400,6 +427,7 @@ mod tests {
             angle_deg: 0.0,
             alt_m: 50.0,
             trigger_m: None,
+            crosshatch: false,
         };
         assert_eq!(grid(&cfg), Err(SurveyError::BadSpacing));
         cfg.spacing_m = 500.0;

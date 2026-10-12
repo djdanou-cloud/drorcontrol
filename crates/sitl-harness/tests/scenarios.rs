@@ -1605,6 +1605,7 @@ async fn survey_grid_uploads_and_verifies() {
         // Camera triggered every 15 m: ArduPilot stores DO_SET_CAM_TRIGG_DIST and the
         // read-back matches.
         trigger_m: Some(15.0),
+        crosshatch: false,
     })
     .unwrap();
     assert_eq!(mission.iter().filter(|i| i.command == 206).count(), 2);

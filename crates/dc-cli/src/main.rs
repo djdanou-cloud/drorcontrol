@@ -298,6 +298,9 @@ enum MissionCmd {
         /// survey waypoint, off before RTL), at the photo distance from --camera.
         #[arg(long, requires = "camera")]
         trigger: bool,
+        /// Fly a second set of lines at 90 degrees to the first (crosshatch).
+        #[arg(long)]
+        crosshatch: bool,
         /// Line direction, degrees clockwise from north.
         #[arg(long, default_value_t = 0.0)]
         angle: f64,
@@ -1867,6 +1870,7 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
             sidelap,
             frontlap,
             trigger,
+            crosshatch,
             angle,
             alt,
             out,
@@ -1926,6 +1930,7 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
                 angle_deg: *angle,
                 alt_m: *alt,
                 trigger_m: fp.filter(|_| *trigger).map(|f| f.trigger_m),
+                crosshatch: *crosshatch,
             })
             .map_err(|e| e.to_string())?;
             print_stats(&items);
