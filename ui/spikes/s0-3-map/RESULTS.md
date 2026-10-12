@@ -1,13 +1,14 @@
 # Spike S0-3 results — MapLibre Native through Qt RHI (Metal) (T0-07)
 
 **Question (plan 01 §5.1, ADR-0003):** can MapLibre Native draw the moving-map with Metal
-inside the Qt Quick scene at 60 fps on a 5K Retina display, with ≤ 8 % GPU on an M1 and
+inside the Qt Quick scene at 60 fps full screen on the built-in Retina display, with ≤ 8 % GPU on an M1 and
 correct trackpad pinch and rotate? If not, the fallback is a `wgpu` map renderer (+10
 person-weeks, already budgeted).
 
 **Status:** first real-Mac run done on an M1 at 2880×1800 (2026-10-11): **Metal, frame rate,
-vsync and feel pass; GPU load fails (≈ 42 % vs ≤ 8 %).** The 5K run that the criterion names is
-still to do. Go/no-go is ADR-0003's call. The `spike-map` workflow builds it with Metal and
+vsync and feel pass; GPU load fails (≈ 42 % vs ≤ 8 %).** That is the run the criterion names
+(the 5K run moved to [future upgrades](../../../docs/plan/future-upgrades.md), owner decision
+2026-10-12). Go/no-go is ADR-0003's call. The `spike-map` workflow builds it with Metal and
 flies the route on a macOS runner (indicative).
 
 ## What is used
@@ -40,10 +41,9 @@ flies the route on a macOS runner (indicative).
 |-------|-----|-------------|-------------------------|--------------|-----|---------|
 | macOS CI runner, first run (2026-10-11) | — | — | — | — | — | QMapLibre built with Metal (about 13 min) and the harness compiled; start-up failed: `module "MapLibre" is not installed` (QML import path not given to the engine). Fixed in the next commit; not yet re-run |
 | macOS CI runner (VM) | see the `spike-map` run summary | — | — | — | — | indicative |
-| M1 MacBook Air, built-in Retina, full screen (2026-10-11) | `Metal` | 2880×1800 | 59.98 / 22.63 ms | 19 / 3598 (0.53 %) | ≈ 42 % (mean; max 56 %) | fps, vsync and feel pass; **GPU fails**. Not 5K |
-| **M1 Mac, 5K display, full screen** | pending | pending | pending | pending | pending | **decides T0-07** |
+| M1 MacBook Air, built-in Retina, full screen (2026-10-11) | `Metal` | 2880×1800 | 59.98 / 22.63 ms | 19 / 3598 (0.53 %) | ≈ 42 % (mean; max 56 %) | fps, vsync and feel pass; **GPU fails**. **Decides T0-07** |
 
-Pass (go): API `Metal`; warm pass ≥ 59 fps with < 1 % missed vsync at 5K full screen;
+Pass (go): API `Metal`; warm pass ≥ 59 fps with < 1 % missed vsync, full screen on the built-in Retina display;
 GPU ≤ 8 %; pinch and rotate feel right in `--manual`.
 
 ### M1 Mac run (2026-10-11, mactest-1)
@@ -77,7 +77,7 @@ brew install ninja ccache
 export QT_ROOT_DIR=$(brew --prefix qt)    # Qt >= 6.5
 ui/spikes/s0-3-map/build.sh               # first build: MapLibre from source, ~30-60 min
 B=ui/spikes/s0-3-map/build/spike-s0-3-map
-$B --fullscreen --report s03-m1-5k.json   # 2 × 60 s; run powermetrics alongside
+$B --fullscreen --report s03-m1-full.json # 2 × 60 s; run powermetrics alongside
 $B --manual --report s03-m1-manual.json   # trackpad check; close the window to finish
 ```
 

@@ -75,7 +75,8 @@ through a cxx-qt bridge keeps rendering every frame, with UI-thread cost indepen
 About 1 ms worse p99 than at normal power, and one 33.7 ms frame at 200 k. One run per rate.
 
 ## Not yet measured
-Intel Mac, ProMotion/120 Hz (this Mac has no ProMotion display), energy impact.
+Intel Mac, energy impact. ProMotion/120 Hz is not a current task (no ProMotion Mac available):
+see [`docs/plan/future-upgrades.md`](../../../docs/plan/future-upgrades.md).
 Run (from a terminal in a logged-in desktop session; over SSH Qt finds no screen):
 ```bash
 export QMAKE=$(which qmake)   # Qt 6.5+ recommended on macOS

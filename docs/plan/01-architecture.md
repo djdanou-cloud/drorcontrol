@@ -211,7 +211,7 @@ flowchart LR
 | **`wgpu` custom renderer** (Rust) | Full control, one code path to 3-D, Metal/Vulkan/DX12 | We own tile decode, labels, styling subset | **Fallback / long-term unifier** |
 | Cesium | Excellent 3-D globe | JS/WebGL stack, heavy, conflicts with native pipeline | Rejected for core; optional remote web viewer |
 
-**Go/no-go gate (S0-3, week 6):** MapLibre Metal → `QSGTexture` import at 60 fps on 5 K Retina with ≤ 8 % GPU on M1 and correct trackpad pinch/rotate. If fail → build `wgpu` renderer (+10 person-weeks, already contingency-budgeted).
+**Go/no-go gate (S0-3, week 6):** MapLibre Metal → `QSGTexture` import at 60 fps full screen on the built-in Retina display with ≤ 8 % GPU on M1 (5 K: [future upgrades](future-upgrades.md), owner decision 2026-10-12) and correct trackpad pinch/rotate. If fail → build `wgpu` renderer (+10 person-weeks, already contingency-budgeted).
 
 ### 5.2 Tiles, caching, offline
 * **Vector basemap:** OpenMapTiles/Protomaps schema in **PMTiles** (single-file, range-readable, ideal for offline regions) and **MBTiles**; drawn with our dark/day/night **styles** derived from design tokens.

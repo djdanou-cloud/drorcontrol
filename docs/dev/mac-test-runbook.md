@@ -21,7 +21,6 @@ truth.)
 | USB-serial adapters | T0-05 soak | 3 chip families: FTDI, SiLabs CP210x, WCH CH340/CH9102 | Plus a SiK/RFD900x radio pair |
 | Jumper wires (TX↔RX loopback) | T0-05 soak | 1 per adapter | — |
 | USB-C hub, data-capable cables | T0-05 | Cables | Powered hub |
-| 5K display | T0-07 | Built-in Retina | Apple Studio Display (5K) |
 | RTSP H.264 1080p30 camera | T0-09 | Optional: the harness makes its own clip | — |
 
 Time budget:
@@ -103,15 +102,17 @@ The container run (no GPU) got 17.7 ms p99 and 0 dropped frames.
 2. Prepare the Mac: close other apps, plug in power, turn Low Power Mode off.
 3. Run:
    `for r in 0 200000 400000; do S01_RATE=$r S01_REPORT=s01-$r.json ui/spikes/s0-1-bridge/target/release/spike-s0-1-bridge; done`
-4. Repeat with Low Power Mode on (`s01-lpm-*.json`), and on a 120 Hz ProMotion display if
-   the Mac has one (`s01-120hz-*.json`).
+4. Repeat with Low Power Mode on (`s01-lpm-*.json`). (120 Hz ProMotion runs are not a current
+   task: see [`../plan/future-upgrades.md`](../plan/future-upgrades.md).)
 5. Record the numbers in `ui/spikes/s0-1-bridge/RESULTS.md` and in ADR-0001's validation.
 
 ## T0-07 — MapLibre through Qt RHI on Metal (spike S0-3)
 
 Pass (go):
 * the report says the graphics API is `Metal`;
-* the warm pass runs at ≥ 59 fps with < 1 % missed vsync, full screen at 5K;
+* the warm pass runs at ≥ 59 fps with < 1 % missed vsync, full screen on the built-in Retina
+  display (done on the M1 on 2026-10-11; 5K runs are in
+  [`../plan/future-upgrades.md`](../plan/future-upgrades.md));
 * GPU ≤ 8 %;
 * pinch and rotate feel right.
 
@@ -121,7 +122,7 @@ Fail → the `wgpu` fallback (plan 01 §5.1).
 ui/spikes/s0-3-map/build.sh                 # MapLibre from a pinned commit, Metal; ~30-60 min first time
 B=ui/spikes/s0-3-map/build/spike-s0-3-map
 sudo powermetrics --samplers gpu_power -i 1000 > gpu.txt &   # GPU load while the route runs
-$B --fullscreen --report s03-m1-5k.json     # 2 × 60 s route (cold, warm)
+$B --fullscreen --report s03-m1-full.json   # 2 × 60 s route (cold, warm)
 sudo pkill powermetrics
 $B --manual --report s03-m1-manual.json     # trackpad pinch/rotate check; close the window to finish
 ```

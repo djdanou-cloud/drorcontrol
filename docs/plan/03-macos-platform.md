@@ -185,7 +185,7 @@ Techniques: render only on invalidation (no free-running timers), `CAMetalLayer.
 |-----------|--------|
 | Hardware | M1 Air, M3/M4 Pro MacBook, Intel Mac (2019+), Mac mini CI |
 | OS | 13, 14, 15, 26 (+ beta track for next) |
-| Displays | built-in Retina/ProMotion, external 4K/5K, mixed-DPI dual screen |
+| Displays | built-in Retina, external 4K, mixed-DPI dual screen (ProMotion and 5K: [future upgrades](future-upgrades.md)) |
 | Serial devices | CubeOrange/Pixhawk 6X (CDC), Matek H743, FTDI & CP210x & CH340 radios, RFD900x, ELRS TX |
 | Network | Wi-Fi + Ethernet adapter, VPN on/off, Local Network permission denied/allowed |
 | Controllers | DualSense, Xbox, 8BitDo, generic HID joystick/HOTAS |

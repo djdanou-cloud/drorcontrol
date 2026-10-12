@@ -24,3 +24,6 @@ Someone with a Mac runs the commands in ui/spikes/s0-1-bridge/RESULTS.md ("Not y
   16.7 ms bound is missed even at idle. Numbers in `ui/spikes/s0-1-bridge/RESULTS.md`. Left open:
   the criterion needs restating in ADR-0001 (handoff to architect), and Intel / 120 Hz / Low
   Power Mode runs are still missing.
+* 2026-10-12 (core-1): owner decision: no ProMotion Mac is available, so the 120 Hz run is no
+  longer part of this issue; it is kept in `docs/plan/future-upgrades.md`. Low Power Mode was
+  run on 2026-10-11; Intel and the ADR-0001 restatement remain.

@@ -63,6 +63,7 @@ nav:
       - plan/06-documentation-system.md
       - plan/07-roadmap-team.md
       - plan/08-safety-vv.md
+      - plan/future-upgrades.md
   - Decisions (ADRs):
       - plan/adr/README.md
       - plan/adr/0001-core-and-ui-stack.md

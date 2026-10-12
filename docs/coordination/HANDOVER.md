@@ -46,6 +46,9 @@ and the code are newer. Where either disagrees with an owner instruction, the ow
   * Link state never blocks or delays a command (ADR-0009).
   * CommandPolicy design approved (T0-16).
   * No Apple developer credentials: ad-hoc signed, internal distribution (ADR-0010).
+  * No 5K or ProMotion (120 Hz) Mac display is available (2026-10-12): those tests and targets
+    are deferred to `docs/plan/future-upgrades.md`; Mac display tests use the M1 MacBook Air's
+    built-in Retina screen.
   * Parity: the recommendations were accepted; Cursor-on-Target (CoT) is in scope; swarm
     comes later.
   * Design tokens: Night-Ops telemetry `#FF4D4D` (6.4:1, accepted residual risk); panels
@@ -86,8 +89,8 @@ and the code are newer. Where either disagrees with an owner instruction, the ow
 | T0-03 router, links, tlog | done | `mav-router`, `link-*`, `recorder` |
 | T0-04 core daemon, gRPC, FFI, CLI | done | `dc-core`, `api`, `core-ffi`, `dc-cli` |
 | T0-05 macOS serial | **code done; hardware matrix pending** | Mac runbook T0-05; `crates/platform-macos/HARDWARE_MATRIX.md` |
-| T0-06 spike S0-1 bridge | **M1 run done; strict p99 bound missed** | M1: 0 dropped frames, p99 19.5 ms at 200 k (17.8 ms idle). Criterion needs restating in ADR-0001; Low Power Mode / 120 Hz / Intel not run |
-| T0-07 spike S0-3 map | **M1 run done at 2880×1800: Metal, fps, vsync, feel pass; GPU ≈ 42 % fails** | `ui/spikes/s0-3-map/RESULTS.md`; 5K run and ADR-0003 go/no-go pending |
+| T0-06 spike S0-1 bridge | **M1 run done; strict p99 bound missed** | M1: 0 dropped frames, p99 19.5 ms at 200 k (17.8 ms idle). Criterion needs restating in ADR-0001; Intel not run (120 Hz deferred: `docs/plan/future-upgrades.md`) |
+| T0-07 spike S0-3 map | **M1 run done at 2880×1800: Metal, fps, vsync, feel pass; GPU ≈ 42 % fails** | `ui/spikes/s0-3-map/RESULTS.md`; ADR-0003 go/no-go pending (decided on the built-in Retina run; 5K deferred to `docs/plan/future-upgrades.md`, owner 2026-10-12) |
 | T0-08 spike S0-4 logs | done | `crates/logs` |
 | T0-09 spike S0-5 video | **M1 runs done incl. live RTSP: hardware + zero-copy pass; live p99 113 ms and CPU 6.4 % fail. Latency = frames held per `max_dec_frame_buffering` (36 ms with 1)** | `ui/spikes/s0-5-video/RESULTS.md`; separate `spike-video` workflow gives indicative numbers when the spike or its workflow changes, or on manual dispatch |
 | T0-10 macOS package | done on CI; local M1 package + first-launch steps 1–3 pass | "Open Anyway" not verified on the M1 (approved in another account than the app's owner); see log |
@@ -115,7 +118,7 @@ and the code are newer. Where either disagrees with an owner instruction, the ow
 
 | Item | Where | Needed from |
 |------|-------|-------------|
-| Mac session, remaining: T0-05 hardware matrix, T0-07 at 5K, T0-10 "Open Anyway" step, T0-09 re-run once a no-hold decode path exists (M1 results of 2026-10-11 are in the spike RESULTS.md files) | Mac runbook | Owner (hardware) |
+| Mac session, remaining: T0-05 hardware matrix, T0-10 "Open Anyway" step, T0-09 re-run once a no-hold decode path exists (M1 results of 2026-10-11 are in the spike RESULTS.md files) | Mac runbook | Owner (hardware) |
 | Per-hazard rating review; interpretations I1–I3; acceptance of the H14 residual risk | `docs/safety/hazards.md` §3, §7 | Flight Operations & Systems Safety Lead |
 | Licence of the vendored MAVLink XML and the generated code | `issues/20261010T213905Z-…` | Owner / legal |
 | MapLibre Native third-party licence inventory before shipping | `ui/spikes/s0-3-map/RESULTS.md` | Owner / legal |

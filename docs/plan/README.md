@@ -26,6 +26,7 @@ A cross-platform ground control station (GCS) for ArduPilot vehicles that:
 | 06 | [Documentation architecture](06-documentation-system.md) | ADR/ADD, API refs, onboarding, protocol guide, operator handbook, in-app help |
 | 07 | [Roadmap, team, estimates](07-roadmap-team.md) | Phases 0–5, sprints, staffing, risks |
 | 08 | [Safety, V&V](08-safety-vv.md) | SITL-in-CI, HITL bench, command interlocks, degraded-link UX |
+| — | [Future upgrades](future-upgrades.md) | Deferred until the hardware exists: 5K and ProMotion (120 Hz) display tests and targets |
 | — | [ADRs](adr/README.md) | Architecture Decision Records 0001–0007 + template |
 
 ## 3. Decision register (summary)
@@ -46,7 +47,7 @@ A cross-platform ground control station (GCS) for ArduPilot vehicles that:
 |--------|--------|
 | Sustained MAVLink ingest | ≥ 20 000 msg/s, ≥ 200 000 msg/s burst (SITL/Ethernet), zero UI frame drops at p99 |
 | Telemetry → pixel latency | p95 ≤ 50 ms (link excluded) |
-| PFD + map frame rate | 60 fps @ Retina (120 fps on ProMotion when plugged in); adaptive 30 fps on battery/Low Power Mode |
+| PFD + map frame rate | 60 fps @ Retina; adaptive 30 fps on battery/Low Power Mode. (120 fps on ProMotion: [future upgrades](future-upgrades.md), owner decision 2026-10-12) |
 | CPU, flight view, M1 Air | ≤ 12 % total (one core ≈ 12.5 % of 8) at 50 Hz telemetry |
 | RAM | ≤ 600 MB baseline; 4 GB `.bin` log open ≤ 1.2 GB RSS (mmap + lazy columns) |
 | Parameter table (1 500+ params) | search-as-you-type ≤ 16 ms; full download over 57 600 baud has progress, resume, and cache |

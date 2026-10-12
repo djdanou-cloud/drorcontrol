@@ -2,8 +2,8 @@
 //
 // Flies a fixed camera route (continuous pan, zoom, rotation and tilt, set every frame) twice
 // over a vector basemap and records the interval between presented frames. The first pass
-// loads tiles ("cold"); the second reuses them ("warm"). Pass (plan 01 §5.1): 60 fps on a 5K
-// Retina display; GPU load is read with `sudo powermetrics --samplers gpu_power` while it runs.
+// loads tiles ("cold"); the second reuses them ("warm"). Pass (ADR-0003): 60 fps full screen
+// on the built-in Retina display; GPU load is read with `sudo powermetrics --samplers gpu_power` while it runs.
 //
 //   spike-s0-3-map [--seconds-per-pass 60] [--warmup 5] [--style URL] [--report PATH]
 //                  [--fullscreen] [--manual]
@@ -98,7 +98,7 @@ int main(int argc, char *argv[]) {
         {"warmup", "Seconds before the first pass (default 5).", "s", "5"},
         {"style", "Style URL.", "url", "https://tiles.openfreemap.org/styles/liberty"},
         {"report", "Write the JSON report here.", "path"},
-        {"fullscreen", "Full screen (use for the 5K measurement)."},
+        {"fullscreen", "Full screen (use for the measurement)."},
         {"manual", "No route: interact by hand; report on close."},
     });
     cli.process(app);
