@@ -74,7 +74,8 @@ pub struct DownloadConfig {
     pub batch: usize,
     /// Rounds without progress before giving up.
     pub max_stalls: u32,
-    /// No first `PARAM_VALUE` within this time: give up.
+    /// No first `PARAM_VALUE` within this time: give up. Until then `PARAM_REQUEST_LIST` is
+    /// re-sent every `quiet` (a lost request would otherwise fail the whole download).
     pub first_reply: Duration,
 }
 
@@ -168,6 +169,15 @@ impl ParamDownload {
         let Some(total) = self.total else {
             if now.duration_since(self.started) > self.cfg.first_reply {
                 self.failed = true;
+                return Vec::new();
+            }
+            // Nothing heard yet: the request (or every reply so far) was lost. Ask again.
+            if self.last_rx.is_none() && now.duration_since(self.last_request) >= self.cfg.quiet {
+                self.last_request = now;
+                return vec![Message::ParamRequestList(ParamRequestList {
+                    target_system: self.target.0,
+                    target_component: self.target.1,
+                })];
             }
             return Vec::new();
         };
@@ -512,6 +522,26 @@ mod tests {
             d.params().keys().cloned().collect::<Vec<_>>(),
             ["A", "B", "C", "D", "E"]
         );
+    }
+
+    #[test]
+    fn lost_request_list_is_sent_again() {
+        let t0 = Instant::now();
+        let (mut d, _) = ParamDownload::start((1, 1), DownloadConfig::default(), t0);
+        assert!(d.poll(t0 + Duration::from_millis(400)).is_empty());
+        let again = d.poll(t0 + Duration::from_millis(500));
+        assert!(
+            matches!(again[..], [Message::ParamRequestList(_)]),
+            "{again:?}"
+        );
+        assert!(
+            d.poll(t0 + Duration::from_millis(800)).is_empty(),
+            "not every poll"
+        );
+        assert_eq!(d.poll(t0 + Duration::from_millis(1000)).len(), 1);
+        // The second request got through.
+        d.on_message(&value("A", 0.0, 0, 1), t0 + Duration::from_millis(1100));
+        assert_eq!(d.status(), DownloadStatus::Complete);
     }
 
     #[test]
