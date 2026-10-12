@@ -1255,6 +1255,21 @@ fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
             });
         println!("  source {sys}/{comp}: {n} frames{loss}");
     }
+    let lost_s = dc_core::CoreConfig::default().link_lost.as_secs_f64();
+    for (sys, gaps) in &s.link_gaps {
+        let lost = gaps.iter().filter(|g| g.1 > lost_s).count();
+        println!(
+            "  vehicle {sys}: {} heartbeat gaps over 1.5 s (STALE), {lost} over {lost_s:.0} s (LOST)",
+            gaps.len()
+        );
+        for (at, len) in gaps {
+            println!(
+                "    {}  {len:.1} s{}",
+                tlog::utc(*at),
+                if *len > lost_s { "  LOST" } else { "" }
+            );
+        }
+    }
     for ((sys, comp), r) in &s.radios {
         let sig = |v: Option<(u8, f64)>| {
             v.map_or("unknown".to_string(), |(lo, m)| {

@@ -44,6 +44,13 @@ pub struct Summary {
     pub flights: BTreeMap<u8, FlightStats>,
     /// Telemetry radio reports (`RADIO_STATUS`) per sender.
     pub radios: BTreeMap<(u8, u8), RadioStats>,
+    /// Link gaps per vehicle: times (µs since the Unix epoch) and lengths (s) of each gap
+    /// between the autopilot's heartbeats longer than the core's STALE limit
+    /// (`CoreConfig::link_stale`, 1.5 s); those over `link_lost` (5 s) are what the live
+    /// core would have shown as LOST. A gap still open at the end of the recording is
+    /// included.
+    pub link_gaps: BTreeMap<u8, Vec<(u64, f64)>>,
+    last_heartbeat: BTreeMap<u8, u64>,
     /// Why reading stopped early (a truncated or corrupt record), if it did.
     pub stopped: Option<String>,
 }
@@ -240,6 +247,18 @@ pub fn summarise(input: impl Read) -> io::Result<Summary> {
         if let Message::RadioStatus(r) = &msg {
             s.radios.entry((sysid, compid)).or_default().add(r);
         }
+        if matches!(msg, Message::Heartbeat(_)) && compid == 1 {
+            let stale = dc_core::CoreConfig::default().link_stale;
+            if let Some(prev) = s.last_heartbeat.insert(sysid, t) {
+                let gap = t.saturating_sub(prev);
+                if gap > stale.as_micros() as u64 {
+                    s.link_gaps
+                        .entry(sysid)
+                        .or_default()
+                        .push((prev, gap as f64 / 1e6));
+                }
+            }
+        }
         let text = fleet.apply(sysid, compid, &msg, at);
         let mut event = |text: String| {
             s.events.push(Event {
@@ -302,6 +321,15 @@ pub fn summarise(input: impl Read) -> io::Result<Summary> {
         }
     }
     if let Some((_, end)) = s.span {
+        let stale = dc_core::CoreConfig::default().link_stale.as_micros() as u64;
+        for (sys, last) in &s.last_heartbeat {
+            if end.saturating_sub(*last) > stale {
+                s.link_gaps
+                    .entry(*sys)
+                    .or_default()
+                    .push((*last, end.saturating_sub(*last) as f64 / 1e6));
+            }
+        }
         for f in s.flights.values_mut() {
             if let Some(since) = f.armed_since {
                 f.armed_s += end.saturating_sub(since) as f64 / 1e6;
@@ -684,6 +712,25 @@ mod tests {
         assert_eq!((r.margin, r.rem_margin), (Some(60), Some(130)));
         assert_eq!(r.rx_errors, 4 + 2);
         assert_eq!(r.min_txbuf, Some(90));
+    }
+
+    #[test]
+    fn heartbeat_gaps_are_link_drops() {
+        let s = 1_000_000;
+        // Heartbeats every second; a 3 s gap (STALE), a 7 s gap (LOST), then silence for 2 s
+        // to the end of the recording (another vehicle's frame).
+        let mut recs: Vec<(u64, u8, Message)> = [0, 1, 4, 11, 12]
+            .iter()
+            .map(|t| (t * s, 1, hb(0, false)))
+            .collect();
+        recs.push((14 * s, 2, hb(0, false))); // component 2: not the autopilot
+        let sum = summarise(&tlog(&recs)[..]).unwrap();
+        assert_eq!(
+            sum.link_gaps[&1],
+            [(s, 3.0), (4 * s, 7.0), (12 * s, 2.0)],
+            "{:?}",
+            sum.link_gaps
+        );
     }
 
     #[test]
