@@ -12,6 +12,8 @@
 //! dc-cli mission compare plan.waypoints --connect tcp:127.0.0.1:5760
 //! dc-cli tlog info flight.tlog
 //! dc-cli tlog export flight.tlog --gpx flight.gpx [--kml flight.kml]
+//! dc-cli tlog params flight.tlog [--out flight.param]
+//! dc-cli tlog mission flight.tlog [--out flight.waypoints]
 //! dc-cli log export flight.bin --gpx flight.gpx [--kml flight.kml]
 //! ```
 //!
@@ -172,6 +174,25 @@ enum TlogCmd {
     Info {
         /// The .tlog file.
         file: std::path::PathBuf,
+    },
+    /// Parameters the recording saw (PARAM_VALUE, last value per name) as a .param file.
+    Params {
+        /// The .tlog file.
+        file: std::path::PathBuf,
+        /// Output .param file (default: print).
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+        /// Vehicle system id (default: the first that sent parameters).
+        #[arg(long)]
+        vehicle: Option<u8>,
+    },
+    /// The last complete mission in the recording (a download or an upload) as .waypoints.
+    Mission {
+        /// The .tlog file.
+        file: std::path::PathBuf,
+        /// Output .waypoints file (default: print).
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
     },
     /// Export the flight track (GLOBAL_POSITION_INT) as GPX and/or KML.
     Export {
@@ -536,6 +557,33 @@ fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
             kml,
             vehicle,
         } => return tlog_export(file, gpx.as_deref(), kml.as_deref(), *vehicle),
+        TlogCmd::Params { file, out, vehicle } => {
+            let f = std::fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()))?;
+            let (sys, p) = tlog::params(std::io::BufReader::new(f), *vehicle)
+                .map_err(|e| format!("{}: {e}", file.display()))?
+                .ok_or_else(|| format!("{}: no PARAM_VALUE in this recording", file.display()))?;
+            let text = to_param_file(&p);
+            return write_or_print(
+                out.as_deref(),
+                &text,
+                &format!("{} parameters from system {sys}", p.len()),
+            );
+        }
+        TlogCmd::Mission { file, out } => {
+            let f = std::fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()))?;
+            let ((sys, comp), items) = tlog::mission(std::io::BufReader::new(f))
+                .map_err(|e| format!("{}: {e}", file.display()))?
+                .ok_or_else(|| {
+                    format!("{}: no complete mission in this recording", file.display())
+                })?;
+            print_stats(&items);
+            let text = protocols::wpl::to_string(&items);
+            return write_or_print(
+                out.as_deref(),
+                &text,
+                &format!("{} items sent by {sys}/{comp}", items.len()),
+            );
+        }
     };
     let f = std::fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()))?;
     let s = tlog::summarise(std::io::BufReader::new(f))
@@ -574,6 +622,21 @@ fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
     }
     if let Some(why) = &s.stopped {
         eprintln!("warning: stopped early: {why}");
+    }
+    Ok(())
+}
+
+/// Write `text` to `out`, or print it; `what` describes it on stderr.
+fn write_or_print(out: Option<&std::path::Path>, text: &str, what: &str) -> Result<(), String> {
+    match out {
+        Some(p) => {
+            std::fs::write(p, text).map_err(|e| format!("{}: {e}", p.display()))?;
+            eprintln!("wrote {} ({what})", p.display());
+        }
+        None => {
+            print!("{text}");
+            eprintln!("{what}");
+        }
     }
     Ok(())
 }

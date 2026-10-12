@@ -8,6 +8,7 @@ use std::io::{self, Read};
 use std::time::{Duration, Instant};
 
 use dc_core::Fleet;
+use mavlink_codec::Message;
 use recorder::TlogReader;
 
 /// What happened, at microseconds since the Unix epoch.
@@ -120,6 +121,106 @@ pub fn summarise(input: impl Read) -> io::Result<Summary> {
     Ok(s)
 }
 
+/// The parameters a recording saw from one vehicle's autopilot (`PARAM_VALUE`, last value
+/// per name), as Mission Planner's "tlog → param" does. Default vehicle: the first that sent
+/// any. Returns the system id and the parameters.
+pub fn params(
+    input: impl Read,
+    vehicle: Option<u8>,
+) -> io::Result<Option<(u8, BTreeMap<String, protocols::params::Param>)>> {
+    let mut r = TlogReader::new(input);
+    let mut chosen = vehicle;
+    let mut out = BTreeMap::new();
+    while let Ok(Some(rec)) = r.next_record() {
+        let f = &rec.frame;
+        if f.compid() != 1 {
+            // Autopilot component only (vehicle::AUTOPILOT_COMPID).
+
+            continue;
+        }
+        let Ok(Message::ParamValue(p)) = f.decode() else {
+            continue;
+        };
+        if *chosen.get_or_insert(f.sysid()) != f.sysid() {
+            continue;
+        }
+        out.insert(
+            protocols::params::decode_id(&p.param_id),
+            protocols::params::Param {
+                value: p.param_value,
+                ty: p.param_type,
+                index: p.param_index,
+            },
+        );
+    }
+    Ok(chosen.map(|s| (s, out)))
+}
+
+/// A mission and who sent it: (system id, component id).
+pub type SentMission = ((u8, u8), Vec<dc_core::MissionItem>);
+
+/// The last complete mission seen in a recording (`MISSION_COUNT` then every item, from one
+/// sender, mission type 0): the vehicle's answer to a download, or the GCS's upload. Items
+/// in `MISSION_ITEM` (not `_INT`) are converted as ArduPilot does (x, y × 1e7 for commands
+/// with a location). Returns the sender and the items.
+pub fn mission(input: impl Read) -> io::Result<Option<SentMission>> {
+    use protocols::mission::{MissionItem, has_location};
+    let mut r = TlogReader::new(input);
+    // Per sender: the announced count and the items so far.
+    let mut open: BTreeMap<(u8, u8), (u16, BTreeMap<u16, MissionItem>)> = BTreeMap::new();
+    let mut last = None;
+    while let Ok(Some(rec)) = r.next_record() {
+        let f = &rec.frame;
+        let from = (f.sysid(), f.compid());
+        let (seq, item) = match f.decode() {
+            Ok(Message::MissionCount(c)) if c.mission_type == 0 => {
+                if c.count == 0 {
+                    // An empty mission is complete as announced.
+                    last = Some((from, Vec::new()));
+                    open.remove(&from);
+                } else {
+                    open.insert(from, (c.count, BTreeMap::new()));
+                }
+                continue;
+            }
+            Ok(Message::MissionItemInt(m)) if m.mission_type == 0 => {
+                (m.seq, MissionItem::from_message(&m))
+            }
+            Ok(Message::MissionItem(m)) if m.mission_type == 0 => {
+                let scale = |v: f32| {
+                    if has_location(m.command) {
+                        (f64::from(v) * 1e7).round() as i32
+                    } else {
+                        v as i32
+                    }
+                };
+                let item = MissionItem {
+                    frame: m.frame,
+                    command: m.command,
+                    params: [m.param1, m.param2, m.param3, m.param4],
+                    x: scale(m.x),
+                    y: scale(m.y),
+                    z: m.z,
+                    autocontinue: m.autocontinue != 0,
+                };
+                (m.seq, item)
+            }
+            _ => continue,
+        };
+        let Some((count, items)) = open.get_mut(&from) else {
+            continue;
+        };
+        if seq < *count {
+            items.insert(seq, item);
+        }
+        if items.len() == usize::from(*count) {
+            last = Some((from, items.values().copied().collect()));
+            open.remove(&from);
+        }
+    }
+    Ok(last)
+}
+
 /// `YYYY-MM-DD HH:MM:SS.mmm` UTC.
 pub fn utc(unix_us: u64) -> String {
     let secs = unix_us / 1_000_000;
@@ -224,6 +325,58 @@ mod tests {
         );
         assert_eq!(s.stopped, None);
         assert_eq!(utc(t0), "2025-10-09 08:53:20.000");
+    }
+
+    #[test]
+    fn extracts_params_and_the_last_complete_mission() {
+        use mavlink_codec::messages::{MissionCount, MissionItemInt, ParamValue};
+        let pv = |name: &str, v: f32| {
+            Message::ParamValue(ParamValue {
+                param_id: protocols::params::encode_id(name),
+                param_value: v,
+                param_type: 9,
+                param_count: 2,
+                param_index: 0,
+            })
+        };
+        let item = |seq: u16, x: i32| {
+            Message::MissionItemInt(MissionItemInt {
+                seq,
+                command: 16,
+                frame: 3,
+                x,
+                y: 1_491_652_300,
+                z: 20.0,
+                ..Default::default()
+            })
+        };
+        let count = |n: u16| {
+            Message::MissionCount(MissionCount {
+                count: n,
+                ..Default::default()
+            })
+        };
+        let bytes = tlog(&[
+            (1, 1, pv("WP_SPD", 5.0)),
+            (2, 1, pv("WP_SPD", 6.5)),
+            (3, 1, pv("RTL_ALT", 1500.0)),
+            (4, 1, count(2)),
+            (5, 1, item(0, -353_632_610)),
+            (6, 1, item(1, -353_622_610)),
+            (7, 1, count(3)), // a later download, cut short: not complete
+            (8, 1, item(0, -353_632_610)),
+        ]);
+        let (sys, p) = params(&bytes[..], None).unwrap().unwrap();
+        assert_eq!(sys, 1);
+        assert_eq!(p["WP_SPD"].value, 6.5, "last value wins");
+        assert_eq!(p.len(), 2);
+        let (from, m) = mission(&bytes[..]).unwrap().unwrap();
+        assert_eq!((from, m.len()), ((1, 1), 2));
+        assert_eq!(m[1].x, -353_622_610);
+        // A later empty mission is the last complete one.
+        let mut more = bytes.clone();
+        more.extend(tlog(&[(9, 1, count(0))]));
+        assert_eq!(mission(&more[..]).unwrap().unwrap().1.len(), 0);
     }
 
     #[test]
