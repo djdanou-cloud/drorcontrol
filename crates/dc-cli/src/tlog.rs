@@ -37,8 +37,33 @@ pub struct Summary {
     pub events: Vec<Event>,
     /// Highest altitude above home per system, m.
     pub max_alt_rel_m: BTreeMap<u8, f32>,
+    /// Armed time, ground speed and distance per system.
+    pub flights: BTreeMap<u8, FlightStats>,
     /// Why reading stopped early (a truncated or corrupt record), if it did.
     pub stopped: Option<String>,
+}
+
+/// What one vehicle did while armed, from its heartbeats and `GLOBAL_POSITION_INT`.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct FlightStats {
+    /// Armed time, s (an armed period open at the end counts to the end of the recording).
+    pub armed_s: f64,
+    /// Times armed.
+    pub arms: u32,
+    /// Horizontal distance while armed, m.
+    pub distance_m: f64,
+    /// Highest ground speed, m/s.
+    pub max_speed_ms: f32,
+    armed_since: Option<u64>,
+    last_pos: Option<(f64, f64)>,
+}
+
+fn distance_m(a: (f64, f64), b: (f64, f64)) -> f64 {
+    const R: f64 = 6_371_008.8;
+    let (la1, la2) = (a.0.to_radians(), b.0.to_radians());
+    let h = ((la2 - la1) / 2.0).sin().powi(2)
+        + la1.cos() * la2.cos() * ((b.1 - a.1).to_radians() / 2.0).sin().powi(2);
+    2.0 * R * h.sqrt().asin()
 }
 
 #[derive(Default, PartialEq)]
@@ -111,11 +136,38 @@ pub fn summarise(input: impl Read) -> io::Result<Summary> {
             if prev.armed != Some(armed) {
                 event(if armed { "ARMED" } else { "disarmed" }.to_string());
                 prev.armed = Some(armed);
+                let f = s.flights.entry(sysid).or_default();
+                if armed {
+                    f.arms += 1;
+                    f.armed_since = Some(t);
+                } else if let Some(since) = f.armed_since.take() {
+                    f.armed_s += t.saturating_sub(since) as f64 / 1e6;
+                    f.last_pos = None;
+                }
             }
         }
         if let Some(p) = &v.position {
             let m = s.max_alt_rel_m.entry(sysid).or_insert(f32::MIN);
             *m = m.max(p.value.alt_rel_m);
+        }
+        if let (Message::GlobalPositionInt(_), Some(p)) = (&msg, &v.position) {
+            let f = s.flights.entry(sysid).or_default();
+            let speed = p.value.vel_ned[0].hypot(p.value.vel_ned[1]);
+            f.max_speed_ms = f.max_speed_ms.max(speed);
+            let here = (p.value.lat_deg, p.value.lon_deg);
+            if f.armed_since.is_some() && here != (0.0, 0.0) {
+                if let Some(last) = f.last_pos {
+                    f.distance_m += distance_m(last, here);
+                }
+                f.last_pos = Some(here);
+            }
+        }
+    }
+    if let Some((_, end)) = s.span {
+        for f in s.flights.values_mut() {
+            if let Some(since) = f.armed_since {
+                f.armed_s += end.saturating_sub(since) as f64 / 1e6;
+            }
         }
     }
     Ok(s)
@@ -308,6 +360,12 @@ mod tests {
         assert_eq!(s.sources[&(1, 1)], 8);
         assert_eq!(s.messages["HEARTBEAT"], 5);
         assert_eq!(s.max_alt_rel_m[&1], 15.5);
+        let f = &s.flights[&1];
+        assert_eq!(
+            (f.arms, f.armed_s),
+            (1, 7.0),
+            "armed at +2 s, disarmed at +9 s"
+        );
         let texts: Vec<&str> = s.events.iter().map(|e| e.text.as_str()).collect();
         assert_eq!(
             texts,

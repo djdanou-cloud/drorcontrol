@@ -681,6 +681,12 @@ fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
     for (sys, alt) in &s.max_alt_rel_m {
         println!("system {sys}: highest {alt:.1} m above home");
     }
+    for (sys, f) in &s.flights {
+        println!(
+            "system {sys}: armed {} times, {:.1} s; {:.0} m flown; top ground speed {:.1} m/s",
+            f.arms, f.armed_s, f.distance_m, f.max_speed_ms
+        );
+    }
     println!("timeline:");
     for e in &s.events {
         println!(
