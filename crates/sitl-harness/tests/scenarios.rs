@@ -1068,6 +1068,12 @@ async fn auto_mission_flight_reports_progress_to_landing() {
         hover.learned.is_some_and(|h| (0.2..0.6).contains(&h)),
         "{hover:?}"
     );
+    // The default tune follows its targets closely in this calm flight.
+    let att = logs::tuning::attitude_tracking(&log).expect("ATT in flight");
+    eprintln!("attitude tracking: {att:?}");
+    assert!(att.land_detector && att.samples > 100, "{att:?}");
+    assert!(att.roll.rms_deg < 2.0 && att.pitch.rms_deg < 2.0, "{att:?}");
+    assert!(att.yaw.rms_deg < 5.0, "{att:?}");
     // Only values the autopilot updates itself changed (STAT_* counters, the learned
     // MOT_THST_HOVER at disarm). STAT_DISTFLWN counts 3-D distance, so it reads a little
     // more than the horizontal distance computed from POS.

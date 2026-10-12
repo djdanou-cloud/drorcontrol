@@ -20,5 +20,6 @@ pub mod spectrum;
 #[cfg(test)]
 mod testlog;
 pub mod track;
+pub mod tuning;
 
 pub use dataflash::{Column, Format, Log};

@@ -306,6 +306,11 @@ enum LogCmd {
         /// Path to the .bin log.
         path: std::path::PathBuf,
     },
+    /// Attitude tracking while flying: desired minus achieved roll, pitch and yaw.
+    Attitude {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+    },
     /// Vibration spectrum (Welch FFT) of an IMU axis while armed, and its strongest peaks.
     Fft {
         /// Path to the .bin log.
@@ -1211,6 +1216,27 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                 println!(
                     "quad: clockwise motors (3, 4) {:+.1} points of output vs counter-clockwise (1, 2)",
                     d * 100.0
+                );
+            }
+        }
+        LogCmd::Attitude { path } => {
+            let log = open(path)?;
+            let a = logs::tuning::attitude_tracking(&log).ok_or("no ATT samples in flight")?;
+            println!(
+                "{} samples while {}",
+                a.samples,
+                if a.land_detector {
+                    "flying (land detector)"
+                } else {
+                    "armed (no land-detector events)"
+                }
+            );
+            for (name, e) in [("roll", a.roll), ("pitch", a.pitch), ("yaw", a.yaw)] {
+                println!(
+                    "  {name:<5} error rms {:5.2} deg, max {:6.2} deg at {:.1} s",
+                    e.rms_deg,
+                    e.max_deg,
+                    e.max_at_us as f64 / 1e6
                 );
             }
         }
