@@ -12,6 +12,7 @@
 pub mod altitude;
 pub mod battery;
 pub mod camera;
+pub mod cells;
 pub mod compass;
 pub mod dataflash;
 pub mod downsample;

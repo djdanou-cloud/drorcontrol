@@ -448,6 +448,11 @@ enum LogCmd {
         /// Path to the .bin log.
         path: std::path::PathBuf,
     },
+    /// Battery cell balance while flying (packs that report cell voltages).
+    Cells {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+    },
     /// Autopilot performance: loop rate and overruns, processor load, memory, internal errors.
     Perf {
         /// Path to the .bin log.
@@ -1128,6 +1133,27 @@ fn print_params_review(params: &std::collections::BTreeMap<String, f64>) {
         };
         println!("{tag}  {:<16} {}", f.param, f.text);
     }
+}
+
+fn print_log_cells(log: &logs::Log) -> Result<(), String> {
+    let packs = logs::cells::cell_balance(log);
+    if packs.is_empty() {
+        return Err("no cell voltages (BCL) while flying".into());
+    }
+    for p in packs {
+        println!(
+            "battery {}: {} cells, {} samples; spread mean {:.3} V, largest {:.3} V at {:.1} s; lowest cell {} at {:.3} V",
+            p.instance,
+            p.cells,
+            p.samples,
+            p.mean_spread_v,
+            p.max_spread_v,
+            p.max_spread_at_us as f64 / 1e6,
+            p.lowest_cell,
+            p.lowest_v
+        );
+    }
+    Ok(())
 }
 
 fn print_log_perf(log: &logs::Log) -> Result<(), String> {
@@ -2134,6 +2160,7 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                 ("Motors and hover", Box::new(|| print_log_motors(&log))),
                 ("Attitude tracking", Box::new(|| print_log_attitude(&log))),
                 ("Battery", Box::new(|| print_log_battery(&log, &0))),
+                ("Cell balance", Box::new(|| print_log_cells(&log))),
                 (
                     "Compass interference",
                     Box::new(|| print_log_compass(&log, &0)),
@@ -2207,6 +2234,7 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
         LogCmd::Altitude { path } => print_log_altitude(&open(path)?)?,
         LogCmd::Esc { path } => print_log_esc(&open(path)?)?,
         LogCmd::Perf { path } => print_log_perf(&open(path)?)?,
+        LogCmd::Cells { path } => print_log_cells(&open(path)?)?,
         LogCmd::Gps { path } => print_log_gps(&open(path)?)?,
         LogCmd::Compass { path, instance } => print_log_compass(&open(path)?, instance)?,
         LogCmd::Battery { path, instance } => print_log_battery(&open(path)?, instance)?,
