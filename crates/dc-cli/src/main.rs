@@ -443,6 +443,11 @@ enum LogCmd {
         /// Path to the .bin log.
         path: std::path::PathBuf,
     },
+    /// ESC telemetry while armed: RPM, error rate, temperature and current per ESC.
+    Esc {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+    },
     /// Compass interference: field strength against battery current while flying.
     Compass {
         /// Path to the .bin log.
@@ -1093,6 +1098,28 @@ fn print_log_notch(
             .map(|(k, v)| format!("{k} {}", *v as f32))
             .collect();
         println!("currently: {}", cur.join(", "));
+    }
+    Ok(())
+}
+
+fn print_log_esc(log: &logs::Log) -> Result<(), String> {
+    let stats = logs::esc::esc_stats(log);
+    if stats.is_empty() {
+        return Err("no ESC telemetry while armed".into());
+    }
+    for e in &stats {
+        let opt = |v: Option<f64>, unit: &str| v.map_or("-".into(), |v| format!("{v:.1} {unit}"));
+        println!(
+            "ESC {}: {} samples; RPM mean {:.0}, highest {:.0}; error rate mean {:.1} %, highest {:.1} %; temperature highest {}; current mean {}",
+            e.instance,
+            e.samples,
+            e.mean_rpm,
+            e.max_rpm,
+            e.mean_err_pct,
+            e.max_err_pct,
+            opt(e.max_temp_c, "C"),
+            opt(e.mean_current_a, "A")
+        );
     }
     Ok(())
 }
@@ -2058,6 +2085,7 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                     "Compass interference",
                     Box::new(|| print_log_compass(&log, &0)),
                 ),
+                ("ESC telemetry", Box::new(|| print_log_esc(&log))),
                 ("Wind", Box::new(|| print_log_wind(&log))),
                 ("GPS", Box::new(|| print_log_gps(&log))),
                 ("Altitude sources", Box::new(|| print_log_altitude(&log))),
@@ -2116,6 +2144,7 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
         LogCmd::Sensors { path } => print_log_sensors(&open(path)?)?,
         LogCmd::Wind { path } => print_log_wind(&open(path)?)?,
         LogCmd::Altitude { path } => print_log_altitude(&open(path)?)?,
+        LogCmd::Esc { path } => print_log_esc(&open(path)?)?,
         LogCmd::Gps { path } => print_log_gps(&open(path)?)?,
         LogCmd::Compass { path, instance } => print_log_compass(&open(path)?, instance)?,
         LogCmd::Battery { path, instance } => print_log_battery(&open(path)?, instance)?,

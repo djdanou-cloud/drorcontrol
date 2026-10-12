@@ -15,6 +15,7 @@ pub mod camera;
 pub mod compass;
 pub mod dataflash;
 pub mod downsample;
+pub mod esc;
 pub mod export;
 pub mod flight;
 pub mod gps;
