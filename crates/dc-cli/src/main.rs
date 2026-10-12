@@ -356,6 +356,11 @@ enum LogCmd {
         #[arg(long)]
         out: Option<std::path::PathBuf>,
     },
+    /// RC link: receiver RSSI and link quality while armed, radio failsafes, late frames.
+    Rc {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+    },
     /// Optical flow and rangefinders while flying: could the EKF use them?
     Sensors {
         /// Path to the .bin log.
@@ -1488,6 +1493,36 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                 &csv,
                 &format!("{} {msg} records", photos.len()),
             )?;
+        }
+        LogCmd::Rc { path } => {
+            let log = open(path)?;
+            let l = logs::rc::rc_link(&log);
+            let mm = |v: Option<(f64, f64)>| {
+                v.map_or("not reported".into(), |(m, lo)| {
+                    format!("mean {m:.0} %, lowest {lo:.0} %")
+                })
+            };
+            println!(
+                "while armed ({} samples): RSSI {}; link quality {}",
+                l.rssi_samples,
+                mm(l.rssi_pct),
+                mm(l.lq_pct)
+            );
+            println!(
+                "radio failsafes: {}; late frames: {}",
+                l.failsafes.len(),
+                l.late_frames
+            );
+            for (start, end) in &l.failsafes {
+                println!(
+                    "  failsafe at {:.1} s, {}",
+                    *start as f64 / 1e6,
+                    end.map_or("not resolved by the end of the log".into(), |e| format!(
+                        "resolved after {:.1} s",
+                        (e - start) as f64 / 1e6
+                    ))
+                );
+            }
         }
         LogCmd::Sensors { path } => {
             let log = open(path)?;
