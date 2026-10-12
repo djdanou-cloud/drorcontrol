@@ -301,6 +301,20 @@ enum LogCmd {
         /// Path to the .bin log.
         path: std::path::PathBuf,
     },
+    /// Vibration spectrum (Welch FFT) of an IMU axis while armed, and its strongest peaks.
+    Fft {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+        /// Message and field, e.g. ACC.AccX or GYR.GyrZ.
+        #[arg(long, default_value = "ACC.AccZ")]
+        field: String,
+        /// IMU instance.
+        #[arg(long, default_value_t = 0)]
+        imu: u8,
+        /// Samples per FFT segment (power of two).
+        #[arg(long, default_value_t = 1024)]
+        segment: usize,
+    },
     /// Every record of one message as CSV (all fields; text quoted).
     Csv {
         /// Path to the .bin log.
@@ -1047,6 +1061,48 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
             let log = open(path)?;
             for (name, n) in log.counts() {
                 println!("{name:<6} {n}");
+            }
+        }
+        LogCmd::Fft {
+            path,
+            field,
+            imu,
+            segment,
+        } => {
+            let log = open(path)?;
+            let (msg, f) = field
+                .split_once('.')
+                .ok_or("--field is MSG.FIELD, e.g. ACC.AccZ")?;
+            let c = log
+                .column(msg, f, Some(("I", f64::from(*imu))))
+                .ok_or_else(|| format!("{}: no {field} for IMU {imu}", path.display()))?;
+            let armed = logs::flight::armed_periods(&log);
+            let in_flight = |t: u64| {
+                armed.is_empty()
+                    || armed
+                        .iter()
+                        .any(|p| t >= p.start_us && p.end_us.is_none_or(|e| t <= e))
+            };
+            let (t, v): (Vec<u64>, Vec<f64>) = c
+                .time_us
+                .iter()
+                .zip(&c.values)
+                .filter(|(t, _)| in_flight(**t))
+                .map(|(t, v)| (*t, *v))
+                .unzip();
+            let sp = logs::spectrum::spectrum(&t, &v, *segment).ok_or_else(|| {
+                format!("{} samples: fewer than one segment of {segment}", v.len())
+            })?;
+            println!(
+                "{field} IMU {imu}: {} samples at {:.0} Hz{}, {} segments, {:.2} Hz bins",
+                v.len(),
+                sp.sample_rate_hz,
+                if armed.is_empty() { "" } else { " while armed" },
+                sp.segments,
+                sp.sample_rate_hz / *segment as f64
+            );
+            for (freq, p) in logs::spectrum::peaks(&sp, 5.0, 5) {
+                println!("  peak {freq:7.1} Hz  power {p:.3e}");
             }
         }
         LogCmd::Summary { path } => {

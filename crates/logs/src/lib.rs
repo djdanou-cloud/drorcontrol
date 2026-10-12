@@ -6,6 +6,7 @@
 //! * [`export`]: one message as CSV; the recorded parameters as a .param file.
 //! * [`flight`]: armed periods and flight summary, event timeline, in-flight parameter changes.
 //! * [`health`]: automatic checks (vibration, battery, EKF, errors) against sourced thresholds.
+//! * [`spectrum`]: IMU vibration spectrum (Welch FFT) and its peaks.
 //! * [`track`]: the flight track (EKF position) with UTC from the GPS clock.
 
 pub mod dataflash;
@@ -14,6 +15,7 @@ pub mod export;
 pub mod flight;
 pub mod health;
 mod params;
+pub mod spectrum;
 pub mod track;
 
 pub use dataflash::{Column, Format, Log};

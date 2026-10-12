@@ -820,9 +820,19 @@ async fn flight_with_gcs_failsafe_on_link_loss() {
 async fn auto_mission_flight_reports_progress_to_landing() {
     use dc_core::MissionState;
     use dc_core::{Command, CommandState, MissionItem, PositionTrust};
-    let Some(cfg) = SitlConfig::copter_or_skip() else {
+    let Some(mut cfg) = SitlConfig::copter_or_skip() else {
         return;
     };
+    // Simulated 37 Hz vibration on the X accelerometer while the motors run, for the
+    // spectrum check on the flight log (AP_InertialSensor_SITL: SIM_VIB_FREQ).
+    // LOG_BITMASK: Copter's default (180222, ArduCopter/config.h) plus IMU_RAW (1 << 19,
+    // defines.h), so the raw ACC samples are logged for that check.
+    cfg.params = vec![
+        ("SIM_VIB_FREQ_X".into(), 37.0),
+        // The vibration's amplitude follows the accelerometer noise level, 0 by default.
+        ("SIM_ACC1_RND".into(), 2.0),
+        ("LOG_BITMASK".into(), 704_510.0),
+    ];
     let sitl = Sitl::start(&cfg).unwrap();
     let core = core_on(sitl.addr()).await;
     assert_eq!(
@@ -1051,6 +1061,21 @@ async fn auto_mission_flight_reports_progress_to_landing() {
         "STAT_DISTFLWN grew by {flown:?} m; POS distance {:.0} m",
         s.distance_m
     );
+    // The vibration spectrum of the flight shows the simulated 37 Hz.
+    let period = s.armed[0];
+    let acc = log.column("ACC", "AccX", Some(("I", 0.0))).unwrap();
+    let (t, v): (Vec<u64>, Vec<f64>) = acc
+        .time_us
+        .iter()
+        .zip(&acc.values)
+        .filter(|(t, _)| **t >= period.start_us && period.end_us.is_none_or(|e| **t <= e))
+        .map(|(t, v)| (*t, *v))
+        .unzip();
+    let sp = logs::spectrum::spectrum(&t, &v, 1024).expect("enough samples");
+    let top = logs::spectrum::peaks(&sp, 5.0, 3);
+    eprintln!("ACC.AccX at {:.0} Hz: peaks {top:?}", sp.sample_rate_hz);
+    let bin = sp.sample_rate_hz / 1024.0;
+    assert!((top[0].0 - 37.0).abs() <= 2.0 * bin, "{top:?}");
     // The same progress arrived as events, for a UI that does not poll.
     let mut seen = Vec::new();
     while let Ok(e) = events.try_recv() {
