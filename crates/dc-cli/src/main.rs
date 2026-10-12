@@ -299,6 +299,8 @@ enum RemoteCmd {
     },
     /// The vehicle's recent STATUSTEXT lines (the "Messages" view), oldest first.
     Messages,
+    /// Photos the vehicle reported taking (CAMERA_FEEDBACK) as CSV, for geotagging.
+    Geotags,
     /// Print events (STATUSTEXT, links) for a while.
     Events {
         /// Seconds to listen.
@@ -1200,6 +1202,31 @@ async fn remote(url: &str, what: &RemoteCmd) -> Result<(), String> {
                 .collect();
             eprintln!("vehicle {}: {} {:?} items", list.sysid, items.len(), kind);
             print_mission(&items);
+        }
+        RemoteCmd::Geotags => {
+            let list = c
+                .get_geotags(pb::GetGeotagsRequest { sysid: 0 })
+                .await
+                .map_err(err)?
+                .into_inner();
+            println!("cam,img,time_usec,lat,lon,alt_msl_m,alt_rel_m,roll,pitch,yaw,flags");
+            for g in &list.geotags {
+                println!(
+                    "{},{},{},{:.7},{:.7},{:.2},{:.2},{:.2},{:.2},{:.2},{}",
+                    g.cam_idx,
+                    g.img_idx,
+                    g.time_usec,
+                    g.lat_deg,
+                    g.lon_deg,
+                    g.alt_msl_m,
+                    g.alt_rel_m,
+                    g.roll_deg,
+                    g.pitch_deg,
+                    g.yaw_deg,
+                    g.flags
+                );
+            }
+            eprintln!("vehicle {}: {} photos", list.sysid, list.geotags.len());
         }
         RemoteCmd::Messages => {
             let list = c

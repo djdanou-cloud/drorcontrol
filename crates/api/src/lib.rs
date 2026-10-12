@@ -391,6 +391,35 @@ impl CoreApi for CoreService {
         }))
     }
 
+    async fn get_geotags(
+        &self,
+        req: Request<pb::GetGeotagsRequest>,
+    ) -> Result<Response<pb::GeotagList>, Status> {
+        let sysid = self.pick_vehicle(req.into_inner().sysid)?;
+        let geotags = self
+            .core
+            .geotags(sysid)
+            .into_iter()
+            .map(|g| pb::Geotag {
+                time_usec: g.time_usec,
+                cam_idx: u32::from(g.cam_idx),
+                img_idx: u32::from(g.img_idx),
+                lat_deg: g.lat_deg,
+                lon_deg: g.lon_deg,
+                alt_msl_m: g.alt_msl_m,
+                alt_rel_m: g.alt_rel_m,
+                roll_deg: g.roll_deg,
+                pitch_deg: g.pitch_deg,
+                yaw_deg: g.yaw_deg,
+                flags: u32::from(g.flags),
+            })
+            .collect();
+        Ok(Response::new(pb::GeotagList {
+            sysid: u32::from(sysid),
+            geotags,
+        }))
+    }
+
     async fn get_messages(
         &self,
         req: Request<pb::GetMessagesRequest>,

@@ -175,6 +175,38 @@ impl fmt::Display for LinkSpec {
     }
 }
 
+/// Camera geotags kept per vehicle.
+pub const GEOTAG_LIMIT: usize = 20_000;
+
+/// One photo the autopilot reported taking (`CAMERA_FEEDBACK`, ArduPilot).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Geotag {
+    /// Host time of receipt.
+    pub received: SystemTime,
+    /// Image time from the autopilot, µs since the Unix epoch (0 if unknown).
+    pub time_usec: u64,
+    /// Camera and image index.
+    pub cam_idx: u8,
+    /// See `cam_idx`.
+    pub img_idx: u16,
+    /// Position, degrees.
+    pub lat_deg: f64,
+    /// See `lat_deg`.
+    pub lon_deg: f64,
+    /// Altitude above MSL and above home, m.
+    pub alt_msl_m: f32,
+    /// See `alt_msl_m`.
+    pub alt_rel_m: f32,
+    /// Camera attitude, degrees (earth frame; yaw true, 0–360).
+    pub roll_deg: f32,
+    /// See `roll_deg`.
+    pub pitch_deg: f32,
+    /// See `roll_deg`.
+    pub yaw_deg: f32,
+    /// `CAMERA_FEEDBACK_FLAGS` (0 photo, 1 video, 2 bad exposure, 3 closed loop, 4 open loop).
+    pub flags: u8,
+}
+
 /// STATUSTEXT lines kept per vehicle (Mission Planner's "Messages" tab).
 pub const MESSAGE_HISTORY: usize = 500;
 
@@ -521,6 +553,8 @@ pub struct Core {
     nav_trust: Arc<std::sync::Mutex<HashMap<u8, PositionTrust>>>,
     /// Recent STATUSTEXT per vehicle (kept outside the fleet, which is cloned per message).
     messages: Arc<std::sync::Mutex<HashMap<u8, std::collections::VecDeque<LoggedText>>>>,
+    /// Camera geotags per vehicle (outside the fleet for the same reason).
+    geotags: Arc<std::sync::Mutex<HashMap<u8, Vec<Geotag>>>>,
     parameters: Arc<parameters::ParameterState>,
     /// Held across opening a link, so concurrent connects cannot both pass the check.
     link_mode: Arc<tokio::sync::Mutex<LinkMode>>,
@@ -558,6 +592,7 @@ impl Core {
             audit,
             nav_trust: Arc::default(),
             messages: Arc::default(),
+            geotags: Arc::default(),
             parameters: Arc::default(),
             link_mode: Arc::default(),
         };
@@ -755,6 +790,9 @@ impl Core {
             self.request_streams(sysid, compid).await;
             self.request_banner(sysid, compid);
             self.request_version(sysid, compid);
+        }
+        if let Message::CameraFeedback(c) = &msg {
+            self.record_geotag(sysid, c);
         }
         if let Some(text) = text {
             // The firmware's version banner confirms it: from now on mode changes are named.
@@ -1013,6 +1051,45 @@ impl Core {
         let fleet = self.fleet();
         let v = fleet.get(sysid).filter(|v| v.heartbeat.is_some())?;
         Some(vehicle_link(v, Instant::now(), &self.cfg))
+    }
+
+    fn record_geotag(&self, sysid: u8, c: &mavlink_codec::messages::CameraFeedback) {
+        let g = Geotag {
+            received: SystemTime::now(),
+            time_usec: c.time_usec,
+            cam_idx: c.cam_idx,
+            img_idx: c.img_idx,
+            lat_deg: f64::from(c.lat) * 1e-7,
+            lon_deg: f64::from(c.lng) * 1e-7,
+            alt_msl_m: c.alt_msl,
+            alt_rel_m: c.alt_rel,
+            roll_deg: c.roll,
+            pitch_deg: c.pitch,
+            yaw_deg: c.yaw,
+            flags: c.flags,
+        };
+        let mut all = self.geotags.lock().unwrap_or_else(|e| e.into_inner());
+        let list = all.entry(sysid).or_default();
+        // A repeated report of the same image replaces the earlier one.
+        if let Some(old) = list
+            .iter_mut()
+            .rev()
+            .find(|o| (o.cam_idx, o.img_idx) == (g.cam_idx, g.img_idx))
+        {
+            *old = g;
+        } else if list.len() < GEOTAG_LIMIT {
+            list.push(g);
+        }
+    }
+
+    /// Photos `sysid` reported (CAMERA_FEEDBACK), in order, at most [`GEOTAG_LIMIT`].
+    pub fn geotags(&self, sysid: u8) -> Vec<Geotag> {
+        self.geotags
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&sysid)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// The last [`MESSAGE_HISTORY`] STATUSTEXT lines from `sysid`, oldest first.

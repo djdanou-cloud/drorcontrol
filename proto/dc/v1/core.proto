@@ -27,6 +27,8 @@ service Core {
   rpc DownloadItems(DownloadItemsRequest) returns (ItemList);
   // The last 500 STATUSTEXT lines from a vehicle, oldest first (the "Messages" view).
   rpc GetMessages(GetMessagesRequest) returns (MessageList);
+  // Photos the vehicle reported taking (CAMERA_FEEDBACK), in order (survey geotags).
+  rpc GetGeotags(GetGeotagsRequest) returns (GeotagList);
 }
 
 message GetInfoRequest {}
@@ -287,6 +289,29 @@ enum PositionTrust {
 message LandedState {
   uint32 age_ms = 1;
   uint32 landed_state = 2;  // MAV_LANDED_STATE: 0 undefined, 1 on ground, 2 in air, 3 takeoff, 4 landing
+}
+
+message GetGeotagsRequest {
+  uint32 sysid = 1;  // 0 = first vehicle heard
+}
+
+message Geotag {
+  uint64 time_usec = 1;  // image time from the autopilot (Unix epoch), 0 if unknown
+  uint32 cam_idx = 2;
+  uint32 img_idx = 3;
+  double lat_deg = 4;
+  double lon_deg = 5;
+  float alt_msl_m = 6;
+  float alt_rel_m = 7;
+  float roll_deg = 8;
+  float pitch_deg = 9;
+  float yaw_deg = 10;
+  uint32 flags = 11;     // CAMERA_FEEDBACK_FLAGS
+}
+
+message GeotagList {
+  uint32 sysid = 1;
+  repeated Geotag geotags = 2;
 }
 
 message GetMessagesRequest {
