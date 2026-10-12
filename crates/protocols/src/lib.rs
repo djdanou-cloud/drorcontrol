@@ -6,6 +6,7 @@
 pub mod audit;
 pub mod command;
 pub mod fence;
+pub mod kml;
 pub mod log_transfer;
 pub mod mission;
 pub mod params;

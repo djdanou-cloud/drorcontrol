@@ -270,8 +270,16 @@ enum MissionCmd {
     Survey {
         /// Polygon vertices as "lat,lon;lat,lon;..." (at least 3; southern latitudes start
         /// with a minus sign).
-        #[arg(long, allow_hyphen_values = true)]
-        polygon: String,
+        #[arg(
+            long,
+            allow_hyphen_values = true,
+            required_unless_present = "polygon_kml"
+        )]
+        polygon: Option<String>,
+        /// Read the polygon from a KML file instead (its first <Polygon>, e.g. drawn in
+        /// Google Earth).
+        #[arg(long, conflicts_with = "polygon")]
+        polygon_kml: Option<std::path::PathBuf>,
         /// Distance between lines, m (or worked out from --camera and --sidelap).
         #[arg(long, required_unless_present = "camera")]
         spacing: Option<f64>,
@@ -1622,6 +1630,23 @@ fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
 }
 
 /// Write `text` to `out`, or print it; `what` describes it on stderr.
+/// Polygon vertices from "lat,lon;lat,lon;...".
+fn parse_polygon(text: &str) -> Result<Vec<(f64, f64)>, String> {
+    text.split(';')
+        .map(|v| {
+            let (a, b) = v
+                .split_once(',')
+                .ok_or_else(|| format!("vertex {v:?}: expected lat,lon"))?;
+            let num = |t: &str| {
+                t.trim()
+                    .parse::<f64>()
+                    .map_err(|_| format!("vertex {v:?}: {t:?} is not a number"))
+            };
+            Ok((num(a)?, num(b)?))
+        })
+        .collect()
+}
+
 fn write_or_print(out: Option<&std::path::Path>, text: &str, what: &str) -> Result<(), String> {
     match out {
         Some(p) => {
@@ -1836,6 +1861,7 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
         }
         MissionCmd::Survey {
             polygon,
+            polygon_kml,
             spacing,
             camera,
             sidelap,
@@ -1882,20 +1908,18 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
                 (None, Some(fp)) => fp.spacing_m,
                 (None, None) => return Err("--spacing or --camera is needed".into()),
             };
-            let polygon = polygon
-                .split(';')
-                .map(|v| {
-                    let (a, b) = v
-                        .split_once(',')
-                        .ok_or_else(|| format!("vertex {v:?}: expected lat,lon"))?;
-                    let num = |t: &str| {
-                        t.trim()
-                            .parse::<f64>()
-                            .map_err(|_| format!("vertex {v:?}: {t:?} is not a number"))
-                    };
-                    Ok((num(a)?, num(b)?))
-                })
-                .collect::<Result<Vec<_>, String>>()?;
+            let polygon = match (polygon, polygon_kml) {
+                (_, Some(k)) => {
+                    let text =
+                        std::fs::read_to_string(k).map_err(|e| format!("{}: {e}", k.display()))?;
+                    let p = protocols::kml::first_polygon(&text)
+                        .map_err(|e| format!("{}: {e}", k.display()))?;
+                    eprintln!("{}: polygon of {} vertices", k.display(), p.len());
+                    p
+                }
+                (Some(p), None) => parse_polygon(p)?,
+                (None, None) => return Err("--polygon or --polygon-kml is needed".into()),
+            };
             let items = protocols::survey::mission(&protocols::survey::SurveyConfig {
                 polygon,
                 spacing_m: spacing,
