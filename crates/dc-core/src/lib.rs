@@ -175,6 +175,87 @@ impl fmt::Display for LinkSpec {
     }
 }
 
+/// Frames received and lost from one (system, component), from MAVLink sequence numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct StreamQuality {
+    /// Frames received since the first one.
+    pub received: u64,
+    /// Frames missing from the sequence since the first one.
+    pub lost: u64,
+    /// Received and lost over the last [`QUALITY_WINDOW`].
+    pub recent_received: u32,
+    /// See `recent_received`.
+    pub recent_lost: u32,
+}
+
+impl StreamQuality {
+    /// Loss over the recent window, percent (`None` before any frame in it).
+    pub fn recent_loss_pct(&self) -> Option<f32> {
+        let n = self.recent_received + self.recent_lost;
+        (n > 0).then(|| self.recent_lost as f32 * 100.0 / n as f32)
+    }
+}
+
+/// Window for [`StreamQuality::recent_loss_pct`].
+pub const QUALITY_WINDOW: Duration = Duration::from_secs(10);
+
+/// Sequence tracking for one (system, component).
+#[derive(Debug, Default)]
+struct SeqTracker {
+    last: Option<u8>,
+    total: StreamQuality,
+    /// Per-second buckets: (start, received, lost).
+    buckets: std::collections::VecDeque<(Instant, u32, u32)>,
+}
+
+impl SeqTracker {
+    fn on_frame(&mut self, seq: u8, now: Instant) {
+        // `last` is the newest sequence number seen. A frame ahead of it by n means n - 1
+        // frames lost; a frame behind it (by less than 128) arrived late, after being counted
+        // lost, so that loss is taken back; the same number again is a duplicate.
+        let (lost, late) = match self.last {
+            None => (0, false),
+            Some(last) => {
+                let ahead = seq.wrapping_sub(last);
+                match ahead {
+                    0 => return, // duplicate
+                    1..=127 => (u32::from(ahead - 1), false),
+                    _ => (0, true),
+                }
+            }
+        };
+        if !late {
+            self.last = Some(seq);
+        }
+        self.total.received += 1;
+        self.total.lost = (self.total.lost + u64::from(lost)).saturating_sub(u64::from(late));
+        match self.buckets.back_mut() {
+            Some(b) if now.duration_since(b.0) < Duration::from_secs(1) => {
+                b.1 += 1;
+                b.2 = (b.2 + lost).saturating_sub(u32::from(late));
+            }
+            _ => self.buckets.push_back((now, 1, lost)),
+        }
+        while self
+            .buckets
+            .front()
+            .is_some_and(|b| now.duration_since(b.0) > QUALITY_WINDOW)
+        {
+            self.buckets.pop_front();
+        }
+    }
+
+    fn quality(&self, now: Instant) -> StreamQuality {
+        let mut q = self.total;
+        let recent = self
+            .buckets
+            .iter()
+            .filter(|b| now.duration_since(b.0) <= QUALITY_WINDOW);
+        (q.recent_received, q.recent_lost) = recent.fold((0, 0), |(r, l), b| (r + b.1, l + b.2));
+        q
+    }
+}
+
 /// A change in mission progress.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MissionChange {
@@ -571,6 +652,8 @@ pub struct Core {
     nav_trust: Arc<std::sync::Mutex<HashMap<u8, PositionTrust>>>,
     /// Recent STATUSTEXT per vehicle (kept outside the fleet, which is cloned per message).
     messages: Arc<std::sync::Mutex<HashMap<u8, std::collections::VecDeque<LoggedText>>>>,
+    /// MAVLink sequence tracking per (system, component).
+    sequences: Arc<std::sync::Mutex<HashMap<(u8, u8), SeqTracker>>>,
     /// Camera geotags per vehicle (outside the fleet for the same reason).
     geotags: Arc<std::sync::Mutex<HashMap<u8, Vec<Geotag>>>>,
     parameters: Arc<parameters::ParameterState>,
@@ -611,6 +694,7 @@ impl Core {
             nav_trust: Arc::default(),
             messages: Arc::default(),
             geotags: Arc::default(),
+            sequences: Arc::default(),
             parameters: Arc::default(),
             link_mode: Arc::default(),
         };
@@ -766,9 +850,15 @@ impl Core {
     }
 
     async fn dispatch(&self, frame: &Frame) {
-        let Ok(msg) = frame.decode() else { return };
         let (sysid, compid) = (frame.sysid(), frame.compid());
         let now = Instant::now();
+        self.sequences
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry((sysid, compid))
+            .or_default()
+            .on_frame(frame.seq(), now);
+        let Ok(msg) = frame.decode() else { return };
         self.observe_parameter_safety(sysid, compid, &msg, now);
         let first_heartbeat = matches!(msg, Message::Heartbeat(ref h) if h.r#type != MavType::GCS.0)
             && self
@@ -1097,6 +1187,18 @@ impl Core {
         let fleet = self.fleet();
         let v = fleet.get(sysid).filter(|v| v.heartbeat.is_some())?;
         Some(vehicle_link(v, Instant::now(), &self.cfg))
+    }
+
+    /// Frames received and lost from each component of `sysid`, by component id.
+    pub fn stream_quality(&self, sysid: u8) -> Vec<(u8, StreamQuality)> {
+        let now = Instant::now();
+        self.sequences
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .filter(|((s, _), _)| *s == sysid)
+            .map(|((_, c), t)| (*c, t.quality(now)))
+            .collect()
     }
 
     fn record_geotag(&self, sysid: u8, c: &mavlink_codec::messages::CameraFeedback) {
@@ -1563,6 +1665,29 @@ impl Core {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sequence_gaps_count_as_loss_but_reorders_do_not() {
+        let t = Instant::now();
+        let mut s = SeqTracker::default();
+        for seq in [250u8, 251, 253, 254, 255, 0, 3] {
+            s.on_frame(seq, t);
+        }
+        // 252 and 1, 2 missing (wrapping through 255 -> 0).
+        let q = s.quality(t);
+        assert_eq!((q.received, q.lost), (7, 3));
+        s.on_frame(2, t); // late frame: it was counted lost, so that is taken back
+        assert_eq!(s.quality(t).lost, 2);
+        s.on_frame(4, t); // next in order: no loss, and no double count after the reorder
+        s.on_frame(4, t); // duplicate: ignored
+        let q = s.quality(t);
+        assert_eq!((q.received, q.lost), (9, 2));
+        assert_eq!(q.recent_loss_pct(), Some(2.0 * 100.0 / 11.0));
+        // Ten seconds later the window has moved on.
+        let later = t + Duration::from_secs(12);
+        s.on_frame(3, later);
+        assert_eq!(s.quality(later).recent_received, 1);
+    }
 
     #[test]
     fn parses_link_specs() {

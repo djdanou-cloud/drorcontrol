@@ -88,6 +88,15 @@ message Vehicle {
   repeated RangefinderState rangefinders = 19;
   optional TerrainState terrain = 20;
   optional AutopilotVersionState autopilot_version = 21;
+  // Frames received and lost per component of this system (MAVLink sequence numbers).
+  repeated StreamQualityState streams = 22;
+}
+
+message StreamQualityState {
+  uint32 compid = 1;
+  uint64 received = 2;
+  uint64 lost = 3;
+  optional float recent_loss_pct = 4;  // over the last 10 s
 }
 
 // From AUTOPILOT_VERSION (requested once on connect).

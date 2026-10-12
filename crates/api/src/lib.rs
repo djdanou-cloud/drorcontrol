@@ -95,6 +95,16 @@ pub fn vehicle_with_health(core: &Core, v: &VehicleState, now: Instant) -> pb::V
         } as i32,
         reasons: nav.reasons.iter().map(|r| r.to_string()).collect(),
     });
+    pb.streams = core
+        .stream_quality(v.sysid)
+        .into_iter()
+        .map(|(compid, q)| pb::StreamQualityState {
+            compid: u32::from(compid),
+            received: q.received,
+            lost: q.lost,
+            recent_loss_pct: q.recent_loss_pct(),
+        })
+        .collect();
     if let Some(l) = core.vehicle_link(v.sysid) {
         pb.link = link_to_pb(l) as i32;
     }
@@ -155,6 +165,7 @@ pub fn vehicle_to_pb(v: &VehicleState, now: Instant) -> pb::Vehicle {
         }),
         nav: None,
         link: 0,
+        streams: Vec::new(),
         traffic: v
             .traffic
             .values()

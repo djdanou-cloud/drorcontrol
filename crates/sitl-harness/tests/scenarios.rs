@@ -67,6 +67,12 @@ async fn connect_detects_the_vehicle_and_receives_telemetry() {
     let ext = core.fleet().get(1).unwrap().extended.clone().unwrap().value;
     assert_eq!(ext.landed, dc_core::LandedState::OnGround);
     assert_eq!(core.facts(1).landed_state.map(|(s, _)| s), Some(1));
+    // A direct link loses nothing: the sequence numbers have no gaps.
+    assert!(
+        core.stream_quality(1)
+            .iter()
+            .all(|(_, q)| q.lost == 0 && q.received > 0)
+    );
     // BATTERY_STATUS: SITL's simulated analog monitor measures the pack, not cells. Right
     // after boot it reports charge state UNHEALTHY with no voltage; wait for a reading.
     until(
@@ -301,6 +307,36 @@ async fn parameter_download_completes_through_30_percent_loss() {
     );
     assert_eq!(params.len(), total);
     assert!(dropped > 100, "the link really was lossy: {dropped}");
+    // The loss the core measures from the autopilot's sequence numbers matches the proxy's.
+    let q = core
+        .stream_quality(1)
+        .into_iter()
+        .find(|(c, _)| *c == 1)
+        .map(|(_, q)| q)
+        .unwrap();
+    let pct = q.lost as f64 * 100.0 / (q.received + q.lost) as f64;
+    let fwd = chaos
+        .stats()
+        .forwarded
+        .load(std::sync::atomic::Ordering::Relaxed);
+    eprintln!(
+        "measured loss {pct:.1} % ({} received, {} lost); proxy saw {} frames (both ways)",
+        q.received,
+        q.lost,
+        fwd + dropped
+    );
+    // At least the proxy's 30 %: the sequence also counts frames ArduPilot numbered but never
+    // sent (its output buffer fills while the jittered proxy reads slowly; the proxy saw far
+    // fewer frames than the sequence spans). That is loss as the GCS experiences it.
+    assert!(
+        pct >= 22.0,
+        "{pct:.1} % measured, the proxy alone dropped 30 %"
+    );
+    assert!(
+        q.received <= fwd,
+        "received {} > forwarded {fwd}",
+        q.received
+    );
 }
 
 /// A radio fade: heartbeats stop, the GCS shows STALE then LOST (never stale data as live),
