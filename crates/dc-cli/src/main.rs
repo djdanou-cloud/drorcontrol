@@ -153,6 +153,14 @@ struct VehicleArgs {
     wait: u64,
 }
 
+/// `--type` of `mission download`.
+#[derive(Clone, Copy, PartialEq, clap::ValueEnum)]
+enum ListKind {
+    Mission,
+    Fence,
+    Rally,
+}
+
 #[derive(Subcommand)]
 enum TlogCmd {
     /// Time span, systems, message counts, maximum altitude, and a timeline of mode changes,
@@ -169,7 +177,10 @@ enum MissionCmd {
     Download {
         #[command(flatten)]
         vehicle: VehicleArgs,
-        /// Write a .waypoints file instead of printing.
+        /// Which list: the mission, the geofence or the rally points.
+        #[arg(long = "type", value_enum, default_value_t = ListKind::Mission)]
+        kind: ListKind,
+        /// Write a .waypoints file instead of printing (mission only).
         #[arg(long)]
         out: Option<std::path::PathBuf>,
     },
@@ -494,8 +505,14 @@ fn print_mission(items: &[dc_core::MissionItem]) {
             .name()
             .map_or_else(|| format!("command {}", i.command), str::to_string);
         if protocols::mission::has_location(i.command) {
+            // Fence items carry the polygon's vertex count or the circle's radius in param1.
+            let p1 = if i.params[0] != 0.0 {
+                format!("  p1 {}", i.params[0])
+            } else {
+                String::new()
+            };
             println!(
-                "{seq:4}  {name:<28} frame {:2}  {:.7}, {:.7}  {} m",
+                "{seq:4}  {name:<28} frame {:2}  {:.7}, {:.7}  {} m{p1}",
                 i.frame,
                 f64::from(i.x) * 1e-7,
                 f64::from(i.y) * 1e-7,
@@ -507,7 +524,11 @@ fn print_mission(items: &[dc_core::MissionItem]) {
     }
 }
 
-async fn download_mission(cli: &Cli, v: &VehicleArgs) -> Result<Vec<dc_core::MissionItem>, String> {
+async fn download_mission(
+    cli: &Cli,
+    v: &VehicleArgs,
+    kind: dc_core::MissionType,
+) -> Result<Vec<dc_core::MissionItem>, String> {
     let core = start(cli, &v.connect).await?;
     let sysid = match v.target {
         Some(t) => t,
@@ -516,18 +537,34 @@ async fn download_mission(cli: &Cli, v: &VehicleArgs) -> Result<Vec<dc_core::Mis
             .await
             .ok_or_else(|| format!("no vehicle heartbeat on {} within {} s", v.connect, v.wait))?,
     };
-    eprintln!("vehicle {sysid}: downloading the mission…");
-    let (status, items) = core.download_mission((sysid, v.component)).await;
+    eprintln!("vehicle {sysid}: downloading {kind:?}…");
+    let (status, items) = core.download_items((sysid, v.component), kind).await;
     match status {
         dc_core::TransferStatus::Done => Ok(items),
-        s => Err(format!("mission download did not complete: {s:?}")),
+        s => Err(format!("{kind:?} download did not complete: {s:?}")),
     }
 }
 
 async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
     match what {
-        MissionCmd::Download { vehicle, out } => {
-            let items = download_mission(cli, vehicle).await?;
+        MissionCmd::Download { vehicle, kind, out } => {
+            let kind = match kind {
+                ListKind::Mission => dc_core::MissionType::Mission,
+                ListKind::Fence => dc_core::MissionType::Fence,
+                ListKind::Rally => dc_core::MissionType::Rally,
+            };
+            if kind != dc_core::MissionType::Mission {
+                // Mission Planner keeps fences and rally points in other file formats; until
+                // those are implemented, only list them.
+                if out.is_some() {
+                    return Err("--out writes .waypoints files, for --type mission only".into());
+                }
+                let items = download_mission(cli, vehicle, kind).await?;
+                eprintln!("{} {kind:?} items", items.len());
+                print_mission(&items);
+                return Ok(());
+            }
+            let items = download_mission(cli, vehicle, kind).await?;
             eprintln!("{} items (including home)", items.len());
             let text = protocols::wpl::to_string(&items);
             match out {
@@ -551,7 +588,7 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
         }
         MissionCmd::Compare { file, vehicle } => {
             let draft = read_mission(file)?;
-            let on_vehicle = download_mission(cli, vehicle).await?;
+            let on_vehicle = download_mission(cli, vehicle, dc_core::MissionType::Mission).await?;
             let diff = protocols::mission::verify(&draft, &on_vehicle, true);
             if diff.is_empty() {
                 println!("the vehicle holds this mission ({} items)", draft.len());

@@ -46,8 +46,9 @@ use protocols::command::{AuditEvent, CommandPolicy, LinkInfo, LinkState, Target}
 use protocols::mission::{
     self, MISSION_TYPE_MISSION, MissionDownload, MissionUpload, TransferConfig,
 };
-/// Mission types for [`Core::upload_mission`] and [`Core::download_mission`].
-pub use protocols::mission::{Mismatch, MissionItem, TransferStatus};
+/// Mission types for [`Core::upload_mission`], [`Core::download_mission`] and
+/// [`Core::download_items`].
+pub use protocols::mission::{Mismatch, MissionItem, MissionType, TransferStatus};
 pub use protocols::params::snapshot::ParamSnapshot;
 use protocols::params::{DownloadConfig, DownloadStatus, ParamDownload};
 /// Parameter values, reports and saved baselines for parameter write/rollback clients.
@@ -1061,9 +1062,18 @@ impl Core {
 
     /// Download the mission from `target`.
     pub async fn download_mission(&self, target: (u8, u8)) -> (TransferStatus, Vec<MissionItem>) {
+        self.download_items(target, MissionType::Mission).await
+    }
+
+    /// Download the mission, the geofence or the rally points from `target` (read-only).
+    pub async fn download_items(
+        &self,
+        target: (u8, u8),
+        kind: MissionType,
+    ) -> (TransferStatus, Vec<MissionItem>) {
         let (mut dl, first) = MissionDownload::start(
             target,
-            MISSION_TYPE_MISSION,
+            kind.mavlink(),
             TransferConfig::default(),
             Instant::now(),
         );

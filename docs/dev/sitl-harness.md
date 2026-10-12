@@ -6,7 +6,7 @@
 |---|---|
 | `Sitl` | Starts the pinned `arducopter` (Copter-4.7.1) headless in a temp dir with a wiped EEPROM; reads the TCP port from SITL's own log; kills it on drop |
 | `chaos::ChaosProxy` | Frame-aware TCP proxy: drop, duplicate, corrupt, delay and jitter (reorders) per frame from a logged seed; `blackout` (radio fade) and `cut` (connection drop) |
-| `tests/scenarios.rs` | 11 scenarios (incl. core-2's parameter write/rollback): connect + telemetry (+ landed state ON_GROUND); full parameter download; download through 30 % frame loss both ways (must complete); fade → STALE → LOST → CONNECTED; reconnect after a cut; firmware banner + named single-action mode change verified (ADR-0011); GPS failure → position UNTRUSTED warning (H16); mission upload through 20 % loss verified by read-back (H4); a real flight: GUIDED, arm and take off as single actions, a radio blackout during which the GCS shows LOST and the vehicle's own GCS failsafe flies RTL, then CONNECTED with the mode shown as RTL, landing and auto-disarm; an AUTO mission flight (take off, two waypoints, RTL) whose progress (`MISSION_CURRENT`, `MISSION_ITEM_REACHED`) the GCS follows item by item to MISSION_STATE_COMPLETE after landing |
+| `tests/scenarios.rs` | 12 scenarios (incl. core-2's parameter write/rollback): connect + telemetry (+ landed state ON_GROUND); full parameter download; download through 30 % frame loss both ways (must complete); fade → STALE → LOST → CONNECTED; reconnect after a cut; firmware banner + named single-action mode change verified (ADR-0011); GPS failure → position UNTRUSTED warning (H16); mission upload through 20 % loss verified by read-back (H4); a real flight: GUIDED, arm and take off as single actions, a radio blackout during which the GCS shows LOST and the vehicle's own GCS failsafe flies RTL, then CONNECTED with the mode shown as RTL, landing and auto-disarm; an AUTO mission flight (take off, two waypoints, RTL) whose progress (`MISSION_CURRENT`, `MISSION_ITEM_REACHED`) the GCS follows item by item to MISSION_STATE_COMPLETE after landing; geofence (polygon, return point, circle) and a rally point read back through the read-only download (set up with a raw upload: the product has no fence/rally upload) |
 
 ## Running
 
@@ -36,4 +36,4 @@ caches the built binary keyed on `scripts/build_sitl.sh` and the tag.
   harness has no RC input. At completion
   ArduPilot reports item 0 with MISSION_STATE_COMPLETE.
 * Not yet covered from plan 08 §2: other failsafes (RC, battery, EKF,
-  fence), calibration, logs and robustness suites; mission fence/rally; other vehicles; the YAML scenario DSL; nightly/weekly runs.
+  fence), calibration, logs and robustness suites; fence/rally upload (download is covered); other vehicles; the YAML scenario DSL; nightly/weekly runs.

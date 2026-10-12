@@ -876,3 +876,101 @@ async fn auto_mission_flight_reports_progress_to_landing() {
     })
     .await;
 }
+
+/// Test setup only: put a list on the vehicle with the raw mission protocol (the product has
+/// no fence or rally upload; a geofence is a failsafe boundary and needs its own safety
+/// review before it gets one).
+async fn raw_upload(core: &Core, kind: dc_core::MissionType, items: Vec<dc_core::MissionItem>) {
+    use protocols::mission::{MissionUpload, TransferConfig};
+    let mut rx = core.subscribe();
+    let (mut up, first) = MissionUpload::start(
+        (1, 1),
+        items,
+        kind.mavlink(),
+        TransferConfig::default(),
+        Instant::now(),
+    );
+    core.send(&first).await;
+    let t0 = Instant::now();
+    while matches!(up.status(), dc_core::TransferStatus::InProgress { .. }) {
+        assert!(
+            t0.elapsed() < Duration::from_secs(30),
+            "{kind:?} upload stuck"
+        );
+        let out = match tokio::time::timeout(Duration::from_millis(100), rx.recv()).await {
+            Ok(Ok(inc)) if inc.sysid == 1 && inc.compid == 1 => {
+                up.on_message(&inc.msg, Instant::now())
+            }
+            _ => up.poll(Instant::now()),
+        };
+        for m in out {
+            core.send(&m).await;
+        }
+    }
+    assert_eq!(
+        up.status(),
+        &dc_core::TransferStatus::Done,
+        "{kind:?} upload"
+    );
+}
+
+/// Geofence and rally points are read back as the vehicle holds them (read-only download,
+/// `dc-cli mission download --type fence|rally`).
+#[tokio::test(flavor = "multi_thread")]
+async fn fence_and_rally_points_are_downloaded() {
+    use dc_core::{MissionItem, MissionType, TransferStatus};
+    let Some(cfg) = SitlConfig::copter_or_skip() else {
+        return;
+    };
+    let sitl = Sitl::start(&cfg).unwrap();
+    let core = core_on(sitl.addr()).await;
+    assert_eq!(
+        core.wait_for_vehicle(Duration::from_secs(60)).await,
+        Some(1)
+    );
+    until(Duration::from_secs(30), "booted", || {
+        core.fleet()
+            .get(1)
+            .and_then(|v| v.heartbeat.clone())
+            .is_some_and(|h| h.value.system_status != 1)
+    })
+    .await;
+    let (lat, lon) = (-35.363261, 149.165230);
+    let at = |command: u16, frame: u8, dlat: f64, dlon: f64, p1: f32, z: f32| MissionItem {
+        frame,
+        command,
+        params: [p1, 0.0, 0.0, 0.0],
+        x: ((lat + dlat) * 1e7).round() as i32,
+        y: ((lon + dlon) * 1e7).round() as i32,
+        z,
+        autocontinue: false,
+    };
+    // A 4-vertex inclusion polygon (about 220 m x 180 m), a return point, a 30 m exclusion circle.
+    let fence = vec![
+        at(5001, 5, -0.001, -0.001, 4.0, 0.0),
+        at(5001, 5, 0.001, -0.001, 4.0, 0.0),
+        at(5001, 5, 0.001, 0.001, 4.0, 0.0),
+        at(5001, 5, -0.001, 0.001, 4.0, 0.0),
+        at(5000, 5, 0.0, 0.0005, 0.0, 0.0),
+        at(5003, 5, 0.0005, 0.0, 30.0, 0.0),
+    ];
+    let rally = vec![at(5100, 6, 0.0008, 0.0002, 0.0, 30.0)];
+    raw_upload(&core, MissionType::Fence, fence.clone()).await;
+    raw_upload(&core, MissionType::Rally, rally.clone()).await;
+
+    let (status, got) = core.download_items((1, 1), MissionType::Fence).await;
+    assert_eq!(status, TransferStatus::Done);
+    let key = |i: &MissionItem| (i.command, i.x, i.y, i.params[0]);
+    assert_eq!(
+        got.iter().map(key).collect::<Vec<_>>(),
+        fence.iter().map(key).collect::<Vec<_>>(),
+        "fence: command, position and param1 (vertex count / radius) as uploaded"
+    );
+    let (status, got) = core.download_items((1, 1), MissionType::Rally).await;
+    assert_eq!(status, TransferStatus::Done);
+    assert_eq!(got.len(), 1);
+    assert_eq!(
+        (got[0].command, got[0].x, got[0].y, got[0].z),
+        (5100, rally[0].x, rally[0].y, 30.0)
+    );
+}

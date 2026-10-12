@@ -24,6 +24,28 @@ use mavlink_codec::messages::{
 
 /// `MAV_MISSION_TYPE_MISSION`.
 pub const MISSION_TYPE_MISSION: u8 = 0;
+
+/// Which list a transfer is about (`MAV_MISSION_TYPE`). The same protocol carries all three.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MissionType {
+    /// The mission (on ArduPilot item 0 is home).
+    Mission,
+    /// Geofence: polygon vertices, circles and the return point (`FENCE_*` items).
+    Fence,
+    /// Rally points (`MAV_CMD_NAV_RALLY_POINT`).
+    Rally,
+}
+
+impl MissionType {
+    /// The `MAV_MISSION_TYPE` value.
+    pub fn mavlink(self) -> u8 {
+        match self {
+            MissionType::Mission => MISSION_TYPE_MISSION,
+            MissionType::Fence => 1,
+            MissionType::Rally => 2,
+        }
+    }
+}
 /// `MAV_MISSION_ACCEPTED`.
 const MISSION_ACCEPTED: u8 = 0;
 /// `MAV_MISSION_INVALID_SEQUENCE`: ArduPilot's answer to an out-of-sequence item. The upload
