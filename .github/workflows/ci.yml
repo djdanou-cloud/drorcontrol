@@ -57,6 +57,21 @@ jobs:
           rustup target add x86_64-apple-darwin
           cargo build --workspace --locked --target x86_64-apple-darwin
 
+      # Unsigned command-line tool for bench tests on real hardware (e.g. a Windows PC on a
+      # flight controller's USB port). Not a release: no signing, no installer.
+      - name: Build dc-cli (release)
+        run: cargo build --release --locked -p dc-cli
+
+      - name: Upload dc-cli
+        uses: actions/upload-artifact@v4
+        with:
+          name: dc-cli-${{ matrix.name }}
+          path: |
+            target/release/dc-cli
+            target/release/dc-cli.exe
+          if-no-files-found: error
+          retention-days: 14
+
   qml-tokens:
     name: qml-tokens (Qt 6.4, Linux)
     runs-on: ubuntu-24.04
