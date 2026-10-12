@@ -11,12 +11,14 @@
 //! dc-cli mission check plan.waypoints
 //! dc-cli mission compare plan.waypoints --connect tcp:127.0.0.1:5760
 //! dc-cli tlog info flight.tlog
+//! dc-cli tlog export flight.tlog --gpx flight.gpx [--kml flight.kml]
 //! ```
 //!
 //! Read-only by design for now: parameter writes and vehicle commands will be exposed only
 //! through the safety interlocks (`CommandPolicy`, plan 08 §4) once they exist.
 
 mod tlog;
+mod track;
 
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
@@ -169,6 +171,21 @@ enum TlogCmd {
     Info {
         /// The .tlog file.
         file: std::path::PathBuf,
+    },
+    /// Export the flight track (GLOBAL_POSITION_INT) as GPX and/or KML.
+    Export {
+        /// The .tlog file.
+        file: std::path::PathBuf,
+        /// Write a GPX 1.1 track.
+        #[arg(long)]
+        gpx: Option<std::path::PathBuf>,
+        /// Write a KML 2.2 line (Google Earth), altitude above MSL.
+        #[arg(long)]
+        kml: Option<std::path::PathBuf>,
+        /// Vehicle system id (default: the first with a position). Not `--sysid`, which
+        /// is our own MAVLink id.
+        #[arg(long)]
+        vehicle: Option<u8>,
     },
 }
 
@@ -465,7 +482,15 @@ fn load_params(path: &std::path::Path) -> Result<std::collections::BTreeMap<Stri
 }
 
 fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
-    let TlogCmd::Info { file } = what;
+    let file = match what {
+        TlogCmd::Info { file } => file,
+        TlogCmd::Export {
+            file,
+            gpx,
+            kml,
+            vehicle,
+        } => return tlog_export(file, gpx.as_deref(), kml.as_deref(), *vehicle),
+    };
     let f = std::fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()))?;
     let s = tlog::summarise(std::io::BufReader::new(f))
         .map_err(|e| format!("{}: {e}", file.display()))?;
@@ -503,6 +528,42 @@ fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
     }
     if let Some(why) = &s.stopped {
         eprintln!("warning: stopped early: {why}");
+    }
+    Ok(())
+}
+
+fn tlog_export(
+    file: &std::path::Path,
+    gpx: Option<&std::path::Path>,
+    kml: Option<&std::path::Path>,
+    sysid: Option<u8>,
+) -> Result<(), String> {
+    if gpx.is_none() && kml.is_none() {
+        return Err("nothing to write: give --gpx and/or --kml".into());
+    }
+    let f = std::fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()))?;
+    let (sys, points) = track::from_tlog(std::io::BufReader::new(f), sysid)
+        .map_err(|e| format!("{}: {e}", file.display()))?
+        .ok_or_else(|| format!("{}: no vehicle position in this recording", file.display()))?;
+    let name = format!(
+        "{} (system {sys})",
+        file.file_name()
+            .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+    );
+    let write = |path: &std::path::Path, text: String| {
+        std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+        eprintln!(
+            "wrote {} ({} points, system {sys})",
+            path.display(),
+            points.len()
+        );
+        Ok::<_, String>(())
+    };
+    if let Some(p) = gpx {
+        write(p, track::gpx(&name, &points))?;
+    }
+    if let Some(p) = kml {
+        write(p, track::kml(&name, &points))?;
     }
     Ok(())
 }
