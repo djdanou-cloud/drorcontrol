@@ -423,12 +423,18 @@ const ARDUPILOT_LOCATION_COMMANDS: [u16; 26] = [
     5003, 5004, 5000, 5100, 36,
 ];
 
+/// Whether ArduPilot treats `command`'s x and y as latitude and longitude
+/// (`AP_Mission::cmd_has_location`, 4.7.1). For other commands they are plain integers.
+pub fn has_location(command: u16) -> bool {
+    ARDUPILOT_LOCATION_COMMANDS.contains(&command)
+}
+
 /// The item as ArduPilot stores it, where its encoding is known to differ without changing
 /// meaning (checked against `AP_Mission.cpp` 4.7.1 and SITL). Everything else is compared
 /// as sent, so an unknown difference is reported, never assumed harmless.
 fn ardupilot_canonical(mut i: MissionItem) -> MissionItem {
     i.frame = normalise_frame(i.frame);
-    if !ARDUPILOT_LOCATION_COMMANDS.contains(&i.command) {
+    if !has_location(i.command) {
         (i.frame, i.x, i.y, i.z) = (0, 0, 0, 0.0);
     }
     if i.command == 19 {

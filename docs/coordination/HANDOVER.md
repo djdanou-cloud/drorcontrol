@@ -112,6 +112,8 @@ and the code are newer. Where either disagrees with an owner instruction, the ow
 | SR-05 alerts: Warning when a flight command ends unconfirmed, Caution for a ground command, Advisory when a mode is verified | `CommandStatus::alert`, `CoreEvent::Alert`, gRPC `AlertEvent` | `unconfirmed_mode_change_alerts_the_pilot` |
 | H16 navigation health mirrored from the autopilot's EKF (ArduPilot `FS_EKF_THRESH` rule) | `vehicle::nav`, `Core::nav_health` | SITL: GPS failed → UNTRUSTED in 7.5 s |
 | H4 mission upload verified by read-back; ArduPilot storage rules; refused while armed | `protocols::mission`, `Core::upload_mission` | 30 % loss × 20 seeds; SITL: 20 % loss, 14 items, 0 differences |
+| Mission progress (`MISSION_CURRENT`, `MISSION_ITEM_REACHED`) in `VehicleState` | `vehicle::MissionProgress` | SITL: AUTO mission flight followed item by item to COMPLETE |
+| Mission files (`QGC WPL 110`, Mission Planner `.waypoints`); `dc-cli mission download / check / compare` (read-only: no upload from the CLI) | `protocols::wpl`, `dc-cli` | unit tests; SITL: file round trip verifies against the vehicle |
 | Mac test runbook | [`../dev/mac-test-runbook.md`](../dev/mac-test-runbook.md) | — |
 
 ## 6. Waiting on humans

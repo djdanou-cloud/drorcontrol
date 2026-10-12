@@ -757,6 +757,14 @@ async fn auto_mission_flight_reports_progress_to_landing() {
     ];
     let report = core.upload_mission((1, 1), mission.clone()).await.unwrap();
     assert!(report.verified(), "{:?}", report.mismatches);
+    // Saved as a Mission Planner .waypoints file and read again, the mission still matches
+    // what the vehicle holds (what `dc-cli mission compare` checks).
+    let file = protocols::wpl::to_string(&mission);
+    let from_file = protocols::wpl::parse(&file).unwrap();
+    assert!(
+        protocols::mission::verify(&from_file, &report.on_vehicle, true).is_empty(),
+        "{file}"
+    );
     until(
         Duration::from_secs(10),
         "MISSION_CURRENT shows the mission",

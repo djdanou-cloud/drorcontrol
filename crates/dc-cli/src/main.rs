@@ -6,6 +6,9 @@
 //! dc-cli daemon    --connect tcp:127.0.0.1:5760 [--listen 127.0.0.1:50051]
 //! dc-cli remote    --grpc http://127.0.0.1:50051 vehicles|params|events
 //! dc-cli params-diff old.param flight.bin
+//! dc-cli mission download --connect tcp:127.0.0.1:5760 [--out plan.waypoints]
+//! dc-cli mission check plan.waypoints
+//! dc-cli mission compare plan.waypoints --connect tcp:127.0.0.1:5760
 //! ```
 //!
 //! Read-only by design for now: parameter writes and vehicle commands will be exposed only
@@ -108,6 +111,12 @@ enum Cmd {
         #[command(subcommand)]
         what: LogCmd,
     },
+    /// Mission files (QGC WPL 110, Mission Planner's .waypoints): download, check, compare.
+    /// Read-only: uploads stay behind the core's interlocks and are not offered here yet.
+    Mission {
+        #[command(subcommand)]
+        what: MissionCmd,
+    },
     /// Print a telemetry summary once per second.
     Telemetry {
         /// Link to open.
@@ -116,6 +125,48 @@ enum Cmd {
         /// Stop after this many seconds.
         #[arg(long, default_value_t = 10)]
         seconds: u64,
+    },
+}
+
+/// Which vehicle to talk to.
+#[derive(clap::Args)]
+struct VehicleArgs {
+    /// Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200.
+    #[arg(long)]
+    connect: LinkSpec,
+    /// Target system id (default: first vehicle heard).
+    #[arg(long)]
+    target: Option<u8>,
+    /// Target component id.
+    #[arg(long, default_value_t = 1)]
+    component: u8,
+    /// Seconds to wait for a vehicle heartbeat.
+    #[arg(long, default_value_t = 15)]
+    wait: u64,
+}
+
+#[derive(Subcommand)]
+enum MissionCmd {
+    /// Download the vehicle's mission and print it (or write a .waypoints file).
+    Download {
+        #[command(flatten)]
+        vehicle: VehicleArgs,
+        /// Write a .waypoints file instead of printing.
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
+    /// Read a .waypoints file and list its items (offline).
+    Check {
+        /// The file.
+        file: std::path::PathBuf,
+    },
+    /// Does the vehicle hold exactly this file's mission? Downloads and compares (home, item
+    /// 0, is not compared); exits with failure on any difference.
+    Compare {
+        /// The file.
+        file: std::path::PathBuf,
+        #[command(flatten)]
+        vehicle: VehicleArgs,
     },
 }
 
@@ -293,6 +344,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         Cmd::Remote { grpc, what } => remote(grpc, what).await,
         Cmd::Ports { watch, probe } => ports(*watch, probe.as_deref()),
         Cmd::Log { what } => log_cmd(what),
+        Cmd::Mission { what } => mission_cmd(&cli, what).await,
         Cmd::ParamsDiff { a, b } => params_diff(a, b),
         Cmd::Soak {
             tx,
@@ -366,6 +418,89 @@ fn load_params(path: &std::path::Path) -> Result<std::collections::BTreeMap<Stri
     } else {
         let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
         parse_param_file(&text).map_err(|e| format!("{}: {e}", path.display()))
+    }
+}
+
+fn read_mission(path: &std::path::Path) -> Result<Vec<dc_core::MissionItem>, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    protocols::wpl::parse(&text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+fn print_mission(items: &[dc_core::MissionItem]) {
+    for (seq, i) in items.iter().enumerate() {
+        let name = mavlink_codec::enums::MavCmd(i.command)
+            .name()
+            .map_or_else(|| format!("command {}", i.command), str::to_string);
+        if protocols::mission::has_location(i.command) {
+            println!(
+                "{seq:4}  {name:<28} frame {:2}  {:.7}, {:.7}  {} m",
+                i.frame,
+                f64::from(i.x) * 1e-7,
+                f64::from(i.y) * 1e-7,
+                i.z
+            );
+        } else {
+            println!("{seq:4}  {name:<28} params {:?}", i.params);
+        }
+    }
+}
+
+async fn download_mission(cli: &Cli, v: &VehicleArgs) -> Result<Vec<dc_core::MissionItem>, String> {
+    let core = start(cli, &v.connect).await?;
+    let sysid = match v.target {
+        Some(t) => t,
+        None => core
+            .wait_for_vehicle(Duration::from_secs(v.wait))
+            .await
+            .ok_or_else(|| format!("no vehicle heartbeat on {} within {} s", v.connect, v.wait))?,
+    };
+    eprintln!("vehicle {sysid}: downloading the mission…");
+    let (status, items) = core.download_mission((sysid, v.component)).await;
+    match status {
+        dc_core::TransferStatus::Done => Ok(items),
+        s => Err(format!("mission download did not complete: {s:?}")),
+    }
+}
+
+async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
+    match what {
+        MissionCmd::Download { vehicle, out } => {
+            let items = download_mission(cli, vehicle).await?;
+            eprintln!("{} items (including home)", items.len());
+            let text = protocols::wpl::to_string(&items);
+            match out {
+                Some(path) => {
+                    std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+                    eprintln!("wrote {}", path.display());
+                }
+                None => print!("{text}"),
+            }
+            Ok(())
+        }
+        MissionCmd::Check { file } => {
+            let items = read_mission(file)?;
+            print_mission(&items);
+            eprintln!(
+                "{}: {} items (including home), readable",
+                file.display(),
+                items.len()
+            );
+            Ok(())
+        }
+        MissionCmd::Compare { file, vehicle } => {
+            let draft = read_mission(file)?;
+            let on_vehicle = download_mission(cli, vehicle).await?;
+            let diff = protocols::mission::verify(&draft, &on_vehicle, true);
+            if diff.is_empty() {
+                println!("the vehicle holds this mission ({} items)", draft.len());
+                return Ok(());
+            }
+            for m in &diff {
+                let at = m.seq.map_or_else(String::new, |s| format!("item {s} "));
+                println!("{at}{}: file {}, vehicle {}", m.field, m.draft, m.vehicle);
+            }
+            Err(format!("{} differences", diff.len()))
+        }
     }
 }
 
