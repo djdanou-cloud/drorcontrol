@@ -13,6 +13,7 @@ tokio.workspace = true
 [dev-dependencies]
 dc-core = { path = "../dc-core" }
 protocols = { path = "../protocols" }
+logs = { path = "../logs" }
 
 [lints]
 workspace = true

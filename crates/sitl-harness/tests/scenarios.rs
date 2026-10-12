@@ -1030,3 +1030,67 @@ async fn adsb_traffic_is_reported() {
         assert!(t.alt_msl_m.is_some(), "{t:?}");
     }
 }
+
+/// The vehicle's own dataflash log (SITL writes it like a flight controller's SD card, here
+/// while disarmed with LOG_DISARMED=1) gives a track near home with UTC times from the GPS
+/// clock, and its health checks run on real records.
+#[tokio::test(flavor = "multi_thread")]
+async fn dataflash_log_gives_a_track_with_gps_time() {
+    use dc_core::PositionTrust;
+    let Some(mut cfg) = SitlConfig::copter_or_skip() else {
+        return;
+    };
+    cfg.params = vec![("LOG_DISARMED".into(), 1.0)];
+    let sitl = Sitl::start(&cfg).unwrap();
+    let core = core_on(sitl.addr()).await;
+    assert_eq!(
+        core.wait_for_vehicle(Duration::from_secs(60)).await,
+        Some(1)
+    );
+    until(Duration::from_secs(90), "position good (EKF)", || {
+        core.nav_health(1).trust == PositionTrust::Good
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(10)).await;
+
+    let logs_dir = sitl.dir().join("logs");
+    let bin = std::fs::read_dir(&logs_dir)
+        .unwrap_or_else(|e| panic!("{}: {e}", logs_dir.display()))
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("bin")))
+        .max_by_key(|p| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0))
+        .expect("a .BIN log");
+    let log = logs::Log::open(&bin).unwrap();
+    let track = logs::track::track(&log);
+    assert!(track.len() > 20, "{} points", track.len());
+    let last = track.last().unwrap();
+    assert!(
+        (last.lat + 35.363_261).abs() < 1e-4 && (last.lon - 149.165_23).abs() < 1e-4,
+        "{last:?}"
+    );
+    assert!((last.alt_msl - 584.0).abs() < 5.0, "{last:?}");
+    // SITL's GPS clock follows the host clock: the log's UTC is today's.
+    let now_us = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_micros() as u64;
+    let utc = last.unix_us.expect("GPS time reference");
+    assert!(
+        utc.abs_diff(now_us) < 3_600_000_000,
+        "log UTC {utc} vs now {now_us}"
+    );
+    let findings = logs::health::assess(&log);
+    assert!(
+        findings.iter().any(|f| f.check == "vibration"),
+        "{findings:?}"
+    );
+    eprintln!(
+        "{}: {} track points; health {:?}",
+        bin.display(),
+        track.len(),
+        findings
+            .iter()
+            .map(|f| (f.check, f.level))
+            .collect::<Vec<_>>()
+    );
+}

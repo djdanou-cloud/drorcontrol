@@ -4,10 +4,12 @@
 //! * [`downsample`]: LTTB and MinMaxLTTB for plotting millions of points.
 //! * [`Log::params`]: parameter values recorded in the log.
 //! * [`health`]: automatic checks (vibration, battery, EKF, errors) against sourced thresholds.
+//! * [`track`]: the flight track (EKF position) with UTC from the GPS clock.
 
 pub mod dataflash;
 pub mod downsample;
 pub mod health;
 mod params;
+pub mod track;
 
 pub use dataflash::{Column, Format, Log};

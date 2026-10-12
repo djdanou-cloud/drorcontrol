@@ -1252,6 +1252,7 @@ name = "sitl-harness"
 version = "0.0.0"
 dependencies = [
  "dc-core",
+ "logs",
  "mavlink-codec",
  "protocols",
  "tokio",

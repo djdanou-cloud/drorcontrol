@@ -12,6 +12,7 @@
 //! dc-cli mission compare plan.waypoints --connect tcp:127.0.0.1:5760
 //! dc-cli tlog info flight.tlog
 //! dc-cli tlog export flight.tlog --gpx flight.gpx [--kml flight.kml]
+//! dc-cli log export flight.bin --gpx flight.gpx [--kml flight.kml]
 //! ```
 //!
 //! Read-only by design for now: parameter writes and vehicle commands will be exposed only
@@ -229,6 +230,17 @@ enum LogCmd {
     Health {
         /// Path to the .bin log.
         path: std::path::PathBuf,
+    },
+    /// Export the flight track (EKF position, UTC from the GPS clock) as GPX and/or KML.
+    Export {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+        /// Write a GPX 1.1 track.
+        #[arg(long)]
+        gpx: Option<std::path::PathBuf>,
+        /// Write a KML 2.2 line (Google Earth), altitude above MSL.
+        #[arg(long)]
+        kml: Option<std::path::PathBuf>,
     },
     /// Extract MSG.FIELD and downsample it (MinMaxLTTB) for plotting.
     Plot {
@@ -733,6 +745,34 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
             let log = open(path)?;
             for (name, n) in log.counts() {
                 println!("{name:<6} {n}");
+            }
+        }
+        LogCmd::Export { path, gpx, kml } => {
+            if gpx.is_none() && kml.is_none() {
+                return Err("nothing to write: give --gpx and/or --kml".into());
+            }
+            let log = open(path)?;
+            let points = track::from_bin(&log);
+            if points.is_empty() {
+                return Err(format!(
+                    "{}: no POS records with a position",
+                    path.display()
+                ));
+            }
+            if points[0].unix_us.is_none() {
+                eprintln!("note: no GPS time in this log; the GPX has no timestamps");
+            }
+            let name = path
+                .file_name()
+                .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+            for (out, text) in [
+                (gpx, gpx.as_ref().map(|_| track::gpx(&name, &points))),
+                (kml, kml.as_ref().map(|_| track::kml(&name, &points))),
+            ] {
+                if let (Some(p), Some(t)) = (out, text) {
+                    std::fs::write(p, t).map_err(|e| format!("{}: {e}", p.display()))?;
+                    eprintln!("wrote {} ({} points)", p.display(), points.len());
+                }
             }
         }
         LogCmd::Health { path } => {

@@ -1,5 +1,5 @@
-//! Flight track export from a `.tlog`: GPX 1.1 and KML 2.2 (Google Earth), as Mission
-//! Planner offers.
+//! Flight track export: GPX 1.1 and KML 2.2 (Google Earth), as Mission Planner offers,
+//! from a `.tlog` (here) or a dataflash log ([`logs::track`]).
 //!
 //! Points come from `GLOBAL_POSITION_INT` of the autopilot component (the fused position the
 //! GCS displays), with the record's receive time. Samples at exactly 0, 0 (no position yet)
@@ -14,8 +14,8 @@ use recorder::TlogReader;
 /// One track point.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Point {
-    /// Receive time, µs since the Unix epoch.
-    pub unix_us: u64,
+    /// UTC, µs since the Unix epoch (`None`: a log without a GPS time reference).
+    pub unix_us: Option<u64>,
     /// Latitude, degrees.
     pub lat: f64,
     /// Longitude, degrees.
@@ -45,7 +45,7 @@ pub fn from_tlog(input: impl Read, sysid: Option<u8>) -> io::Result<Option<(u8, 
             continue;
         }
         points.push(Point {
-            unix_us: rec.unix_us,
+            unix_us: Some(rec.unix_us),
             lat: f64::from(p.lat) * 1e-7,
             lon: f64::from(p.lon) * 1e-7,
             alt_msl: f64::from(p.alt) / 1000.0,
@@ -66,6 +66,19 @@ fn iso(unix_us: u64) -> String {
     crate::tlog::utc(unix_us).replacen(' ', "T", 1) + "Z"
 }
 
+/// From a dataflash log's track.
+pub fn from_bin(log: &logs::Log) -> Vec<Point> {
+    logs::track::track(log)
+        .into_iter()
+        .map(|p| Point {
+            unix_us: p.unix_us,
+            lat: p.lat,
+            lon: p.lon,
+            alt_msl: p.alt_msl,
+        })
+        .collect()
+}
+
 /// GPX 1.1 track.
 pub fn gpx(name: &str, points: &[Point]) -> String {
     let mut s = String::from(
@@ -80,11 +93,12 @@ pub fn gpx(name: &str, points: &[Point]) -> String {
     for p in points {
         let _ = writeln!(
             s,
-            "      <trkpt lat=\"{:.7}\" lon=\"{:.7}\"><ele>{:.2}</ele><time>{}</time></trkpt>",
+            "      <trkpt lat=\"{:.7}\" lon=\"{:.7}\"><ele>{:.2}</ele>{}</trkpt>",
             p.lat,
             p.lon,
             p.alt_msl,
-            iso(p.unix_us)
+            p.unix_us
+                .map_or_else(String::new, |t| format!("<time>{}</time>", iso(t)))
         );
     }
     s.push_str("    </trkseg>\n  </trk>\n</gpx>\n");
@@ -162,7 +176,7 @@ mod tests {
     #[test]
     fn writes_gpx_and_kml() {
         let pts = [Point {
-            unix_us: 1_760_000_000_250_000,
+            unix_us: Some(1_760_000_000_250_000),
             lat: -35.363261,
             lon: 149.16523,
             alt_msl: 584.0,
