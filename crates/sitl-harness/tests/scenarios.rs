@@ -482,7 +482,15 @@ async fn mission_upload_is_verified_by_read_back_through_loss() {
     );
     // Wait for a heartbeat that says disarmed (uploads are refused otherwise).
     tokio::time::timeout(Duration::from_secs(20), async {
-        while core.facts(1).armed != Some(false) {
+        // Disarmed, and finished booting (ArduPilot reports MAV_STATE_BOOT until its mission
+        // storage is ready; uploading earlier is refused).
+        while core.facts(1).armed != Some(false)
+            || core
+                .fleet()
+                .get(1)
+                .and_then(|v| v.heartbeat.clone())
+                .is_none_or(|h| h.value.system_status == 1)
+        {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     })

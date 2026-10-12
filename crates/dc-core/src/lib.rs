@@ -1094,6 +1094,20 @@ impl Core {
                     .into(),
             ));
         }
+        // ArduPilot reports MAV_STATE_BOOT until init_ardupilot() has finished, which includes
+        // initialising mission storage; an upload before that is refused as NO_SPACE (seen in
+        // SITL under load). Say what is really wrong instead.
+        let booting = self
+            .fleet()
+            .get(target.0)
+            .and_then(|v| v.heartbeat.as_ref())
+            .is_none_or(|h| h.value.system_status == MavState::BOOT.0);
+        if booting {
+            return Err(Refusal::Precondition(
+                "the vehicle is still booting (MAV_STATE_BOOT); upload once it reports ready"
+                    .into(),
+            ));
+        }
         let (mut up, first) = MissionUpload::start(
             target,
             items.clone(),

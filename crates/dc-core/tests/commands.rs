@@ -24,6 +24,8 @@ struct Vehicle {
     deaf: bool,
     /// Every COMMAND_LONG received.
     received: Vec<CommandLong>,
+    /// Heartbeat `system_status` (0 = MAV_STATE_UNINIT, as before).
+    system_status: u8,
 }
 
 async fn fake_vehicle(
@@ -44,7 +46,7 @@ async fn fake_vehicle(
                 let s = v.lock().unwrap();
                 if !s.silent {
                     let base_mode = MavModeFlag::CUSTOM_MODE_ENABLED.0 | if s.armed { MavModeFlag::SAFETY_ARMED.0 } else { 0 };
-                    out.push(Message::Heartbeat(Heartbeat { r#type: 2, autopilot: 3, base_mode, custom_mode: s.mode, mavlink_version: 3, ..Default::default() }));
+                    out.push(Message::Heartbeat(Heartbeat { r#type: 2, autopilot: 3, base_mode, custom_mode: s.mode, system_status: s.system_status, mavlink_version: 3 }));
                 }
             }
             n = sock.read(&mut buf) => {
@@ -408,5 +410,23 @@ async fn mission_upload_is_refused_while_armed() {
         .await
         .expect_err("refused while armed");
     assert!(matches!(err, Refusal::Precondition(_)), "{err:?}");
+    let _ = stop.send(true);
+}
+
+/// ArduPilot reports MAV_STATE_BOOT until its mission storage is ready; an upload then would be
+/// refused as NO_SPACE. The core refuses it first, with the real reason.
+#[tokio::test(flavor = "multi_thread")]
+async fn mission_upload_waits_for_the_vehicle_to_finish_booting() {
+    let (core, v, stop) = setup(CoreConfig::default()).await;
+    v.lock().unwrap().system_status = 1; // MAV_STATE_BOOT
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let err = core
+        .upload_mission((1, 1), Vec::new())
+        .await
+        .expect_err("refused while booting");
+    assert!(
+        matches!(&err, Refusal::Precondition(why) if why.contains("booting")),
+        "{err:?}"
+    );
     let _ = stop.send(true);
 }
