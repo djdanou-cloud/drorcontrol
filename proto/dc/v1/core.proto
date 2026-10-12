@@ -77,6 +77,21 @@ message Vehicle {
   optional WindState wind = 15;
   optional RcState rc = 16;
   repeated ServoState servos = 17;
+  optional RadioState radio = 18;
+}
+
+// From RADIO_STATUS (a telemetry radio, under the system id it reports with). Signal
+// values in the radio's own scale (SiK: about 2 x dB); absent when unknown.
+message RadioState {
+  uint32 age_ms = 1;
+  uint32 compid = 2;
+  optional uint32 rssi = 3;
+  optional uint32 remote_rssi = 4;
+  optional uint32 noise = 5;
+  optional uint32 remote_noise = 6;
+  uint32 txbuf_pct = 7;
+  uint32 rx_errors = 8;
+  uint32 corrected = 9;
 }
 
 // From RC_CHANNELS: what the RC receiver delivers.

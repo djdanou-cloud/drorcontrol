@@ -59,8 +59,8 @@ use tokio::sync::broadcast;
 
 pub use vehicle::{
     Battery, Extended, Firmware, FirmwareSource, Fleet, Home, LandedState, MissionProgress,
-    MissionState, RcInput, ServoOutputs, StatusText, Traffic, VehicleState, Vibration, VtolState,
-    Wind,
+    MissionState, RadioStatus, RcInput, ServoOutputs, StatusText, Traffic, VehicleState, Vibration,
+    VtolState, Wind,
 };
 pub use vehicle::{NavHealth, NavThresholds, PositionTrust};
 

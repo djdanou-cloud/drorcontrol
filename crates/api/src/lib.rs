@@ -221,6 +221,20 @@ pub fn vehicle_to_pb(v: &VehicleState, now: Instant) -> pb::Vehicle {
                 outputs_us: t.value.outputs.iter().map(|&o| u32::from(o)).collect(),
             })
             .collect(),
+        radio: v.radio.as_ref().map(|t| {
+            let r = t.value;
+            pb::RadioState {
+                age_ms: ms(t.age(now)),
+                compid: u32::from(r.compid),
+                rssi: r.rssi.map(u32::from),
+                remote_rssi: r.remote_rssi.map(u32::from),
+                noise: r.noise.map(u32::from),
+                remote_noise: r.remote_noise.map(u32::from),
+                txbuf_pct: u32::from(r.txbuf_pct),
+                rx_errors: u32::from(r.rx_errors),
+                corrected: u32::from(r.corrected),
+            }
+        }),
         home: v.home.as_ref().map(|h| pb::HomeState {
             age_ms: ms(h.age(now)),
             lat_deg: h.value.lat_deg,

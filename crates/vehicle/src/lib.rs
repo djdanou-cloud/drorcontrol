@@ -420,6 +420,29 @@ pub struct ServoOutputs {
     pub outputs: [u16; 16],
 }
 
+/// `RADIO_STATUS` from a telemetry radio (any component: SiK and RFD radios report as their
+/// own component, sometimes under their own system id). Signal values are in the radio's
+/// own scale (on SiK about 2 × dB); `None` when the radio reports 255 (unknown).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct RadioStatus {
+    /// Component that sent it.
+    pub compid: u8,
+    /// Signal strength received here.
+    pub rssi: Option<u8>,
+    /// Signal strength at the other end.
+    pub remote_rssi: Option<u8>,
+    /// Background noise here.
+    pub noise: Option<u8>,
+    /// Background noise at the other end.
+    pub remote_noise: Option<u8>,
+    /// Free transmit buffer, percent.
+    pub txbuf_pct: u8,
+    /// Receive errors since the radio booted.
+    pub rx_errors: u16,
+    /// Error-corrected packets since the radio booted.
+    pub corrected: u16,
+}
+
 /// `WIND` (ArduPilot, autopilot component): the autopilot's wind estimate.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Wind {
@@ -507,6 +530,8 @@ pub struct VehicleState {
     pub vibration: Option<Timed<Vibration>>,
     /// Wind estimate.
     pub wind: Option<Timed<Wind>>,
+    /// Telemetry radio link quality reported under this system id.
+    pub radio: Option<Timed<RadioStatus>>,
     /// RC input.
     pub rc: Option<Timed<RcInput>>,
     /// Servo/motor outputs by port (0 = MAIN).
@@ -792,6 +817,22 @@ impl Fleet {
                             ],
                         },
                         at: now,
+                    },
+                );
+            }
+            Message::RadioStatus(r) => {
+                let known = |x: u8| (x != u8::MAX).then_some(x);
+                v.radio = timed(
+                    now,
+                    RadioStatus {
+                        compid,
+                        rssi: known(r.rssi),
+                        remote_rssi: known(r.remrssi),
+                        noise: known(r.noise),
+                        remote_noise: known(r.remnoise),
+                        txbuf_pct: r.txbuf,
+                        rx_errors: r.rxerrors,
+                        corrected: r.fixed,
                     },
                 );
             }
@@ -1228,6 +1269,29 @@ mod tests {
         assert_eq!(rc.rssi, None, "255 = unknown");
         let out = v.servos[&0].value.outputs;
         assert_eq!((out[0], out[3], out[15]), (1100, 1150, 0));
+    }
+
+    #[test]
+    fn radio_status_from_a_radio_component() {
+        use mavlink_codec::messages::RadioStatus as Rs;
+        let mut f = Fleet::new();
+        f.apply(
+            51,
+            68,
+            &Message::RadioStatus(Rs {
+                rssi: 180,
+                remrssi: 255,
+                txbuf: 95,
+                noise: 40,
+                remnoise: 42,
+                rxerrors: 3,
+                fixed: 7,
+            }),
+            Instant::now(),
+        );
+        let r = f.get(51).unwrap().radio.as_ref().unwrap().value;
+        assert_eq!((r.compid, r.rssi, r.remote_rssi), (68, Some(180), None));
+        assert_eq!((r.txbuf_pct, r.rx_errors, r.corrected), (95, 3, 7));
     }
 
     #[test]
