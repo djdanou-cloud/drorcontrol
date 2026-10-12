@@ -212,6 +212,11 @@ message TrafficState {
   uint32 emitter_type = 12;     // ADSB_EMITTER_TYPE
   uint32 tslc_s = 13;           // seconds since the receiver last heard it
   bool simulated = 14;          // ADSB_FLAGS_SIMULATED: not a real aircraft
+  // From the vehicle, when its position is known: great-circle distance, initial bearing
+  // (true), and height above it (reported traffic altitude vs vehicle MSL: approximate).
+  optional double distance_m = 15;
+  optional double bearing_deg = 16;
+  optional float above_m = 17;
 }
 
 // From HOME_POSITION (autopilot component): where RTL returns to, and the reference for

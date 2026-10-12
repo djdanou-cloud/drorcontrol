@@ -169,21 +169,27 @@ pub fn vehicle_to_pb(v: &VehicleState, now: Instant) -> pb::Vehicle {
         traffic: v
             .traffic
             .values()
-            .map(|t| pb::TrafficState {
-                age_ms: ms(t.age(now)),
-                icao: t.value.icao,
-                lat_deg: t.value.lat_deg,
-                lon_deg: t.value.lon_deg,
-                alt_msl_m: t.value.alt_msl_m.map(|(a, _)| a),
-                alt_geometric: t.value.alt_msl_m.is_some_and(|(_, g)| g),
-                heading_deg: t.value.heading_deg,
-                speed_ms: t.value.speed_ms,
-                climb_ms: t.value.climb_ms,
-                callsign: t.value.callsign.clone(),
-                squawk: t.value.squawk.map(u32::from),
-                emitter_type: u32::from(t.value.emitter_type),
-                tslc_s: u32::from(t.value.tslc_s),
-                simulated: t.value.simulated,
+            .map(|t| {
+                let rel = v.position.as_ref().map(|p| t.value.relative_to(&p.value));
+                pb::TrafficState {
+                    distance_m: rel.map(|r| r.distance_m),
+                    bearing_deg: rel.map(|r| r.bearing_deg),
+                    above_m: rel.and_then(|r| r.above_m),
+                    age_ms: ms(t.age(now)),
+                    icao: t.value.icao,
+                    lat_deg: t.value.lat_deg,
+                    lon_deg: t.value.lon_deg,
+                    alt_msl_m: t.value.alt_msl_m.map(|(a, _)| a),
+                    alt_geometric: t.value.alt_msl_m.is_some_and(|(_, g)| g),
+                    heading_deg: t.value.heading_deg,
+                    speed_ms: t.value.speed_ms,
+                    climb_ms: t.value.climb_ms,
+                    callsign: t.value.callsign.clone(),
+                    squawk: t.value.squawk.map(u32::from),
+                    emitter_type: u32::from(t.value.emitter_type),
+                    tslc_s: u32::from(t.value.tslc_s),
+                    simulated: t.value.simulated,
+                }
             })
             .collect(),
         batteries: v
@@ -828,6 +834,7 @@ mod tests {
             ),
             (42, Some("TEST"), None, true)
         );
+        assert_eq!(traffic[0].distance_m, None, "no vehicle position yet");
         assert_eq!((home.lat_deg, home.alt_msl_m), (-35.363_261, 584.09));
     }
 }

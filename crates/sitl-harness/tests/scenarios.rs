@@ -1268,6 +1268,20 @@ async fn adsb_traffic_is_reported() {
         assert!((t.lat_deg + 35.363_261).abs() < 0.1 && (t.lon_deg - 149.165_23).abs() < 0.1);
         assert!(t.alt_msl_m.is_some(), "{t:?}");
     }
+    // Relative to the vehicle once it has a position: within the spawn radius plus the
+    // distance an aircraft flies before re-spawning, at a plausible height.
+    until(Duration::from_secs(90), "vehicle position", || {
+        core.fleet().get(1).is_some_and(|v| v.position.is_some())
+    })
+    .await;
+    let v = core.fleet().get(1).unwrap().clone();
+    let own = &v.position.as_ref().unwrap().value;
+    for t in v.traffic.values().map(|t| &t.value) {
+        let r = t.relative_to(own);
+        assert!(r.distance_m < 12_000.0, "{r:?} {t:?}");
+        assert!((0.0..360.0).contains(&r.bearing_deg), "{r:?}");
+        assert!(r.above_m.is_some_and(|h| h.abs() < 5_000.0), "{r:?} {t:?}");
+    }
 }
 
 /// The vehicle's own dataflash log (SITL writes it like a flight controller's SD card, here

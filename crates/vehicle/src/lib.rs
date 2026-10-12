@@ -278,6 +278,37 @@ pub struct Traffic {
     pub simulated: bool,
 }
 
+/// Where an aircraft is relative to the vehicle.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Relative {
+    /// Horizontal distance, m.
+    pub distance_m: f64,
+    /// Bearing from the vehicle, degrees clockwise from true north.
+    pub bearing_deg: f64,
+    /// Height above the vehicle, m (`None` without a valid traffic altitude).
+    pub above_m: Option<f32>,
+}
+
+impl Traffic {
+    /// Distance (great circle), initial bearing and height difference from `own`. The
+    /// height compares the traffic altitude as reported (pressure or GNSS) with the vehicle's
+    /// MSL altitude, so treat it as approximate.
+    pub fn relative_to(&self, own: &Position) -> Relative {
+        const R: f64 = 6_371_008.8;
+        let (la1, lo1) = (own.lat_deg.to_radians(), own.lon_deg.to_radians());
+        let (la2, lo2) = (self.lat_deg.to_radians(), self.lon_deg.to_radians());
+        let h = ((la2 - la1) / 2.0).sin().powi(2)
+            + la1.cos() * la2.cos() * ((lo2 - lo1) / 2.0).sin().powi(2);
+        let y = (lo2 - lo1).sin() * la2.cos();
+        let x = la1.cos() * la2.sin() - la1.sin() * la2.cos() * (lo2 - lo1).cos();
+        Relative {
+            distance_m: 2.0 * R * h.sqrt().asin(),
+            bearing_deg: y.atan2(x).to_degrees().rem_euclid(360.0),
+            above_m: self.alt_msl_m.map(|(a, _)| a - own.alt_msl_m),
+        }
+    }
+}
+
 /// Traffic not reported for this long is forgotten.
 pub const TRAFFIC_FORGET: Duration = Duration::from_secs(60);
 
@@ -1208,6 +1239,38 @@ mod tests {
             "banner wins, and sticks"
         );
         assert_eq!(v.mode_name(), Some("FLY_BY_WIRE_A"), "not LOITER");
+    }
+
+    #[test]
+    fn traffic_relative_geometry() {
+        let own = Position {
+            lat_deg: -35.0,
+            lon_deg: 149.0,
+            alt_msl_m: 600.0,
+            ..Default::default()
+        };
+        let t = |lat: f64, lon: f64| Traffic {
+            icao: 1,
+            lat_deg: lat,
+            lon_deg: lon,
+            alt_msl_m: Some((900.0, false)),
+            heading_deg: None,
+            speed_ms: None,
+            climb_ms: None,
+            callsign: None,
+            squawk: None,
+            emitter_type: 0,
+            tslc_s: 0,
+            simulated: false,
+        };
+        let north = t(-34.99, 149.0).relative_to(&own);
+        assert!((north.distance_m - 1112.0).abs() < 1.0, "{north:?}");
+        assert!(north.bearing_deg.abs() < 0.01 || (north.bearing_deg - 360.0).abs() < 0.01);
+        assert_eq!(north.above_m, Some(300.0));
+        let east = t(-35.0, 149.01).relative_to(&own);
+        assert!((east.bearing_deg - 90.0).abs() < 0.01, "{east:?}");
+        let west = t(-35.0, 148.99).relative_to(&own);
+        assert!((west.bearing_deg - 270.0).abs() < 0.01, "{west:?}");
     }
 
     #[test]
