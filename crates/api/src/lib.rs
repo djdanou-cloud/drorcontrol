@@ -287,6 +287,7 @@ pub fn vehicle_to_pb(v: &VehicleState, now: Instant) -> pb::Vehicle {
                 product_id: u32::from(t.value.vendor_product.1),
                 uid: t.value.uid,
                 capabilities: t.value.capabilities,
+                tested: v.firmware_tested(),
             }),
         home: v.home.as_ref().map(|h| pb::HomeState {
             age_ms: ms(h.age(now)),

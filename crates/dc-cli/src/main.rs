@@ -1683,7 +1683,31 @@ fn print_fleet(core: &Core) {
             Some(t) => format!("mission {}/{t} {:?}", m.value.current, m.value.state),
             None => format!("mission item {} {:?}", m.value.current, m.value.state),
         });
-        let parts: Vec<String> = [hb, att, pos, bat, mission].into_iter().flatten().collect();
+        let fw = v.autopilot_version.as_ref().map(|a| {
+            let note = match v.firmware_tested() {
+                Some(false) => " (not covered by DrorControl's tests: ArduCopter 4.7)",
+                _ => "",
+            };
+            format!("fw {}{note}", a.value.version_string())
+        });
+        // Packet loss over the last 10 s, all components of this vehicle together.
+        let (rx, lost) = core
+            .stream_quality(v.sysid)
+            .iter()
+            .fold((0u32, 0u32), |(r, l), (_, q)| {
+                (r + q.recent_received, l + q.recent_lost)
+            });
+        let loss = (rx + lost > 0).then(|| {
+            format!(
+                "loss {:.1}% ({lost}/{})",
+                f64::from(lost) * 100.0 / f64::from(rx + lost),
+                rx + lost
+            )
+        });
+        let parts: Vec<String> = [hb, att, pos, bat, mission, loss, fw]
+            .into_iter()
+            .flatten()
+            .collect();
         println!(
             "sys {:3} | {} | hb age {:.1} s",
             v.sysid,

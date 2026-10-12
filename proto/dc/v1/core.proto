@@ -110,6 +110,9 @@ message AutopilotVersionState {
   uint32 product_id = 5;
   uint64 uid = 6;
   uint64 capabilities = 7;   // MAV_PROTOCOL_CAPABILITY bits
+  // Whether DrorControl's automated tests cover this firmware and major.minor version
+  // (ArduCopter 4.7 today); unset until the version banner confirms the firmware.
+  optional bool tested = 8;
 }
 
 // From TERRAIN_REPORT: terrain under the vehicle from the autopilot's terrain database.

@@ -138,6 +138,8 @@ async fn connect_detects_the_vehicle_and_receives_telemetry() {
         .value;
     assert!(av.version_string().starts_with("4.7.1-"), "{av:?}");
     assert_eq!(av.git_hash.len(), 8, "{av:?}");
+    // The banner confirmed ArduCopter and the version is 4.7: covered by these tests.
+    assert_eq!(core.fleet().get(1).unwrap().firmware_tested(), Some(true));
     // TERRAIN_REPORT arrives; before the vehicle has a position it is for 0,0 and flagged.
     until(Duration::from_secs(30), "TERRAIN_REPORT", || {
         core.fleet().get(1).is_some_and(|v| v.terrain.is_some())

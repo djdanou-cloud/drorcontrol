@@ -52,7 +52,24 @@ impl VehicleState {
         let hb = self.heartbeat.as_ref()?;
         self.confirmed_firmware()?.mode_name(hb.value.custom_mode)
     }
+
+    /// Whether DrorControl's automated tests cover this vehicle's firmware and major.minor
+    /// version ([`TESTED_FIRMWARE`]); `None` until the banner and `AUTOPILOT_VERSION` are in.
+    pub fn firmware_tested(&self) -> Option<bool> {
+        let fw = self.confirmed_firmware()?;
+        let (major, minor, _) = self.autopilot_version.as_ref()?.value.version;
+        Some(
+            TESTED_FIRMWARE
+                .iter()
+                .any(|&(f, a, b)| f == fw && (a, b) == (major, minor)),
+        )
+    }
 }
+
+/// Firmware and major.minor versions the automated tests run against (SITL from the pinned
+/// upstream, `.sitl/ardupilot-Copter-4.7.1`). Others may work but are not yet covered:
+/// parameter and log field names can change between versions.
+pub const TESTED_FIRMWARE: &[(Firmware, u8, u8)] = &[(Firmware::Copter, 4, 7)];
 
 impl Heartbeat {
     /// Motors armed (`MAV_MODE_FLAG_SAFETY_ARMED`).
@@ -1495,6 +1512,42 @@ mod tests {
         let a = &f.get(1).unwrap().autopilot_version.as_ref().unwrap().value;
         assert_eq!(a.version_string(), "4.7.1-official");
         assert_eq!((a.git_hash.as_str(), a.board_id), ("dbe79216", 140));
+    }
+
+    #[test]
+    fn tested_firmware_needs_banner_and_version() {
+        use mavlink_codec::messages::{AutopilotVersion as Av, Statustext};
+        let mut f = Fleet::new();
+        let now = Instant::now();
+        let version = |f: &mut Fleet, minor: u32| {
+            f.apply(
+                1,
+                1,
+                &Message::AutopilotVersion(Av {
+                    flight_sw_version: 4 << 24 | minor << 16 | 3 << 8 | 255,
+                    ..Default::default()
+                }),
+                now,
+            )
+        };
+        version(&mut f, 6);
+        assert_eq!(f.get(1).unwrap().firmware_tested(), None, "no banner yet");
+        let mut text = [0u8; 50];
+        let banner = b"ArduCopter V4.6.3 (3fc7011a)";
+        text[..banner.len()].copy_from_slice(banner);
+        f.apply(
+            1,
+            1,
+            &Message::Statustext(Statustext {
+                severity: 6,
+                text,
+                ..Default::default()
+            }),
+            now,
+        );
+        assert_eq!(f.get(1).unwrap().firmware_tested(), Some(false), "4.6");
+        version(&mut f, 7);
+        assert_eq!(f.get(1).unwrap().firmware_tested(), Some(true), "4.7");
     }
 
     #[test]
