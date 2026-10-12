@@ -195,6 +195,26 @@ pub fn footprint(cam: &Camera, alt_m: f64, side: f64, front: f64) -> Option<Foot
     })
 }
 
+/// Area of a polygon (latitude, longitude vertices), m² (local plane, shoelace formula).
+pub fn area_m2(polygon: &[(f64, f64)]) -> f64 {
+    if polygon.len() < 3 {
+        return 0.0;
+    }
+    let n = polygon.len() as f64;
+    let centre = (
+        polygon.iter().map(|p| p.0).sum::<f64>() / n,
+        polygon.iter().map(|p| p.1).sum::<f64>() / n,
+    );
+    let plane = Plane::new(centre);
+    let v: Vec<(f64, f64)> = polygon.iter().map(|&p| plane.to_xy(p)).collect();
+    v.iter()
+        .zip(v.iter().cycle().skip(1))
+        .map(|(a, b)| a.0 * b.1 - b.0 * a.1)
+        .sum::<f64>()
+        .abs()
+        / 2.0
+}
+
 /// Length flown along the survey lines (not the turns between them), m: pairs of points.
 pub fn line_length_m(points: &[(f64, f64)]) -> f64 {
     points
@@ -438,6 +458,10 @@ mod tests {
             overshoot_m: 0.0,
         };
         assert!((line_length_m(&grid(&cfg).unwrap()) - 400.0).abs() < 0.5);
+        assert!(
+            (area_m2(&cfg.polygon) - 10_000.0).abs() < 1.0,
+            "100 m square"
+        );
     }
 
     #[test]

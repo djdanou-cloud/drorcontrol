@@ -1928,6 +1928,7 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
                 (Some(p), None) => parse_polygon(p)?,
                 (None, None) => return Err("--polygon or --polygon-kml is needed".into()),
             };
+            let cfg_polygon = polygon.clone();
             let items = protocols::survey::mission(&protocols::survey::SurveyConfig {
                 polygon,
                 spacing_m: spacing,
@@ -1939,6 +1940,11 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
             })
             .map_err(|e| e.to_string())?;
             print_stats(&items);
+            eprintln!(
+                "area {:.2} ha",
+                protocols::survey::area_m2(&cfg_polygon) / 10_000.0
+            );
+            print_time_estimate(&items, &protocols::mission::Speeds::default(), false);
             if let Some(fp) = fp {
                 let points: Vec<(f64, f64)> = items[2..items.len() - 1]
                     .iter()
