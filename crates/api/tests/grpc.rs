@@ -5,7 +5,15 @@ use std::time::Duration;
 use api::pb::{self, core_client::CoreClient};
 use dc_core::{Core, CoreConfig};
 use mavlink_codec::enums::MavParamType;
-use mavlink_codec::messages::{Heartbeat, MissionCount, MissionItemInt, ParamValue, Statustext};
+use mavlink_codec::messages::{
+    Heartbeat, LogData, LogEntry, MissionCount, MissionItemInt, ParamValue, Statustext,
+};
+
+/// The fake vehicle's one dataflash log.
+fn log_byte(i: u32) -> u8 {
+    (i % 251) as u8
+}
+const LOG_SIZE: u32 = 200;
 use mavlink_codec::{FrameParser, Header, Message, Version, encode};
 use protocols::params::encode_id;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -32,6 +40,26 @@ async fn fake_vehicle(listener: TcpListener) {
                 while let Some(f) = parser.next_frame() {
                     // Missions: 2 items (home and one waypoint); fence and rally: empty.
                     match f.decode() {
+                        Ok(Message::LogRequestList(_)) => out.push(Message::LogEntry(LogEntry {
+                            id: 1,
+                            num_logs: 1,
+                            last_log_num: 1,
+                            time_utc: 1_760_000_000,
+                            size: LOG_SIZE,
+                        })),
+                        Ok(Message::LogRequestData(r)) => {
+                            let mut ofs = r.ofs;
+                            let end = (r.ofs + r.count).min(LOG_SIZE);
+                            while ofs < end {
+                                let n = (end - ofs).min(90);
+                                let mut data = [0u8; 90];
+                                for (k, b) in data.iter_mut().take(n as usize).enumerate() {
+                                    *b = log_byte(ofs + k as u32);
+                                }
+                                out.push(Message::LogData(LogData { id: r.id, ofs, count: n as u8, data }));
+                                ofs += n;
+                            }
+                        }
                         Ok(Message::MissionRequestList(r)) => out.push(Message::MissionCount(MissionCount {
                             target_system: 255,
                             target_component: 190,
@@ -205,6 +233,48 @@ async fn grpc_api_end_to_end() {
     let m = msgs.messages.last().expect("STATUSTEXT kept");
     assert_eq!((m.severity, m.text.as_str(), m.compid), (2, "PreArm: x", 1));
     assert!(m.unix_ms > 1_700_000_000_000, "wall-clock time");
+
+    let logs = c
+        .list_logs(pb::ListLogsRequest {
+            sysid: 0,
+            compid: 0,
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(logs.logs.len(), 1);
+    assert_eq!((logs.logs[0].id, logs.logs[0].size), (1, LOG_SIZE));
+    let mut stream = c
+        .download_log(pb::DownloadLogRequest {
+            sysid: 0,
+            compid: 0,
+            id: 1,
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    let mut data = Vec::new();
+    loop {
+        let u = stream
+            .message()
+            .await
+            .unwrap()
+            .expect("stream ends with done");
+        data.extend_from_slice(&u.data);
+        if u.done {
+            break;
+        }
+    }
+    assert_eq!(data, (0..LOG_SIZE).map(log_byte).collect::<Vec<_>>());
+    let missing = c
+        .download_log(pb::DownloadLogRequest {
+            sysid: 0,
+            compid: 0,
+            id: 9,
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(missing.code(), tonic::Code::NotFound);
 
     let mut tele = c
         .stream_telemetry(pb::StreamTelemetryRequest {

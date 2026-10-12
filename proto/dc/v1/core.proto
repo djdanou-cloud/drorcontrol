@@ -29,6 +29,11 @@ service Core {
   rpc GetMessages(GetMessagesRequest) returns (MessageList);
   // Photos the vehicle reported taking (CAMERA_FEEDBACK), in order (survey geotags).
   rpc GetGeotags(GetGeotagsRequest) returns (GeotagList);
+  // Dataflash logs on the vehicle (read-only; the vehicle must be disarmed).
+  rpc ListLogs(ListLogsRequest) returns (LogList);
+  // Download one log: progress updates, then the data in chunks (the last has done = true).
+  // Logs are never erased by this API.
+  rpc DownloadLog(DownloadLogRequest) returns (stream LogDownloadUpdate);
 }
 
 message GetInfoRequest {}
@@ -289,6 +294,35 @@ enum PositionTrust {
 message LandedState {
   uint32 age_ms = 1;
   uint32 landed_state = 2;  // MAV_LANDED_STATE: 0 undefined, 1 on ground, 2 in air, 3 takeoff, 4 landing
+}
+
+message ListLogsRequest {
+  uint32 sysid = 1;   // 0 = first vehicle heard
+  uint32 compid = 2;  // 0 = autopilot (1)
+}
+
+message LogInfo {
+  uint32 id = 1;
+  uint32 size = 2;      // bytes
+  uint32 time_utc = 3;  // s since the Unix epoch, 0 if unknown
+}
+
+message LogList {
+  uint32 sysid = 1;
+  repeated LogInfo logs = 2;
+}
+
+message DownloadLogRequest {
+  uint32 sysid = 1;
+  uint32 compid = 2;
+  uint32 id = 3;
+}
+
+message LogDownloadUpdate {
+  uint32 received = 1;  // bytes so far
+  uint32 size = 2;
+  bytes data = 3;       // empty in progress updates; consecutive chunks at the end
+  bool done = 4;        // last chunk
 }
 
 message GetGeotagsRequest {

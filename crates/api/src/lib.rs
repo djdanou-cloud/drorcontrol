@@ -391,6 +391,99 @@ impl CoreApi for CoreService {
         }))
     }
 
+    async fn list_logs(
+        &self,
+        req: Request<pb::ListLogsRequest>,
+    ) -> Result<Response<pb::LogList>, Status> {
+        let r = req.into_inner();
+        let sysid = self.pick_vehicle(r.sysid)?;
+        let compid = Self::pick_component(r.compid)?;
+        let logs = self
+            .core
+            .list_logs((sysid, compid))
+            .await
+            .map_err(Status::failed_precondition)?;
+        Ok(Response::new(pb::LogList {
+            sysid: u32::from(sysid),
+            logs: logs
+                .iter()
+                .map(|e| pb::LogInfo {
+                    id: u32::from(e.id),
+                    size: e.size,
+                    time_utc: e.time_utc,
+                })
+                .collect(),
+        }))
+    }
+
+    type DownloadLogStream = BoxStream<pb::LogDownloadUpdate>;
+
+    async fn download_log(
+        &self,
+        req: Request<pb::DownloadLogRequest>,
+    ) -> Result<Response<Self::DownloadLogStream>, Status> {
+        /// Data chunk size, well under gRPC's default 4 MB message limit.
+        const CHUNK: usize = 1 << 20;
+        let r = req.into_inner();
+        let sysid = self.pick_vehicle(r.sysid)?;
+        let compid = Self::pick_component(r.compid)?;
+        let id = u16::try_from(r.id).map_err(|_| Status::invalid_argument("id"))?;
+        let logs = self
+            .core
+            .list_logs((sysid, compid))
+            .await
+            .map_err(Status::failed_precondition)?;
+        let entry = logs
+            .into_iter()
+            .find(|e| e.id == id)
+            .ok_or_else(|| Status::not_found(format!("no log {id} on vehicle {sysid}")))?;
+        let core = self.core.clone();
+        let (tx, rx) = tokio::sync::mpsc::channel(16);
+        tokio::spawn(async move {
+            let progress_tx = tx.clone();
+            let result = core
+                .download_log((sysid, compid), entry, |received, size| {
+                    // Progress is best effort: a slow client skips updates, not data.
+                    let _ = progress_tx.try_send(Ok(pb::LogDownloadUpdate {
+                        received,
+                        size,
+                        data: Vec::new(),
+                        done: false,
+                    }));
+                })
+                .await;
+            match result {
+                Ok(data) => {
+                    let size = data.len() as u32;
+                    let chunks: Vec<&[u8]> = data.chunks(CHUNK).collect();
+                    let n = chunks.len().max(1);
+                    for (i, c) in chunks
+                        .iter()
+                        .copied()
+                        .chain(std::iter::once(&[][..]).filter(|_| data.is_empty()))
+                        .enumerate()
+                    {
+                        let u = pb::LogDownloadUpdate {
+                            received: size,
+                            size,
+                            data: c.to_vec(),
+                            done: i + 1 == n,
+                        };
+                        if tx.send(Ok(u)).await.is_err() {
+                            return;
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(Err(Status::deadline_exceeded(e))).await;
+                }
+            }
+        });
+        Ok(Response::new(Box::pin(
+            tokio_stream::wrappers::ReceiverStream::new(rx),
+        )))
+    }
+
     async fn get_geotags(
         &self,
         req: Request<pb::GetGeotagsRequest>,

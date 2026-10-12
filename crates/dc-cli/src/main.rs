@@ -301,6 +301,15 @@ enum RemoteCmd {
     Messages,
     /// Photos the vehicle reported taking (CAMERA_FEEDBACK) as CSV, for geotagging.
     Geotags,
+    /// List the vehicle's dataflash logs, or download one through the daemon.
+    Logs {
+        /// Log number to download.
+        #[arg(long, requires = "out")]
+        download: Option<u32>,
+        /// Output file for --download (written to FILE.partial, renamed when complete).
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
     /// Print events (STATUSTEXT, links) for a while.
     Events {
         /// Seconds to listen.
@@ -1204,6 +1213,48 @@ async fn remote(url: &str, what: &RemoteCmd) -> Result<(), String> {
             eprintln!("vehicle {}: {} {:?} items", list.sysid, items.len(), kind);
             print_mission(&items);
         }
+        RemoteCmd::Logs { download, out } => match (download, out) {
+            (Some(id), Some(out)) => {
+                let mut s = c
+                    .download_log(pb::DownloadLogRequest {
+                        sysid: 0,
+                        compid: 0,
+                        id: *id,
+                    })
+                    .await
+                    .map_err(err)?
+                    .into_inner();
+                let mut data = Vec::new();
+                while let Some(u) = s.message().await.map_err(err)? {
+                    if u.data.is_empty() {
+                        eprintln!("  {}/{} bytes", u.received, u.size);
+                    }
+                    data.extend_from_slice(&u.data);
+                    if u.done {
+                        break;
+                    }
+                }
+                let partial = out.with_extension("partial");
+                std::fs::write(&partial, &data)
+                    .map_err(|e| format!("{}: {e}", partial.display()))?;
+                std::fs::rename(&partial, out).map_err(|e| format!("{}: {e}", out.display()))?;
+                eprintln!("wrote {} ({} bytes)", out.display(), data.len());
+            }
+            _ => {
+                let list = c
+                    .list_logs(pb::ListLogsRequest {
+                        sysid: 0,
+                        compid: 0,
+                    })
+                    .await
+                    .map_err(err)?
+                    .into_inner();
+                for l in &list.logs {
+                    println!("{:5}  {:>12} bytes", l.id, l.size);
+                }
+                eprintln!("vehicle {}: {} logs", list.sysid, list.logs.len());
+            }
+        },
         RemoteCmd::Geotags => {
             let list = c
                 .get_geotags(pb::GetGeotagsRequest { sysid: 0 })
