@@ -201,6 +201,14 @@ enum TlogCmd {
         #[arg(long)]
         vehicle: Option<u8>,
     },
+    /// Parameters whose value changed during the recording (PARAM_VALUE reports).
+    Changes {
+        /// The .tlog file.
+        file: std::path::PathBuf,
+        /// Vehicle system id (default: the first that sent parameters).
+        #[arg(long)]
+        vehicle: Option<u8>,
+    },
     /// The last complete mission, fence or rally list in the recording (a download or an
     /// upload) as .waypoints (QGC WPL 110).
     Mission {
@@ -1416,6 +1424,23 @@ fn load_params(path: &std::path::Path) -> Result<std::collections::BTreeMap<Stri
 fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
     let file = match what {
         TlogCmd::Info { file } => file,
+        TlogCmd::Changes { file, vehicle } => {
+            let f = std::fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()))?;
+            let (sys, changes) = tlog::param_changes(std::io::BufReader::new(f), *vehicle)
+                .map_err(|e| format!("{}: {e}", file.display()))?
+                .ok_or_else(|| format!("{}: no PARAM_VALUE in this recording", file.display()))?;
+            for c in &changes {
+                println!(
+                    "{}  {:<16} {} -> {}",
+                    tlog::utc(c.unix_us),
+                    c.name,
+                    c.old,
+                    c.new
+                );
+            }
+            eprintln!("vehicle {sys}: {} parameter changes", changes.len());
+            return Ok(());
+        }
         TlogCmd::Csv {
             file,
             msg,

@@ -374,6 +374,56 @@ pub fn params(
     Ok(chosen.map(|s| (s, out)))
 }
 
+/// A parameter whose reported value changed during the recording.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TlogParamChange {
+    /// When it was reported, µs since the Unix epoch.
+    pub unix_us: u64,
+    /// Name.
+    pub name: String,
+    /// Previous and new value.
+    pub old: f32,
+    /// See `old`.
+    pub new: f32,
+}
+
+/// Every change of a parameter's reported value (`PARAM_VALUE` from the autopilot of
+/// `vehicle`, default the first that sent parameters): a later report of the same name with a
+/// different value. A parameter's first report is its baseline, not a change.
+pub fn param_changes(
+    input: impl Read,
+    vehicle: Option<u8>,
+) -> io::Result<Option<(u8, Vec<TlogParamChange>)>> {
+    let mut r = TlogReader::new(input);
+    let mut chosen = vehicle;
+    let mut last: BTreeMap<String, f32> = BTreeMap::new();
+    let mut out = Vec::new();
+    while let Ok(Some(rec)) = r.next_record() {
+        let f = &rec.frame;
+        if f.compid() != 1 {
+            continue;
+        }
+        let Ok(Message::ParamValue(p)) = f.decode() else {
+            continue;
+        };
+        if *chosen.get_or_insert(f.sysid()) != f.sysid() {
+            continue;
+        }
+        let name = protocols::params::decode_id(&p.param_id);
+        if let Some(old) = last.insert(name.clone(), p.param_value)
+            && old.to_bits() != p.param_value.to_bits()
+        {
+            out.push(TlogParamChange {
+                unix_us: rec.unix_us,
+                name,
+                old,
+                new: p.param_value,
+            });
+        }
+    }
+    Ok(chosen.map(|s| (s, out)))
+}
+
 /// A mission and who sent it: (system id, component id).
 pub type SentMission = ((u8, u8), Vec<dc_core::MissionItem>);
 
@@ -712,6 +762,40 @@ mod tests {
         assert_eq!((r.margin, r.rem_margin), (Some(60), Some(130)));
         assert_eq!(r.rx_errors, 4 + 2);
         assert_eq!(r.min_txbuf, Some(90));
+    }
+
+    #[test]
+    fn parameter_changes_in_a_recording() {
+        use mavlink_codec::messages::ParamValue;
+        let pv = |name: &str, v: f32| {
+            let mut id = [0u8; 16];
+            id[..name.len()].copy_from_slice(name.as_bytes());
+            Message::ParamValue(ParamValue {
+                param_id: id,
+                param_value: v,
+                param_type: 9,
+                param_count: 2,
+                param_index: 0,
+            })
+        };
+        let bytes = tlog(&[
+            (1, 1, pv("WP_SPD", 10.0)),
+            (2, 1, pv("RTL_ALT_M", 15.0)),
+            (3, 1, pv("WP_SPD", 10.0)), // re-sent, unchanged
+            (4, 1, pv("WP_SPD", 6.5)),
+            (5, 2, pv("WP_SPD", 1.0)), // another component: ignored
+        ]);
+        let (sys, c) = param_changes(&bytes[..], None).unwrap().unwrap();
+        assert_eq!(sys, 1);
+        assert_eq!(
+            c,
+            [TlogParamChange {
+                unix_us: 4,
+                name: "WP_SPD".into(),
+                old: 10.0,
+                new: 6.5
+            }]
+        );
     }
 
     #[test]
