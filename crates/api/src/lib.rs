@@ -36,6 +36,13 @@ impl CoreService {
     }
 
     /// Resolve "0 = first vehicle heard".
+    fn pick_component(compid: u32) -> Result<u8, Status> {
+        if compid == 0 {
+            return Ok(1);
+        }
+        u8::try_from(compid).map_err(|_| Status::invalid_argument("compid must be 0..=255"))
+    }
+
     fn pick_vehicle(&self, sysid: u32) -> Result<u8, Status> {
         if sysid != 0 {
             return u8::try_from(sysid)
@@ -208,11 +215,7 @@ impl CoreApi for CoreService {
     ) -> Result<Response<pb::ParamList>, Status> {
         let r = req.into_inner();
         let sysid = self.pick_vehicle(r.sysid)?;
-        let compid = if r.compid == 0 {
-            1
-        } else {
-            u8::try_from(r.compid).map_err(|_| Status::invalid_argument("compid"))?
-        };
+        let compid = Self::pick_component(r.compid)?;
         let params = self
             .core
             .download_params((sysid, compid), |_, _| {})
@@ -228,6 +231,45 @@ impl CoreApi for CoreService {
                     value: p.value,
                     mav_param_type: u32::from(p.ty),
                     index: u32::from(p.index),
+                })
+                .collect(),
+        }))
+    }
+
+    async fn download_items(
+        &self,
+        req: Request<pb::DownloadItemsRequest>,
+    ) -> Result<Response<pb::ItemList>, Status> {
+        let r = req.into_inner();
+        let sysid = self.pick_vehicle(r.sysid)?;
+        let compid = Self::pick_component(r.compid)?;
+        let kind = pb::ItemKind::try_from(r.kind)
+            .map_err(|_| Status::invalid_argument(format!("unknown kind {}", r.kind)))?;
+        let mt = match kind {
+            pb::ItemKind::Mission => dc_core::MissionType::Mission,
+            pb::ItemKind::Fence => dc_core::MissionType::Fence,
+            pb::ItemKind::Rally => dc_core::MissionType::Rally,
+        };
+        let (status, items) = self.core.download_items((sysid, compid), mt).await;
+        if status != dc_core::TransferStatus::Done {
+            return Err(Status::deadline_exceeded(format!(
+                "{mt:?} download did not complete: {status:?}"
+            )));
+        }
+        Ok(Response::new(pb::ItemList {
+            sysid: u32::from(sysid),
+            compid: u32::from(compid),
+            kind: kind as i32,
+            items: items
+                .iter()
+                .map(|i| pb::Item {
+                    frame: u32::from(i.frame),
+                    command: u32::from(i.command),
+                    params: i.params.to_vec(),
+                    x: i.x,
+                    y: i.y,
+                    z: i.z,
+                    autocontinue: i.autocontinue,
                 })
                 .collect(),
         }))

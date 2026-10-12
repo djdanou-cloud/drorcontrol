@@ -22,6 +22,9 @@ service Core {
   rpc StreamTelemetry(StreamTelemetryRequest) returns (stream Vehicle);
   // STATUSTEXT messages and link/vehicle events as they happen.
   rpc StreamEvents(StreamEventsRequest) returns (stream Event);
+  // Download the mission, the geofence or the rally points (read-only; there is no upload
+  // RPC yet: uploads stay behind the core's interlocks).
+  rpc DownloadItems(DownloadItemsRequest) returns (ItemList);
 }
 
 message GetInfoRequest {}
@@ -155,6 +158,37 @@ enum PositionTrust {
 message LandedState {
   uint32 age_ms = 1;
   uint32 landed_state = 2;  // MAV_LANDED_STATE: 0 undefined, 1 on ground, 2 in air, 3 takeoff, 4 landing
+}
+
+// MAV_MISSION_TYPE values.
+enum ItemKind {
+  ITEM_KIND_MISSION = 0;  // on ArduPilot item 0 is home
+  ITEM_KIND_FENCE = 1;
+  ITEM_KIND_RALLY = 2;
+}
+
+message DownloadItemsRequest {
+  uint32 sysid = 1;   // 0 = first vehicle heard
+  uint32 compid = 2;  // 0 = autopilot (1)
+  ItemKind kind = 3;
+}
+
+// One item as MISSION_ITEM_INT carries it.
+message Item {
+  uint32 frame = 1;           // MAV_FRAME
+  uint32 command = 2;         // MAV_CMD
+  repeated float params = 3;  // param1..param4
+  int32 x = 4;                // latitude degE7 for commands with a location, else raw
+  int32 y = 5;                // longitude degE7 for commands with a location, else raw
+  float z = 6;
+  bool autocontinue = 7;
+}
+
+message ItemList {
+  uint32 sysid = 1;
+  uint32 compid = 2;
+  ItemKind kind = 3;
+  repeated Item items = 4;
 }
 
 message GetParamsRequest {

@@ -238,6 +238,12 @@ enum RemoteCmd {
         #[arg(long)]
         out: Option<std::path::PathBuf>,
     },
+    /// Download the mission, geofence or rally points through the daemon and list them.
+    Items {
+        /// Which list.
+        #[arg(long = "type", value_enum, default_value_t = ListKind::Mission)]
+        kind: ListKind,
+    },
     /// Print events (STATUSTEXT, links) for a while.
     Events {
         /// Seconds to listen.
@@ -903,6 +909,37 @@ async fn remote(url: &str, what: &RemoteCmd) -> Result<(), String> {
                 }
                 None => print!("{text}"),
             }
+        }
+        RemoteCmd::Items { kind } => {
+            let kind = match kind {
+                ListKind::Mission => pb::ItemKind::Mission,
+                ListKind::Fence => pb::ItemKind::Fence,
+                ListKind::Rally => pb::ItemKind::Rally,
+            };
+            let list = c
+                .download_items(pb::DownloadItemsRequest {
+                    sysid: 0,
+                    compid: 0,
+                    kind: kind as i32,
+                })
+                .await
+                .map_err(err)?
+                .into_inner();
+            let items: Vec<dc_core::MissionItem> = list
+                .items
+                .iter()
+                .map(|i| dc_core::MissionItem {
+                    frame: i.frame as u8,
+                    command: i.command as u16,
+                    params: std::array::from_fn(|k| i.params.get(k).copied().unwrap_or(0.0)),
+                    x: i.x,
+                    y: i.y,
+                    z: i.z,
+                    autocontinue: i.autocontinue,
+                })
+                .collect();
+            eprintln!("vehicle {}: {} {:?} items", list.sysid, items.len(), kind);
+            print_mission(&items);
         }
         RemoteCmd::Events { seconds } => {
             let mut stream = c

@@ -5,7 +5,7 @@ use std::time::Duration;
 use api::pb::{self, core_client::CoreClient};
 use dc_core::{Core, CoreConfig};
 use mavlink_codec::enums::MavParamType;
-use mavlink_codec::messages::{Heartbeat, ParamValue};
+use mavlink_codec::messages::{Heartbeat, MissionCount, MissionItemInt, ParamValue};
 use mavlink_codec::{FrameParser, Header, Message, Version, encode};
 use protocols::params::encode_id;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -25,6 +25,29 @@ async fn fake_vehicle(listener: TcpListener) {
                 if n == 0 { return; }
                 parser.push(&buf[..n]);
                 while let Some(f) = parser.next_frame() {
+                    // Missions: 2 items (home and one waypoint); fence and rally: empty.
+                    match f.decode() {
+                        Ok(Message::MissionRequestList(r)) => out.push(Message::MissionCount(MissionCount {
+                            target_system: 255,
+                            target_component: 190,
+                            count: if r.mission_type == 0 { 2 } else { 0 },
+                            mission_type: r.mission_type,
+                        })),
+                        Ok(Message::MissionRequestInt(r)) => out.push(Message::MissionItemInt(MissionItemInt {
+                            target_system: 255,
+                            target_component: 190,
+                            seq: r.seq,
+                            frame: if r.seq == 0 { 0 } else { 3 },
+                            command: 16,
+                            x: -353_632_610 + i32::from(r.seq),
+                            y: 1_491_652_300,
+                            z: 20.0 * f32::from(r.seq),
+                            autocontinue: 1,
+                            mission_type: r.mission_type,
+                            ..Default::default()
+                        })),
+                        _ => {}
+                    }
                     if let Ok(Message::ParamRequestList(_)) = f.decode() {
                         for (i, name) in ["ALPHA", "BETA", "GAMMA"].iter().enumerate() {
                             out.push(Message::ParamValue(ParamValue {
@@ -124,6 +147,49 @@ async fn grpc_api_end_to_end() {
     assert_eq!(params.sysid, 7);
     let names: Vec<_> = params.params.iter().map(|p| p.name.as_str()).collect();
     assert_eq!(names, ["ALPHA", "BETA", "GAMMA"]);
+
+    let items = c
+        .download_items(pb::DownloadItemsRequest {
+            sysid: 0,
+            compid: 0,
+            kind: pb::ItemKind::Mission as i32,
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(
+        (items.sysid, items.compid, items.kind()),
+        (7, 1, pb::ItemKind::Mission)
+    );
+    assert_eq!(items.items.len(), 2);
+    assert_eq!(
+        (
+            items.items[1].frame,
+            items.items[1].x,
+            items.items[1].z,
+            items.items[1].params.len()
+        ),
+        (3, -353_632_609, 20.0, 4)
+    );
+    let rally = c
+        .download_items(pb::DownloadItemsRequest {
+            sysid: 7,
+            compid: 1,
+            kind: pb::ItemKind::Rally as i32,
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(rally.items.is_empty());
+    let bad = c
+        .download_items(pb::DownloadItemsRequest {
+            sysid: 7,
+            compid: 1,
+            kind: 9,
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(bad.code(), tonic::Code::InvalidArgument);
 
     let mut tele = c
         .stream_telemetry(pb::StreamTelemetryRequest {
