@@ -173,6 +173,20 @@ impl fmt::Display for LinkSpec {
     }
 }
 
+/// STATUSTEXT lines kept per vehicle (Mission Planner's "Messages" tab).
+pub const MESSAGE_HISTORY: usize = 500;
+
+/// One STATUSTEXT line as received.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LoggedText {
+    /// Host time of receipt.
+    pub time: SystemTime,
+    /// Sending component.
+    pub compid: u8,
+    /// Severity and text.
+    pub text: StatusText,
+}
+
 /// Heartbeat-based link state of one vehicle (plan 08 §4.3).
 ///
 /// Informational: it drives annunciation and command *delivery* (retransmission), never
@@ -499,6 +513,8 @@ pub struct Core {
     audit: Option<std::sync::mpsc::Sender<(SystemTime, AuditEvent)>>,
     /// Last navigation trust per vehicle, to alert on changes.
     nav_trust: Arc<std::sync::Mutex<HashMap<u8, PositionTrust>>>,
+    /// Recent STATUSTEXT per vehicle (kept outside the fleet, which is cloned per message).
+    messages: Arc<std::sync::Mutex<HashMap<u8, std::collections::VecDeque<LoggedText>>>>,
     parameters: Arc<parameters::ParameterState>,
     /// Held across opening a link, so concurrent connects cannot both pass the check.
     link_mode: Arc<tokio::sync::Mutex<LinkMode>>,
@@ -535,6 +551,7 @@ impl Core {
             policy,
             audit,
             nav_trust: Arc::default(),
+            messages: Arc::default(),
             parameters: Arc::default(),
             link_mode: Arc::default(),
         };
@@ -742,6 +759,18 @@ impl Core {
                     sysid,
                     fw.modes().into_iter().map(|(n, m)| (n, m.to_string())),
                 );
+            }
+            {
+                let mut m = self.messages.lock().unwrap_or_else(|e| e.into_inner());
+                let q = m.entry(sysid).or_default();
+                if q.len() == MESSAGE_HISTORY {
+                    q.pop_front();
+                }
+                q.push_back(LoggedText {
+                    time: SystemTime::now(),
+                    compid,
+                    text: text.clone(),
+                });
             }
             let _ = self.events.send(CoreEvent::StatusText { sysid, text });
         }
@@ -977,6 +1006,16 @@ impl Core {
         let fleet = self.fleet();
         let v = fleet.get(sysid).filter(|v| v.heartbeat.is_some())?;
         Some(vehicle_link(v, Instant::now(), &self.cfg))
+    }
+
+    /// The last [`MESSAGE_HISTORY`] STATUSTEXT lines from `sysid`, oldest first.
+    pub fn messages(&self, sysid: u8) -> Vec<LoggedText> {
+        self.messages
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&sysid)
+            .map(|q| q.iter().cloned().collect())
+            .unwrap_or_default()
     }
 
     /// Decoded messages as they arrive (for protocol drivers and tools).

@@ -341,6 +341,31 @@ impl CoreApi for CoreService {
         }))
     }
 
+    async fn get_messages(
+        &self,
+        req: Request<pb::GetMessagesRequest>,
+    ) -> Result<Response<pb::MessageList>, Status> {
+        let sysid = self.pick_vehicle(req.into_inner().sysid)?;
+        let messages = self
+            .core
+            .messages(sysid)
+            .into_iter()
+            .map(|m| pb::LoggedMessage {
+                unix_ms: m
+                    .time
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_millis() as u64),
+                compid: u32::from(m.compid),
+                severity: u32::from(m.text.severity),
+                text: m.text.text,
+            })
+            .collect();
+        Ok(Response::new(pb::MessageList {
+            sysid: u32::from(sysid),
+            messages,
+        }))
+    }
+
     type StreamTelemetryStream = BoxStream<pb::Vehicle>;
 
     async fn stream_telemetry(

@@ -25,6 +25,8 @@ service Core {
   // Download the mission, the geofence or the rally points (read-only; there is no upload
   // RPC yet: uploads stay behind the core's interlocks).
   rpc DownloadItems(DownloadItemsRequest) returns (ItemList);
+  // The last 500 STATUSTEXT lines from a vehicle, oldest first (the "Messages" view).
+  rpc GetMessages(GetMessagesRequest) returns (MessageList);
 }
 
 message GetInfoRequest {}
@@ -232,6 +234,22 @@ enum PositionTrust {
 message LandedState {
   uint32 age_ms = 1;
   uint32 landed_state = 2;  // MAV_LANDED_STATE: 0 undefined, 1 on ground, 2 in air, 3 takeoff, 4 landing
+}
+
+message GetMessagesRequest {
+  uint32 sysid = 1;  // 0 = first vehicle heard
+}
+
+message LoggedMessage {
+  uint64 unix_ms = 1;   // host time of receipt
+  uint32 compid = 2;
+  uint32 severity = 3;  // MAV_SEVERITY (0 emergency ... 7 debug)
+  string text = 4;
+}
+
+message MessageList {
+  uint32 sysid = 1;
+  repeated LoggedMessage messages = 2;
 }
 
 // MAV_MISSION_TYPE values.

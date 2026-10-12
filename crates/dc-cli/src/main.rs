@@ -280,6 +280,8 @@ enum RemoteCmd {
         #[arg(long = "type", value_enum, default_value_t = ListKind::Mission)]
         kind: ListKind,
     },
+    /// The vehicle's recent STATUSTEXT lines (the "Messages" view), oldest first.
+    Messages,
     /// Print events (STATUSTEXT, links) for a while.
     Events {
         /// Seconds to listen.
@@ -1071,6 +1073,23 @@ async fn remote(url: &str, what: &RemoteCmd) -> Result<(), String> {
                 .collect();
             eprintln!("vehicle {}: {} {:?} items", list.sysid, items.len(), kind);
             print_mission(&items);
+        }
+        RemoteCmd::Messages => {
+            let list = c
+                .get_messages(pb::GetMessagesRequest { sysid: 0 })
+                .await
+                .map_err(err)?
+                .into_inner();
+            for m in &list.messages {
+                println!(
+                    "{}  sev{} [{}] {}",
+                    crate::tlog::utc(m.unix_ms * 1000),
+                    m.severity,
+                    m.compid,
+                    m.text
+                );
+            }
+            eprintln!("vehicle {}: {} messages", list.sysid, list.messages.len());
         }
         RemoteCmd::Events { seconds } => {
             let mut stream = c

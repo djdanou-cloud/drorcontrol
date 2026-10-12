@@ -5,7 +5,7 @@ use std::time::Duration;
 use api::pb::{self, core_client::CoreClient};
 use dc_core::{Core, CoreConfig};
 use mavlink_codec::enums::MavParamType;
-use mavlink_codec::messages::{Heartbeat, MissionCount, MissionItemInt, ParamValue};
+use mavlink_codec::messages::{Heartbeat, MissionCount, MissionItemInt, ParamValue, Statustext};
 use mavlink_codec::{FrameParser, Header, Message, Version, encode};
 use protocols::params::encode_id;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -19,7 +19,12 @@ async fn fake_vehicle(listener: TcpListener) {
     loop {
         let mut out = Vec::new();
         tokio::select! {
-            _ = tick.tick() => out.push(Message::Heartbeat(Heartbeat { r#type: 2, autopilot: 3, mavlink_version: 3, ..Default::default() })),
+            _ = tick.tick() => {
+                out.push(Message::Heartbeat(Heartbeat { r#type: 2, autopilot: 3, mavlink_version: 3, ..Default::default() }));
+                let mut text = [0u8; 50];
+                text[..9].copy_from_slice(b"PreArm: x");
+                out.push(Message::Statustext(Statustext { severity: 2, text, ..Default::default() }));
+            }
             n = sock.read(&mut buf) => {
                 let Ok(n) = n else { return };
                 if n == 0 { return; }
@@ -190,6 +195,16 @@ async fn grpc_api_end_to_end() {
         .await
         .unwrap_err();
     assert_eq!(bad.code(), tonic::Code::InvalidArgument);
+
+    let msgs = c
+        .get_messages(pb::GetMessagesRequest { sysid: 0 })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(msgs.sysid, 7);
+    let m = msgs.messages.last().expect("STATUSTEXT kept");
+    assert_eq!((m.severity, m.text.as_str(), m.compid), (2, "PreArm: x", 1));
+    assert!(m.unix_ms > 1_700_000_000_000, "wall-clock time");
 
     let mut tele = c
         .stream_telemetry(pb::StreamTelemetryRequest {
