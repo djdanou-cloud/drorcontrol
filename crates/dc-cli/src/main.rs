@@ -325,6 +325,13 @@ enum LogCmd {
         #[arg(long)]
         out: std::path::PathBuf,
     },
+    /// Two flights side by side: time, altitude, distance, speeds, battery, motors, tracking.
+    Compare {
+        /// First .bin log.
+        a: std::path::PathBuf,
+        /// Second .bin log.
+        b: std::path::PathBuf,
+    },
     /// Every analysis at once: summary, health, motors, attitude, battery, compass, wind,
     /// sensors, RC link, notch advice and parameter changes.
     Report {
@@ -1033,6 +1040,63 @@ fn print_log_notch(
         println!("currently: {}", cur.join(", "));
     }
     Ok(())
+}
+
+/// The figures `log compare` puts side by side, as (label, value) in a fixed order.
+fn compare_rows(log: &logs::Log) -> Vec<(&'static str, String)> {
+    let f = |v: Option<f64>, digits: usize| v.map_or("-".to_string(), |v| format!("{v:.digits$}"));
+    let s = logs::flight::summary(log);
+    let bat = logs::battery::battery_use(log, 0);
+    let mot = logs::motors::motor_balance(log);
+    let hov = logs::motors::hover_throttle(log);
+    let att = logs::tuning::attitude_tracking(log);
+    let vibe = ["VibeX", "VibeY", "VibeZ"]
+        .iter()
+        .filter_map(|k| log.column("VIBE", k, Some(("IMU", 0.0))))
+        .flat_map(|c| c.values)
+        .filter(|v| v.is_finite())
+        .reduce(f64::max);
+    vec![
+        ("flights", s.armed.len().to_string()),
+        ("armed time, s", f(Some(s.armed_s), 1)),
+        ("highest above home, m", f(s.max_alt_rel_m, 1)),
+        ("furthest from home, m", f(s.max_from_home_m, 0)),
+        ("distance flown, m", f(Some(s.distance_m), 0)),
+        ("top ground speed, m/s", f(s.max_speed_ms, 1)),
+        ("fastest climb, m/s", f(s.max_climb_ms, 1)),
+        ("fastest descent, m/s", f(s.max_descent_ms, 1)),
+        ("battery used, mAh", f(s.used_mah, 0)),
+        ("lowest voltage, V", f(s.min_voltage, 2)),
+        (
+            "mean current, A",
+            f(bat.as_ref().map(|b| b.mean_current_a), 1),
+        ),
+        (
+            "consumption, mAh/min",
+            f(bat.as_ref().and_then(|b| b.mah_per_min()), 0),
+        ),
+        (
+            "hover throttle (learned), %",
+            f(hov.and_then(|h| h.learned).map(|h| h * 100.0), 1),
+        ),
+        (
+            "worst motor deviation, %",
+            f(mot.and_then(|m| m.worst()).map(|w| w.1 * 100.0), 1),
+        ),
+        (
+            "roll error rms, deg",
+            f(att.as_ref().map(|a| a.roll.rms_deg), 2),
+        ),
+        (
+            "pitch error rms, deg",
+            f(att.as_ref().map(|a| a.pitch.rms_deg), 2),
+        ),
+        (
+            "yaw error rms, deg",
+            f(att.as_ref().map(|a| a.yaw.rms_deg), 2),
+        ),
+        ("highest vibration, m/s2", f(vibe, 1)),
+    ]
 }
 
 /// The firmware that wrote a log, from its version banner (modes are named only then).
@@ -1747,6 +1811,18 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
             }
         }
         LogCmd::Summary { path } => print_log_summary(&open(path)?)?,
+        LogCmd::Compare { a, b } => {
+            let (la, lb) = (open(a)?, open(b)?);
+            let (ra, rb) = (compare_rows(&la), compare_rows(&lb));
+            let name = |p: &std::path::Path| {
+                p.file_name()
+                    .map_or("?".into(), |n| n.to_string_lossy().into_owned())
+            };
+            println!("{:<28} {:>16} {:>16}", "", name(a), name(b));
+            for ((label, x), (_, y)) in ra.iter().zip(&rb) {
+                println!("{label:<28} {x:>16} {y:>16}");
+            }
+        }
         LogCmd::Report { path } => {
             let log = open(path)?;
             type Section<'a> = (&'a str, Box<dyn Fn() -> Result<(), String> + 'a>);
