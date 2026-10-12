@@ -226,6 +226,26 @@ enum MissionCmd {
         #[arg(long)]
         out: Option<std::path::PathBuf>,
     },
+    /// Generate a survey grid ("lawnmower") over a polygon as a .waypoints mission: takeoff,
+    /// parallel lines flown alternately, RTL. Offline; upload it like any other mission.
+    Survey {
+        /// Polygon vertices as "lat,lon;lat,lon;..." (at least 3; southern latitudes start
+        /// with a minus sign).
+        #[arg(long, allow_hyphen_values = true)]
+        polygon: String,
+        /// Distance between lines, m.
+        #[arg(long)]
+        spacing: f64,
+        /// Line direction, degrees clockwise from north.
+        #[arg(long, default_value_t = 0.0)]
+        angle: f64,
+        /// Altitude above home, m.
+        #[arg(long)]
+        alt: f32,
+        /// Output .waypoints file (default: print).
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
     /// Read a .waypoints file and list its items (offline).
     Check {
         /// The file.
@@ -819,6 +839,38 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
                 None => print!("{text}"),
             }
             Ok(())
+        }
+        MissionCmd::Survey {
+            polygon,
+            spacing,
+            angle,
+            alt,
+            out,
+        } => {
+            let polygon = polygon
+                .split(';')
+                .map(|v| {
+                    let (a, b) = v
+                        .split_once(',')
+                        .ok_or_else(|| format!("vertex {v:?}: expected lat,lon"))?;
+                    let num = |t: &str| {
+                        t.trim()
+                            .parse::<f64>()
+                            .map_err(|_| format!("vertex {v:?}: {t:?} is not a number"))
+                    };
+                    Ok((num(a)?, num(b)?))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            let items = protocols::survey::mission(&protocols::survey::SurveyConfig {
+                polygon,
+                spacing_m: *spacing,
+                angle_deg: *angle,
+                alt_m: *alt,
+            })
+            .map_err(|e| e.to_string())?;
+            print_stats(&items);
+            let text = protocols::wpl::to_string(&items);
+            write_or_print(out.as_deref(), &text, &format!("{} items", items.len()))
         }
         MissionCmd::Check { file } => {
             let items = read_mission(file)?;

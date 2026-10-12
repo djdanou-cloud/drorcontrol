@@ -8,4 +8,5 @@ pub mod command;
 pub mod log_transfer;
 pub mod mission;
 pub mod params;
+pub mod survey;
 pub mod wpl;

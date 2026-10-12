@@ -1324,3 +1324,43 @@ async fn log_download_is_byte_identical_through_loss() {
     let log = logs::Log::open(&path).unwrap();
     assert!(log.counts().get("PARM").copied().unwrap_or(0) > 100);
 }
+
+/// A generated survey grid is a mission ArduPilot accepts as is: uploaded and verified by
+/// read-back.
+#[tokio::test(flavor = "multi_thread")]
+async fn survey_grid_uploads_and_verifies() {
+    let Some(cfg) = SitlConfig::copter_or_skip() else {
+        return;
+    };
+    let sitl = Sitl::start(&cfg).unwrap();
+    let core = core_on(sitl.addr()).await;
+    assert_eq!(
+        core.wait_for_vehicle(Duration::from_secs(60)).await,
+        Some(1)
+    );
+    until(Duration::from_secs(30), "disarmed and booted", || {
+        core.facts(1).armed == Some(false)
+            && core
+                .fleet()
+                .get(1)
+                .and_then(|v| v.heartbeat.clone())
+                .is_some_and(|h| h.value.system_status != 1)
+    })
+    .await;
+    let mission = protocols::survey::mission(&protocols::survey::SurveyConfig {
+        polygon: vec![
+            (-35.3620, 149.1640),
+            (-35.3620, 149.1660),
+            (-35.3640, 149.1660),
+            (-35.3640, 149.1640),
+        ],
+        spacing_m: 40.0,
+        angle_deg: 30.0,
+        alt_m: 50.0,
+    })
+    .unwrap();
+    assert!(protocols::mission::lint(&mission).is_empty());
+    let report = core.upload_mission((1, 1), mission.clone()).await.unwrap();
+    assert!(report.verified(), "{:?}", report.mismatches);
+    assert_eq!(report.on_vehicle.len(), mission.len());
+}
