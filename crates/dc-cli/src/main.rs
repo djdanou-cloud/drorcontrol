@@ -15,6 +15,8 @@
 //! dc-cli tlog params flight.tlog [--out flight.param]
 //! dc-cli tlog mission flight.tlog [--out flight.waypoints]
 //! dc-cli log export flight.bin --gpx flight.gpx [--kml flight.kml]
+//! dc-cli log csv flight.bin ATT [--out att.csv]
+//! dc-cli log params flight.bin [--out flight.param]
 //! ```
 //!
 //! Read-only by design for now: parameter writes and vehicle commands will be exposed only
@@ -262,6 +264,24 @@ enum LogCmd {
         /// Output file.
         #[arg(long)]
         out: std::path::PathBuf,
+    },
+    /// Every record of one message as CSV (all fields; text quoted).
+    Csv {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+        /// Message name, e.g. ATT.
+        msg: String,
+        /// Output file (default: print).
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
+    /// The parameters recorded in the log as a .param file.
+    Params {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+        /// Output file (default: print).
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
     },
     /// Automatic checks: vibration and clipping, battery against the vehicle's failsafe
     /// voltages, EKF variances against FS_EKF_THRESH, and the autopilot's ERR records.
@@ -950,6 +970,22 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
             for (name, n) in log.counts() {
                 println!("{name:<6} {n}");
             }
+        }
+        LogCmd::Csv { path, msg, out } => {
+            let log = open(path)?;
+            let text = logs::export::csv(&log, msg)
+                .ok_or_else(|| format!("{}: no {msg} messages", path.display()))?;
+            let rows = text.lines().count().saturating_sub(1);
+            write_or_print(out.as_deref(), &text, &format!("{rows} {msg} records"))?;
+        }
+        LogCmd::Params { path, out } => {
+            let log = open(path)?;
+            let text = logs::export::param_file(&log);
+            if text.is_empty() {
+                return Err(format!("{}: no PARM records", path.display()));
+            }
+            let n = text.lines().count();
+            write_or_print(out.as_deref(), &text, &format!("{n} parameters"))?;
         }
         LogCmd::Export { path, gpx, kml } => {
             if gpx.is_none() && kml.is_none() {
