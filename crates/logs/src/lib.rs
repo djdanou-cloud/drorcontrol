@@ -18,6 +18,7 @@ pub mod export;
 pub mod flight;
 pub mod health;
 pub mod motors;
+pub mod notch;
 mod params;
 pub mod rc;
 pub mod sensors;

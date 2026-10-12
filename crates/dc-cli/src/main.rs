@@ -356,6 +356,24 @@ enum LogCmd {
         #[arg(long)]
         out: Option<std::path::PathBuf>,
     },
+    /// Throttle-based harmonic notch settings suggested from the flight (advice only;
+    /// nothing is written to the vehicle).
+    Notch {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+        /// Message and field, e.g. ACC.AccX or GYR.GyrX (raw IMU logging, LOG_BITMASK bit 19).
+        #[arg(long, default_value = "ACC.AccX")]
+        field: String,
+        /// IMU instance.
+        #[arg(long, default_value_t = 0)]
+        imu: u8,
+        /// Samples per FFT segment (power of two).
+        #[arg(long, default_value_t = 1024)]
+        segment: usize,
+        /// Ignore peaks below this frequency, Hz (body motion, not vibration).
+        #[arg(long, default_value_t = 20.0)]
+        min_hz: f64,
+    },
     /// RC link: receiver RSSI and link quality while armed, radio failsafes, late frames.
     Rc {
         /// Path to the .bin log.
@@ -1499,6 +1517,50 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                 &csv,
                 &format!("{} {msg} records", photos.len()),
             )?;
+        }
+        LogCmd::Notch {
+            path,
+            field,
+            imu,
+            segment,
+            min_hz,
+        } => {
+            let log = open(path)?;
+            let (msg, fld) = field
+                .split_once('.')
+                .ok_or_else(|| format!("--field {field:?}: expected MSG.FIELD"))?;
+            let n = logs::notch::suggest(&log, msg, fld, *imu, *segment, *min_hz).ok_or(
+                "no steady flight with enough samples (needs CTUN while flying and raw IMU data)",
+            )?;
+            println!(
+                "steady flight analysed: {:.1} s, {} samples of {field}",
+                n.span_s, n.samples
+            );
+            println!(
+                "suggested throttle-based harmonic notch (review before use; nothing is written):"
+            );
+            println!("  INS_HNTCH_ENABLE 1");
+            println!("  INS_HNTCH_MODE   1  (throttle)");
+            println!(
+                "  INS_HNTCH_FREQ   {:.0}  (Hz, peak at the reference throttle)",
+                n.freq_hz
+            );
+            println!(
+                "  INS_HNTCH_BW     {:.0}  (Hz, half the frequency)",
+                n.bw_hz
+            );
+            println!(
+                "  INS_HNTCH_REF    {:.2}  (throttle during the measurement)",
+                n.ref_throttle
+            );
+            if !n.current.is_empty() {
+                let cur: Vec<String> = n
+                    .current
+                    .iter()
+                    .map(|(k, v)| format!("{k} {}", *v as f32))
+                    .collect();
+                println!("currently: {}", cur.join(", "));
+            }
         }
         LogCmd::Rc { path } => {
             let log = open(path)?;

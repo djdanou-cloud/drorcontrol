@@ -1138,6 +1138,11 @@ async fn auto_mission_flight_reports_progress_to_landing() {
                 .is_some_and(|(_, hi)| (18.0..26.0).contains(&hi))),
         "{rf:?}"
     );
+    // The notch suggestion finds the simulated 37 Hz at about the hover throttle.
+    let notch = logs::notch::suggest(&log, "ACC", "AccX", 0, 1024, 20.0).expect("notch");
+    eprintln!("notch: {notch:?}");
+    assert!((notch.freq_hz - 37.0).abs() <= 3.0, "{notch:?}");
+    assert!((0.25..0.5).contains(&notch.ref_throttle), "{notch:?}");
     // The EKF learned the simulated wind: from the north, about 4 m/s at its strongest.
     let wind = logs::wind::wind(&log).expect("wind estimated with drag fusion");
     eprintln!("wind: {wind:?}");
