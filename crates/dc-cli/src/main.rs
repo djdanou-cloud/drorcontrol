@@ -2177,10 +2177,13 @@ fn tlog_export(
     if gpx.is_none() && kml.is_none() {
         return Err("nothing to write: give --gpx and/or --kml".into());
     }
-    let f = std::fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()))?;
-    let (sys, points) = track::from_tlog(std::io::BufReader::new(f), sysid)
+    let open = || std::fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()));
+    let t = track::from_tlog_modes(std::io::BufReader::new(open()?), sysid)
         .map_err(|e| format!("{}: {e}", file.display()))?
+        .filter(|t| !t.points.is_empty())
         .ok_or_else(|| format!("{}: no vehicle position in this recording", file.display()))?;
+    let sys = t.sysid;
+    let points: Vec<track::Point> = t.points.iter().map(|(_, p)| *p).collect();
     let name = format!(
         "{} (system {sys})",
         file.file_name()
@@ -2199,9 +2202,76 @@ fn tlog_export(
         write(p, track::gpx(&name, &points))?;
     }
     if let Some(p) = kml {
-        write(p, track::kml(&name, &points))?;
+        let segments = track::split_by_mode(&t.points, |m| {
+            if m == u32::MAX {
+                "before the first heartbeat".into()
+            } else {
+                t.firmware
+                    .and_then(|f| f.mode_name(m))
+                    .map_or(format!("mode {m}"), str::to_string)
+            }
+        });
+        let mission = tlog::mission(std::io::BufReader::new(open()?), 0)
+            .ok()
+            .flatten()
+            .map(|(_, items)| track::waypoints(&items))
+            .unwrap_or_default();
+        write(p, track::kml_rich(&name, &segments, &mission, "absolute"))?;
+        eprintln!(
+            "  {} mode segments, {} waypoints",
+            segments.len(),
+            mission.len()
+        );
     }
     Ok(())
+}
+
+/// Track points of a dataflash log tagged with the flight mode (`MODE` records; `u32::MAX`
+/// before the first), and the mission waypoints from `CMD` records (latest per number).
+fn bin_kml_parts(log: &logs::Log) -> (Vec<(u32, track::Point)>, Vec<track::Waypoint>) {
+    let modes: Vec<(u64, u32)> = logs::flight::events(log)
+        .into_iter()
+        .filter_map(|(t, e)| match e {
+            logs::flight::Event::Mode { mode, .. } => Some((t, u32::from(mode))),
+            _ => None,
+        })
+        .collect();
+    let points = logs::track::track(log)
+        .into_iter()
+        .map(|p| {
+            let i = modes.partition_point(|(t, _)| *t <= p.time_us);
+            (
+                if i == 0 { u32::MAX } else { modes[i - 1].1 },
+                track::Point {
+                    unix_us: p.unix_us,
+                    lat: p.lat,
+                    lon: p.lon,
+                    alt_msl: p.alt_msl,
+                },
+            )
+        })
+        .collect();
+    let col = |f: &str| log.column("CMD", f, None);
+    let mut wps: std::collections::BTreeMap<u16, track::Waypoint> = Default::default();
+    if let (Some(n), Some(la), Some(lo), Some(al)) =
+        (col("CNum"), col("Lat"), col("Lng"), col("Alt"))
+    {
+        for k in 0..n.values.len() {
+            if la.values[k] != 0.0 || lo.values[k] != 0.0 {
+                let seq = n.values[k] as u16;
+                wps.insert(
+                    seq,
+                    track::Waypoint {
+                        seq,
+                        lat: la.values[k],
+                        lon: lo.values[k],
+                        alt_m: al.values[k],
+                    },
+                );
+            }
+        }
+    }
+    (points, wps.into_values().collect())
 }
 
 fn read_mission(path: &std::path::Path) -> Result<Vec<dc_core::MissionItem>, String> {
@@ -3074,9 +3144,26 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
             let name = path
                 .file_name()
                 .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+            let rich_kml = || {
+                let (tagged, wps) = bin_kml_parts(&log);
+                let fw = log_firmware(&logs::flight::events(&log));
+                let segments = track::split_by_mode(&tagged, |m| {
+                    if m == u32::MAX {
+                        "before the first mode change".into()
+                    } else {
+                        mode_label(fw, m as u8)
+                    }
+                });
+                eprintln!(
+                    "  {} mode segments, {} waypoints",
+                    segments.len(),
+                    wps.len()
+                );
+                track::kml_rich(&name, &segments, &wps, "absolute")
+            };
             for (out, text) in [
                 (gpx, gpx.as_ref().map(|_| track::gpx(&name, &points))),
-                (kml, kml.as_ref().map(|_| track::kml(&name, &points))),
+                (kml, kml.as_ref().map(|_| rich_kml())),
             ] {
                 if let (Some(p), Some(t)) = (out, text) {
                     std::fs::write(p, t).map_err(|e| format!("{}: {e}", p.display()))?;

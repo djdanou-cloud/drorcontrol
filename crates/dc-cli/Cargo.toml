@@ -14,6 +14,7 @@ path = "src/main.rs"
 clap = { version = "4.6", features = ["derive"] }
 api = { path = "../api" }
 dc-core = { path = "../dc-core" }
+design-tokens = { path = "../design-tokens" }
 link-serial = { path = "../link-serial" }
 logs = { path = "../logs" }
 mavlink-codec.workspace = true
