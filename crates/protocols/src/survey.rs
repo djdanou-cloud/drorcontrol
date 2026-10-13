@@ -55,27 +55,27 @@ impl std::fmt::Display for SurveyError {
 }
 
 /// Local plane about `origin`: x east, y north, metres.
-struct Plane {
+pub(crate) struct Plane {
     lat0: f64,
     lon0: f64,
     cos_lat0: f64,
 }
 
 impl Plane {
-    fn new(origin: (f64, f64)) -> Self {
+    pub(crate) fn new(origin: (f64, f64)) -> Self {
         Plane {
             lat0: origin.0,
             lon0: origin.1,
             cos_lat0: origin.0.to_radians().cos(),
         }
     }
-    fn to_xy(&self, (lat, lon): (f64, f64)) -> (f64, f64) {
+    pub(crate) fn to_xy(&self, (lat, lon): (f64, f64)) -> (f64, f64) {
         (
             (lon - self.lon0).to_radians() * self.cos_lat0 * EARTH_RADIUS_M,
             (lat - self.lat0).to_radians() * EARTH_RADIUS_M,
         )
     }
-    fn to_latlon(&self, (x, y): (f64, f64)) -> (f64, f64) {
+    pub(crate) fn to_latlon(&self, (x, y): (f64, f64)) -> (f64, f64) {
         (
             self.lat0 + (y / EARTH_RADIUS_M).to_degrees(),
             self.lon0 + (x / (EARTH_RADIUS_M * self.cos_lat0)).to_degrees(),

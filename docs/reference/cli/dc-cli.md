@@ -1167,6 +1167,7 @@ Commands:
   download        Download the vehicle's mission and print it (or write a .waypoints file)
   survey          Generate a survey grid ("lawnmower") over a polygon as a .waypoints mission: takeoff, parallel lines flown alternately, RTL. Offline; upload it like any other mission
   check           Read a .waypoints file and list its items (offline)
+  corridor        Corridor scan along a path (a road, river, power line): parallel lines covering --width centred on the path, flown back and forth. Offline; check and upload as usual
   from-kml        A mission from a path drawn in Google Earth (the KML's first LineString): takeoff, a waypoint per point in drawing order, RTL. Offline; check and upload it as usual
   fence-from-kml  A geofence from polygons drawn in Google Earth: every KML polygon becomes an inclusion zone, or an exclusion zone when its name contains "exclusion", "no-fly", "no fly" or "nofly" (any case). Offline; check a mission against it with `mission check --fence`
   rally-from-kml  Rally points from points (placemarks) drawn in Google Earth, at one altitude above home. Offline
@@ -1248,6 +1249,27 @@ Options:
       --fence <FENCE>    Check the whole path against this geofence (fence items as saved by `mission download --type fence --out` or `mission fence-from-kml`, or a .plan's geofence); exits with failure on a breach
       --tlog <TLOG>      Record everything to this .tlog file
   -h, --help             Print help
+```
+
+#### `dc-cli mission corridor`
+
+```text
+Corridor scan along a path (a road, river, power line): parallel lines covering --width centred on the path, flown back and forth. Offline; check and upload as usual
+
+Usage: dc-cli mission corridor [OPTIONS] --width <WIDTH> --spacing <SPACING> --alt <ALT>
+
+Options:
+      --path <PATH>            Path points as "lat,lon;lat,lon;..." (at least 2)
+      --sysid <SYSID>          Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>        Our MAVLink component id [default: 190]
+      --path-kml <PATH_KML>    Read the path from a KML file instead (its first LineString)
+      --tlog <TLOG>            Record everything to this .tlog file
+      --width <WIDTH>          Width to cover, m, centred on the path
+      --spacing <SPACING>      Distance between lines, m
+      --overshoot <OVERSHOOT>  Extend each line this many metres past both ends of the path [default: 0]
+      --alt <ALT>              Altitude above home, m
+      --out <OUT>              Output file (.waypoints or .plan; default: print)
+  -h, --help                   Print help
 ```
 
 #### `dc-cli mission from-kml`

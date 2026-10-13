@@ -11,6 +11,7 @@ pub mod kml;
 pub mod log_transfer;
 pub mod mission;
 pub mod params;
+pub mod pattern;
 pub mod plan;
 pub mod survey;
 pub mod wpl;

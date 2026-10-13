@@ -508,6 +508,31 @@ enum MissionCmd {
         #[arg(long)]
         fence: Option<std::path::PathBuf>,
     },
+    /// Corridor scan along a path (a road, river, power line): parallel lines covering
+    /// --width centred on the path, flown back and forth. Offline; check and upload as usual.
+    Corridor {
+        /// Path points as "lat,lon;lat,lon;..." (at least 2).
+        #[arg(long, allow_hyphen_values = true, required_unless_present = "path_kml")]
+        path: Option<String>,
+        /// Read the path from a KML file instead (its first LineString).
+        #[arg(long, conflicts_with = "path")]
+        path_kml: Option<std::path::PathBuf>,
+        /// Width to cover, m, centred on the path.
+        #[arg(long)]
+        width: f64,
+        /// Distance between lines, m.
+        #[arg(long)]
+        spacing: f64,
+        /// Extend each line this many metres past both ends of the path.
+        #[arg(long, default_value_t = 0.0)]
+        overshoot: f64,
+        /// Altitude above home, m.
+        #[arg(long)]
+        alt: f32,
+        /// Output file (.waypoints or .plan; default: print).
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
     /// A mission from a path drawn in Google Earth (the KML's first LineString): takeoff, a
     /// waypoint per point in drawing order, RTL. Offline; check and upload it as usual.
     FromKml {
@@ -3039,7 +3064,6 @@ fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
     Ok(())
 }
 
-/// Write `text` to `out`, or print it; `what` describes it on stderr.
 /// Polygon vertices from "lat,lon;lat,lon;...".
 fn parse_polygon(text: &str) -> Result<Vec<(f64, f64)>, String> {
     text.split(';')
@@ -3057,6 +3081,7 @@ fn parse_polygon(text: &str) -> Result<Vec<(f64, f64)>, String> {
         .collect()
 }
 
+/// Write `text` to `out`, or print it; `what` describes it on stderr.
 fn write_or_print(out: Option<&std::path::Path>, text: &str, what: &str) -> Result<(), String> {
     match out {
         Some(p) => {
@@ -3664,6 +3689,39 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
                 );
             }
             Ok(())
+        }
+        MissionCmd::Corridor {
+            path,
+            path_kml,
+            width,
+            spacing,
+            overshoot,
+            alt,
+            out,
+        } => {
+            if !(alt.is_finite() && *alt > 0.0) {
+                return Err("--alt must be above 0 m".into());
+            }
+            let pts = match (path, path_kml) {
+                (Some(p), _) => parse_polygon(p)?,
+                (None, Some(k)) => {
+                    let text =
+                        std::fs::read_to_string(k).map_err(|e| format!("{}: {e}", k.display()))?;
+                    protocols::kml::first_line(&text)
+                        .map_err(|e| format!("{}: no usable path ({e})", k.display()))?
+                }
+                (None, None) => return Err("give --path or --path-kml".into()),
+            };
+            let wps = protocols::pattern::corridor(&pts, *width, *spacing, *overshoot)
+                .map_err(|e| e.to_string())?;
+            let lines = (width / spacing).ceil().max(1.0);
+            let items = protocols::mission::route(&wps, *alt);
+            print_stats(&items);
+            write_or_print(
+                out.as_deref(),
+                &mission_text(out.as_deref(), &items),
+                &format!("{lines} lines {spacing} m apart over {width} m"),
+            )
         }
         MissionCmd::FromKml { kml, alt, out } => {
             if !(alt.is_finite() && *alt > 0.0) {
