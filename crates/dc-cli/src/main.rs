@@ -206,6 +206,15 @@ enum ListKind {
 
 #[derive(Subcommand)]
 enum TlogCmd {
+    /// Index the recording for playback: checkpoints, key events, and what a seek to a time
+    /// would restore (the latest message of each stream).
+    Index {
+        /// The .tlog file.
+        file: std::path::PathBuf,
+        /// Show the state a seek to this many seconds after the start restores.
+        #[arg(long)]
+        at: Option<f64>,
+    },
     /// Health checks from the telemetry (vibration, battery, EKF, GPS, errors), for when there
     /// is no dataflash log: the same thresholds as `log health`.
     Health {
@@ -1835,6 +1844,63 @@ fn load_params(path: &std::path::Path) -> Result<std::collections::BTreeMap<Stri
 fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
     let file = match what {
         TlogCmd::Info { file } => file,
+        TlogCmd::Index { file, at } => {
+            let open = || std::fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()));
+            let t0 = Instant::now();
+            let (ix, err) = recorder::TlogIndex::build(std::io::BufReader::new(open()?));
+            let Some((first, last)) = ix.span else {
+                return Err(format!("{}: no records", file.display()));
+            };
+            println!(
+                "{} records, {:.1} s, {} checkpoints, {} message types, {} key events; indexed in {:.0} ms",
+                ix.records,
+                (last - first) as f64 / 1e6,
+                ix.checkpoints.len(),
+                ix.counts.len(),
+                ix.events.len(),
+                t0.elapsed().as_secs_f64() * 1e3
+            );
+            if let Some(e) = err {
+                println!("warning: stopped at a bad record ({e})");
+            }
+            for e in ix
+                .events
+                .iter()
+                .filter(|e| !matches!(e.kind, recorder::KeyEventKind::Text(..)))
+            {
+                println!(
+                    "  {:8.1} s  sys {}  {:?}",
+                    (e.unix_us - first) as f64 / 1e6,
+                    e.sysid,
+                    e.kind
+                );
+            }
+            if let Some(s) = at {
+                let t = first + (s.max(0.0) * 1e6) as u64;
+                let t1 = Instant::now();
+                let snap = ix
+                    .snapshot(&mut std::io::BufReader::new(open()?), t)
+                    .map_err(|e| format!("{}: {e}", file.display()))?;
+                println!(
+                    "seek to {s:.1} s: offset {}, {} streams restored in {:.1} ms",
+                    ix.offset_at(t),
+                    snap.len(),
+                    t1.elapsed().as_secs_f64() * 1e3
+                );
+                for r in &snap {
+                    let f = &r.frame;
+                    let name = mavlink_codec::message_info(f.msgid())
+                        .map_or(format!("#{}", f.msgid()), |i| i.name.to_string());
+                    println!(
+                        "  {:8.1} s  {}/{}  {name}",
+                        (r.unix_us - first) as f64 / 1e6,
+                        f.sysid(),
+                        f.compid()
+                    );
+                }
+            }
+            return Ok(());
+        }
         TlogCmd::Health {
             file,
             json,

@@ -7,6 +7,10 @@
 //! Recording must be lossless and byte-exact; [`TlogReader`] returns frames whose bytes are
 //! identical to what [`TlogWriter`] was given, so replay is indistinguishable from the link.
 
+pub mod index;
+
+pub use index::{KeyEvent, KeyEventKind, TlogIndex};
+
 use std::io::{self, BufWriter, Read, Write};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
