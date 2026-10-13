@@ -599,6 +599,10 @@ enum LogCmd {
         /// Ignore peaks below this frequency, Hz (body motion, not vibration).
         #[arg(long, default_value_t = 20.0)]
         min_hz: f64,
+        /// Write the filter response of the suggested and the current settings (Hz, dB) to
+        /// this CSV file.
+        #[arg(long)]
+        response: Option<std::path::PathBuf>,
     },
     /// RC link: receiver RSSI and link quality while armed, radio failsafes, late frames.
     Rc {
@@ -728,6 +732,28 @@ enum LogCmd {
         /// Samples per FFT segment (any length; powers of two are fastest).
         #[arg(long, default_value_t = 1024)]
         segment: usize,
+    },
+    /// How the vibration spectrum changes over the flight and with throttle: the strongest
+    /// frequency per throttle band (motor-harmonic lines move with throttle), and optionally
+    /// the full spectrogram as CSV (one row per second).
+    Spectrogram {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+        /// Message and field, e.g. IMU.AccZ or ACC.AccZ.
+        #[arg(long, default_value = "IMU.AccZ")]
+        field: String,
+        /// IMU instance.
+        #[arg(long, default_value_t = 0)]
+        imu: u8,
+        /// Throttle bands (equal widths from 0 to 1).
+        #[arg(long, default_value_t = 10)]
+        bands: usize,
+        /// Ignore peaks below this frequency, Hz.
+        #[arg(long, default_value_t = 20.0)]
+        min_hz: f64,
+        /// Write the spectrogram (1 s slices, armed time) to this CSV file.
+        #[arg(long)]
+        csv: Option<std::path::PathBuf>,
     },
     /// Every record of one message as CSV (all fields; text quoted).
     Csv {
@@ -1679,6 +1705,29 @@ fn print_log_attitude(log: &logs::Log) -> Result<(), String> {
             e.max_at_us as f64 / 1e6
         );
     }
+    let osc = logs::tuning::rate_oscillation(log);
+    if !osc.is_empty() {
+        println!("rate-controller error spectrum (longest flight):");
+        for o in &osc {
+            println!(
+                "  {:<5} rms {:.1} deg/s; strongest peak {:.1} Hz holds {:.0} % of the error above 1 Hz ({} samples at {:.0} Hz)",
+                o.axis,
+                o.rms_degs,
+                o.peak_hz,
+                o.peak_share * 100.0,
+                o.samples,
+                o.sample_rate_hz
+            );
+        }
+        println!(
+            "  a single narrow peak holding much of the error is typical of an oscillation (often too much P or D on that axis)"
+        );
+        if osc.iter().any(|o| o.sample_rate_hz < 50.0) {
+            println!(
+                "  RATE is logged slowly here: only oscillations below half the logging rate can be seen (LOG_BITMASK ATTITUDE_FAST logs it at the loop rate)"
+            );
+        }
+    }
     Ok(())
 }
 
@@ -1910,6 +1959,7 @@ fn print_log_notch(
     imu: &u8,
     segment: &usize,
     min_hz: &f64,
+    response: Option<&std::path::Path>,
 ) -> Result<(), String> {
     let (msg, fld) = field
         .split_once('.')
@@ -1943,6 +1993,44 @@ fn print_log_notch(
             .map(|(k, v)| format!("{k} {}", *v as f32))
             .collect();
         println!("currently: {}", cur.join(", "));
+    }
+    // What the filters would do (the notch runs at the gyro rate).
+    let params = log.params();
+    let p = |k: &str, d: f64| params.get(k).copied().unwrap_or(d);
+    let gyro_hz = logs::imu::imu_health(log)
+        .first()
+        .map(|h| h.rates_hz.0)
+        .filter(|r| *r > 0.0)
+        .unwrap_or(1000.0);
+    let suggested = logs::notch_design::NotchConfig {
+        freq_hz: n.freq_hz,
+        bw_hz: n.bw_hz,
+        att_db: p("INS_HNTCH_ATT", 40.0),
+        harmonics: p("INS_HNTCH_HMNCS", 3.0) as u32,
+        sample_hz: gyro_hz,
+    };
+    let current = (p("INS_HNTCH_ENABLE", 0.0) > 0.0).then(|| logs::notch_design::NotchConfig {
+        freq_hz: p("INS_HNTCH_FREQ", 80.0),
+        bw_hz: p("INS_HNTCH_BW", 40.0),
+        ..suggested
+    });
+    println!(
+        "at the measured peak ({:.0} Hz, gyro rate {gyro_hz:.0} Hz): suggested settings {:+.1} dB, current settings {}",
+        n.freq_hz,
+        suggested.gain_db(n.freq_hz),
+        current.map_or("off".to_string(), |c| format!(
+            "{:+.1} dB",
+            c.gain_db(n.freq_hz)
+        ))
+    );
+    if let Some(out) = response {
+        let mut csv = String::from("hz,suggested_db,current_db\n");
+        for (f, g) in suggested.response(500) {
+            let c = current.map_or(String::new(), |c| format!("{:.2}", c.gain_db(f)));
+            csv.push_str(&format!("{f:.2},{g:.2},{c}\n"));
+        }
+        std::fs::write(out, csv).map_err(|e| format!("{}: {e}", out.display()))?;
+        eprintln!("wrote {}", out.display());
     }
     Ok(())
 }
@@ -3358,6 +3446,53 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
             }
             print_aliasing(&log, sp.sample_rate_hz);
         }
+        LogCmd::Spectrogram {
+            path,
+            field,
+            imu,
+            bands,
+            min_hz,
+            csv,
+        } => {
+            let log = open(path)?;
+            let (msg, f) = field
+                .split_once('.')
+                .ok_or("--field is MSG.FIELD, e.g. IMU.AccZ")?;
+            let m = logs::spectrogram::throttle_map(&log, msg, f, *imu, *bands, *min_hz)
+                .ok_or_else(|| format!("no {field} (IMU {imu}) with CTUN while armed"))?;
+            println!(
+                "strongest vibration at or above {min_hz} Hz per throttle band ({field}, IMU {imu}):"
+            );
+            for ((lo, hi, n, _), peak) in m.bands.iter().zip(&m.peak_hz) {
+                println!("  throttle {lo:.2}-{hi:.2}: {peak:6.1} Hz  ({n} s)");
+            }
+            println!(
+                "a peak that rises with throttle is a motor harmonic (throttle-based notch); one that stays put is a frame or prop resonance"
+            );
+            if let Some(out) = csv {
+                let c = log
+                    .column(msg, f, Some(("I", f64::from(*imu))))
+                    .ok_or_else(|| format!("no {field}"))?;
+                let armed = logs::flight::armed_periods(&log);
+                let (t, v): (Vec<u64>, Vec<f64>) = c
+                    .time_us
+                    .iter()
+                    .zip(&c.values)
+                    .filter(|(t, _)| logs::flight::in_periods(&armed, **t))
+                    .map(|(t, v)| (*t, *v))
+                    .unzip();
+                let sg = logs::spectrogram::spectrogram(&t, &v, 1_000_000, 64)
+                    .ok_or("too few samples for a spectrogram")?;
+                std::fs::write(out, logs::spectrogram::spectrogram_csv(&sg))
+                    .map_err(|e| format!("{}: {e}", out.display()))?;
+                eprintln!(
+                    "wrote {} ({} slices, {} bins)",
+                    out.display(),
+                    sg.slices.len(),
+                    sg.freqs.len()
+                );
+            }
+        }
         LogCmd::Summary { path } => print_log_summary(&open(path)?)?,
         LogCmd::Compare { a, b } => {
             let (la, lb) = (open(a)?, open(b)?);
@@ -3398,7 +3533,7 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                 ("RC link", Box::new(|| print_log_rc(&log))),
                 (
                     "Harmonic notch (advice)",
-                    Box::new(|| print_log_notch(&log, "ACC.AccX", &0, &1024, &20.0)),
+                    Box::new(|| print_log_notch(&log, "ACC.AccX", &0, &1024, &20.0, None)),
                 ),
                 ("Parameter changes", Box::new(|| print_log_changes(&log))),
                 (
@@ -3451,7 +3586,15 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
             imu,
             segment,
             min_hz,
-        } => print_log_notch(&open(path)?, field, imu, segment, min_hz)?,
+            response,
+        } => print_log_notch(
+            &open(path)?,
+            field,
+            imu,
+            segment,
+            min_hz,
+            response.as_deref(),
+        )?,
         LogCmd::Rc { path } => print_log_rc(&open(path)?)?,
         LogCmd::Sensors { path } => print_log_sensors(&open(path)?)?,
         LogCmd::Wind { path } => print_log_wind(&open(path)?)?,

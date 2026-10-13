@@ -400,41 +400,42 @@ Dataflash (.bin) log tools: index statistics and downsampled plots, with timings
 Usage: dc-cli log [OPTIONS] <COMMAND>
 
 Commands:
-  info      Index a log and print message counts, timings and memory use
-  list      List the dataflash logs on the vehicle (over MAVLink; vehicle must be disarmed)
-  download  Download a dataflash log from the vehicle over MAVLink (vehicle must be disarmed). Written to OUT.partial and renamed when complete. Logs are never erased
-  compare   Two flights side by side: time, altitude, distance, speeds, battery, motors, tracking
-  report    Every analysis at once: summary, health, motors, attitude, battery, compass, wind, sensors, RC link, notch advice and parameter changes
-  summary   Flight summary: armed time, highest altitude, top speed, distance, battery used
-  events    Timeline of mode changes, arming, events, errors and messages
-  changes   Parameters changed after boot (values the autopilot updates itself are marked)
-  motors    Motor outputs while flying: how hard each motor works compared with the others
-  geotags   Photos in the log (CAM records) as CSV for geotagging, with UTC from the GPS time
-  notch     Throttle-based harmonic notch settings suggested from the flight (advice only; nothing is written to the vehicle)
-  rc        RC link: receiver RSSI and link quality while armed, radio failsafes, late frames
-  sensors   Optical flow and rangefinders while flying: could the EKF use them?
-  altitude  Do the altitude sources agree while flying (barometer vs EKF, GPS vs EKF)?
-  gps       GPS quality while armed: satellites, HDOP, fix types, glitches
-  wind      Wind while flying, as the EKF estimated it
-  imu       IMU health: temperatures, error counts, unhealthy samples while armed, sample rates
-  sanitize  Write a copy with every position moved to a stand-in location (shapes and distances kept), so the log can be shared without revealing where it was flown
-  trim      Write a smaller copy holding only a time window (default: the armed time with a margin), with the formats, parameters and boot messages that explain it
-  takeoffs  Takeoffs: time from arming to liftoff, climb, attitude error just after liftoff
-  landings  Landings: descent speed before touchdown, time to disarm
-  lanes     EKF lane switches (primary core changes), flagged when armed
-  cells     Battery cell balance while flying (packs that report cell voltages)
-  perf      Autopilot performance: loop rate and overruns, processor load, memory, internal errors
-  esc       ESC telemetry while armed: RPM, error rate, temperature and current per ESC
-  compass   Compass interference: field strength against battery current while flying
-  battery   The battery under load while flying: current, power, voltage sag, use, resistance
-  attitude  Attitude tracking while flying: desired minus achieved roll, pitch and yaw
-  fft       Vibration spectrum (Welch FFT) of an IMU axis while armed, and its strongest peaks
-  csv       Every record of one message as CSV (all fields; text quoted)
-  params    The parameters recorded in the log as a .param file
-  health    Automatic checks: vibration and clipping, battery against the vehicle's failsafe voltages, EKF variances against FS_EKF_THRESH, and the autopilot's ERR records
-  export    Export the flight track (EKF position, UTC from the GPS clock) as GPX and/or KML
-  plot      Extract MSG.FIELD and downsample it (MinMaxLTTB) for plotting
-  help      Print this message or the help of the given subcommand(s)
+  info         Index a log and print message counts, timings and memory use
+  list         List the dataflash logs on the vehicle (over MAVLink; vehicle must be disarmed)
+  download     Download a dataflash log from the vehicle over MAVLink (vehicle must be disarmed). Written to OUT.partial and renamed when complete. Logs are never erased
+  compare      Two flights side by side: time, altitude, distance, speeds, battery, motors, tracking
+  report       Every analysis at once: summary, health, motors, attitude, battery, compass, wind, sensors, RC link, notch advice and parameter changes
+  summary      Flight summary: armed time, highest altitude, top speed, distance, battery used
+  events       Timeline of mode changes, arming, events, errors and messages
+  changes      Parameters changed after boot (values the autopilot updates itself are marked)
+  motors       Motor outputs while flying: how hard each motor works compared with the others
+  geotags      Photos in the log (CAM records) as CSV for geotagging, with UTC from the GPS time
+  notch        Throttle-based harmonic notch settings suggested from the flight (advice only; nothing is written to the vehicle)
+  rc           RC link: receiver RSSI and link quality while armed, radio failsafes, late frames
+  sensors      Optical flow and rangefinders while flying: could the EKF use them?
+  altitude     Do the altitude sources agree while flying (barometer vs EKF, GPS vs EKF)?
+  gps          GPS quality while armed: satellites, HDOP, fix types, glitches
+  wind         Wind while flying, as the EKF estimated it
+  imu          IMU health: temperatures, error counts, unhealthy samples while armed, sample rates
+  sanitize     Write a copy with every position moved to a stand-in location (shapes and distances kept), so the log can be shared without revealing where it was flown
+  trim         Write a smaller copy holding only a time window (default: the armed time with a margin), with the formats, parameters and boot messages that explain it
+  takeoffs     Takeoffs: time from arming to liftoff, climb, attitude error just after liftoff
+  landings     Landings: descent speed before touchdown, time to disarm
+  lanes        EKF lane switches (primary core changes), flagged when armed
+  cells        Battery cell balance while flying (packs that report cell voltages)
+  perf         Autopilot performance: loop rate and overruns, processor load, memory, internal errors
+  esc          ESC telemetry while armed: RPM, error rate, temperature and current per ESC
+  compass      Compass interference: field strength against battery current while flying
+  battery      The battery under load while flying: current, power, voltage sag, use, resistance
+  attitude     Attitude tracking while flying: desired minus achieved roll, pitch and yaw
+  fft          Vibration spectrum (Welch FFT) of an IMU axis while armed, and its strongest peaks
+  spectrogram  How the vibration spectrum changes over the flight and with throttle: the strongest frequency per throttle band (motor-harmonic lines move with throttle), and optionally the full spectrogram as CSV (one row per second)
+  csv          Every record of one message as CSV (all fields; text quoted)
+  params       The parameters recorded in the log as a .param file
+  health       Automatic checks: vibration and clipping, battery against the vehicle's failsafe voltages, EKF variances against FS_EKF_THRESH, and the autopilot's ERR records
+  export       Export the flight track (EKF position, UTC from the GPS clock) as GPX and/or KML
+  plot         Extract MSG.FIELD and downsample it (MinMaxLTTB) for plotting
+  help         Print this message or the help of the given subcommand(s)
 
 Options:
       --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
@@ -631,14 +632,15 @@ Arguments:
   <PATH>  Path to the .bin log
 
 Options:
-      --field <FIELD>      Message and field, e.g. ACC.AccX or GYR.GyrX (raw IMU logging, LOG_BITMASK bit 19) [default: ACC.AccX]
-      --sysid <SYSID>      Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>    Our MAVLink component id [default: 190]
-      --imu <IMU>          IMU instance [default: 0]
-      --segment <SEGMENT>  Samples per FFT segment (any length; powers of two are fastest) [default: 1024]
-      --tlog <TLOG>        Record everything to this .tlog file
-      --min-hz <MIN_HZ>    Ignore peaks below this frequency, Hz (body motion, not vibration) [default: 20]
-  -h, --help               Print help
+      --field <FIELD>        Message and field, e.g. ACC.AccX or GYR.GyrX (raw IMU logging, LOG_BITMASK bit 19) [default: ACC.AccX]
+      --sysid <SYSID>        Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>      Our MAVLink component id [default: 190]
+      --imu <IMU>            IMU instance [default: 0]
+      --segment <SEGMENT>    Samples per FFT segment (any length; powers of two are fastest) [default: 1024]
+      --tlog <TLOG>          Record everything to this .tlog file
+      --min-hz <MIN_HZ>      Ignore peaks below this frequency, Hz (body motion, not vibration) [default: 20]
+      --response <RESPONSE>  Write the filter response of the suggested and the current settings (Hz, dB) to this CSV file
+  -h, --help                 Print help
 ```
 
 #### `dc-cli log rc`
@@ -956,6 +958,28 @@ Options:
       --segment <SEGMENT>  Samples per FFT segment (any length; powers of two are fastest) [default: 1024]
       --tlog <TLOG>        Record everything to this .tlog file
   -h, --help               Print help
+```
+
+#### `dc-cli log spectrogram`
+
+```text
+How the vibration spectrum changes over the flight and with throttle: the strongest frequency per throttle band (motor-harmonic lines move with throttle), and optionally the full spectrogram as CSV (one row per second)
+
+Usage: dc-cli log spectrogram [OPTIONS] <PATH>
+
+Arguments:
+  <PATH>  Path to the .bin log
+
+Options:
+      --field <FIELD>    Message and field, e.g. IMU.AccZ or ACC.AccZ [default: IMU.AccZ]
+      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>  Our MAVLink component id [default: 190]
+      --imu <IMU>        IMU instance [default: 0]
+      --bands <BANDS>    Throttle bands (equal widths from 0 to 1) [default: 10]
+      --tlog <TLOG>      Record everything to this .tlog file
+      --min-hz <MIN_HZ>  Ignore peaks below this frequency, Hz [default: 20]
+      --csv <CSV>        Write the spectrogram (1 s slices, armed time) to this CSV file
+  -h, --help             Print help
 ```
 
 #### `dc-cli log csv`

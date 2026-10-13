@@ -26,11 +26,13 @@ pub mod landing;
 pub mod lanes;
 pub mod motors;
 pub mod notch;
+pub mod notch_design;
 mod params;
 pub mod perf;
 pub mod rc;
 pub mod sanitize;
 pub mod sensors;
+pub mod spectrogram;
 pub mod spectrum;
 pub mod takeoff;
 #[cfg(test)]

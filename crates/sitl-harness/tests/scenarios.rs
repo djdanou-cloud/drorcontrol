@@ -1185,6 +1185,28 @@ async fn auto_mission_flight_reports_progress_to_landing() {
     eprintln!("notch: {notch:?}");
     assert!((notch.freq_hz - 37.0).abs() <= 3.0, "{notch:?}");
     assert!((0.25..0.5).contains(&notch.ref_throttle), "{notch:?}");
+    // The suggested notch takes the 37 Hz down by close to its 40 dB depth (gyro at 1 kHz).
+    let design = logs::notch_design::NotchConfig {
+        freq_hz: notch.freq_hz,
+        bw_hz: notch.bw_hz,
+        att_db: 40.0,
+        harmonics: 3,
+        sample_hz: 1000.0,
+    };
+    eprintln!("notch at 37 Hz: {:.1} dB", design.gain_db(37.0));
+    assert!(
+        design.gain_db(37.0) < -20.0,
+        "{:.1} dB",
+        design.gain_db(37.0)
+    );
+    // The simulated vibration does not follow throttle: every throttle band peaks near 37 Hz.
+    let map = logs::spectrogram::throttle_map(&log, "ACC", "AccX", 0, 10, 20.0).expect("map");
+    eprintln!("throttle map peaks: {:?}", map.peak_hz);
+    assert!(
+        !map.peak_hz.is_empty() && map.peak_hz.iter().all(|f| (f - 37.0).abs() <= 4.0),
+        "{:?}",
+        map.peak_hz
+    );
     // Altitude sources agree in the simulator, and its GPS is clean.
     let baro = logs::altitude::baro_vs_ekf(&log).expect("CTUN");
     let gps_alt = logs::altitude::gps_vs_ekf(&log).expect("GPS and POS");
@@ -1202,6 +1224,10 @@ async fn auto_mission_flight_reports_progress_to_landing() {
         gq.fix_3d() > 0.99 && gq.min_sats >= 6.0 && gq.glitches.is_empty(),
         "{gq:?}"
     );
+    // The simulated quad does not oscillate: no single peak dominates the rate error.
+    let osc = logs::tuning::rate_oscillation(&log);
+    eprintln!("rate oscillation: {osc:?}");
+    assert_eq!(osc.len(), 3, "{osc:?}");
     // AUTO holds its height target closely (the wind is horizontal).
     let hold = logs::altitude::hold_error(&log).expect("altitude-controlled flight");
     eprintln!("altitude hold: {hold:?}");

@@ -183,7 +183,7 @@ fn distance_m(a: (f64, f64), b: (f64, f64)) -> f64 {
 }
 
 /// Latest `TimeUS` in the log (the last record of each message type), µs.
-fn log_end_us(log: &Log) -> u64 {
+pub(crate) fn log_end_us(log: &Log) -> u64 {
     log.counts()
         .iter()
         .filter(|(_, n)| **n > 0)
