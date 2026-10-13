@@ -313,6 +313,41 @@ pub fn kml_with(name: &str, points: &[Point], altitude_mode: &str) -> String {
     s
 }
 
+/// `kml` (from [`kml_with`]) with named polygons (lat, lon; closed in the file) and points
+/// added, e.g. a mission's geofence and rally points, so they can be edited in Google Earth
+/// and read back by `mission fence-from-kml` / `rally-from-kml`.
+pub fn kml_add_shapes(
+    kml: &str,
+    polygons: &[(String, Vec<(f64, f64)>)],
+    points: &[(String, (f64, f64))],
+) -> String {
+    let mut add = String::new();
+    for (name, poly) in polygons {
+        let _ = writeln!(
+            add,
+            "    <Placemark>\n      <name>{}</name>\n      <Polygon><outerBoundaryIs><LinearRing><coordinates>",
+            xml_escape(name)
+        );
+        for (lat, lon) in poly.iter().chain(poly.first()) {
+            let _ = writeln!(add, "          {lon:.7},{lat:.7},0");
+        }
+        add.push_str(
+            "      </coordinates></LinearRing></outerBoundaryIs></Polygon>\n    </Placemark>\n",
+        );
+    }
+    for (name, (lat, lon)) in points {
+        let _ = writeln!(
+            add,
+            "    <Placemark>\n      <name>{}</name>\n      <Point><coordinates>{lon:.7},{lat:.7},0</coordinates></Point>\n    </Placemark>",
+            xml_escape(name)
+        );
+    }
+    match kml.rfind("  </Document>") {
+        Some(at) => format!("{}{add}{}", &kml[..at], &kml[at..]),
+        None => kml.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -430,5 +465,32 @@ mod tests {
             colours.len() >= 2 && colours.iter().all(|c| c.len() == 8),
             "{colours:?}"
         );
+    }
+
+    #[test]
+    fn shapes_read_back_as_placemarks() {
+        let base = kml_with("m", &[], "relativeToGround");
+        let k = kml_add_shapes(
+            &base,
+            &[(
+                "No-fly 1 & co".into(),
+                vec![(-35.0, 149.0), (-35.0, 149.1), (-35.1, 149.1)],
+            )],
+            &[("Rally 1".into(), (-35.05, 149.05))],
+        );
+        let p = protocols::kml::placemarks(&k).unwrap();
+        let shapes: Vec<_> = p
+            .iter()
+            .map(|p| (p.name.as_deref(), p.kind, p.points.len()))
+            .collect();
+        assert_eq!(
+            shapes,
+            [
+                (Some("m"), "LineString", 0),
+                (Some("No-fly 1 & co"), "Polygon", 3),
+                (Some("Rally 1"), "Point", 1)
+            ]
+        );
+        assert!(k.trim_end().ends_with("</kml>"));
     }
 }

@@ -3518,6 +3518,62 @@ fn read_fence(path: &std::path::Path) -> Result<Vec<dc_core::MissionItem>, Strin
     read_mission(path)
 }
 
+/// A .plan's geofence as named polygons (circles as 36-sided polygons; exclusion zones
+/// named "No-fly …" so `fence-from-kml` reads them back as exclusions) and its rally
+/// points.
+#[allow(clippy::type_complexity)]
+fn plan_shapes(
+    path: &std::path::Path,
+) -> Result<(Vec<(String, Vec<(f64, f64)>)>, Vec<(String, (f64, f64))>), String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let plan = protocols::plan::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    let f = protocols::fence::Fence::from_items(&plan.fence)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    let circle = |(lat, lon): (f64, f64), r: f64| -> Vec<(f64, f64)> {
+        const R_EARTH: f64 = 6_371_008.8;
+        (0..36)
+            .map(|k| {
+                let a = f64::from(k) * 10f64.to_radians();
+                (
+                    lat + (r * a.cos() / R_EARTH).to_degrees(),
+                    lon + (r * a.sin() / (R_EARTH * lat.to_radians().cos())).to_degrees(),
+                )
+            })
+            .collect()
+    };
+    let mut zones = Vec::new();
+    for (k, p) in f.inclusion_polygons.iter().enumerate() {
+        zones.push((format!("Inclusion {}", k + 1), p.clone()));
+    }
+    for (k, p) in f.exclusion_polygons.iter().enumerate() {
+        zones.push((format!("No-fly {}", k + 1), p.clone()));
+    }
+    for (k, (c, r)) in f.inclusion_circles.iter().enumerate() {
+        zones.push((
+            format!("Inclusion circle {} ({r:.0} m)", k + 1),
+            circle(*c, *r),
+        ));
+    }
+    for (k, (c, r)) in f.exclusion_circles.iter().enumerate() {
+        zones.push((
+            format!("No-fly circle {} ({r:.0} m)", k + 1),
+            circle(*c, *r),
+        ));
+    }
+    let rally = plan
+        .rally
+        .iter()
+        .enumerate()
+        .map(|(k, r)| {
+            (
+                format!("Rally {}", k + 1),
+                (f64::from(r.x) * 1e-7, f64::from(r.y) * 1e-7),
+            )
+        })
+        .collect();
+    Ok((zones, rally))
+}
+
 /// A KML polygon named as a no-fly zone.
 fn is_exclusion_name(name: &str) -> bool {
     let n = name.to_lowercase();
@@ -3857,9 +3913,24 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
                 } else {
                     "relativeToGround"
                 };
-                let text = track::kml_with(&name, &points, mode);
+                let mut text = track::kml_with(&name, &points, mode);
+                // A .plan's geofence and rally points go along as polygons and points.
+                let (zones, rally) = if is_plan(file) {
+                    plan_shapes(file)?
+                } else {
+                    (Vec::new(), Vec::new())
+                };
+                if !zones.is_empty() || !rally.is_empty() {
+                    text = track::kml_add_shapes(&text, &zones, &rally);
+                }
                 std::fs::write(out, text).map_err(|e| format!("{}: {e}", out.display()))?;
-                eprintln!("wrote {} ({} points, {mode})", out.display(), points.len());
+                eprintln!(
+                    "wrote {} ({} points, {mode}; {} fence zones, {} rally points)",
+                    out.display(),
+                    points.len(),
+                    zones.len(),
+                    rally.len()
+                );
             }
             Ok(())
         }

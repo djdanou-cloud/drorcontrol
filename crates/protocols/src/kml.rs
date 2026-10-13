@@ -92,9 +92,23 @@ fn section<'a>(s: &'a str, from: usize, open: &str, close: &str) -> Option<(&'a 
     Some((&s[body_start..b], b + close.len()))
 }
 
-/// A placemark's `<name>`, if it has one.
+/// The placemark's `<name>`, with CDATA and the XML entities decoded.
 fn name_of(placemark: &str) -> Option<String> {
-    section(placemark, 0, "<name", "</name>").map(|(n, _)| n.trim().to_string())
+    let (n, _) = section(placemark, 0, "<name", "</name>")?;
+    let n = n.trim();
+    if let Some(c) = n
+        .strip_prefix("<![CDATA[")
+        .and_then(|c| c.strip_suffix("]]>"))
+    {
+        return Some(c.to_string());
+    }
+    Some(
+        n.replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
+            .replace("&amp;", "&"),
+    )
 }
 
 /// The first `<LineString>` (e.g. a path drawn in Google Earth) as (latitude, longitude)
