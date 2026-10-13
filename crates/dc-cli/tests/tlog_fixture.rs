@@ -14,10 +14,18 @@ fn dc(args: &[&str]) -> (bool, String) {
         .args(args)
         .output()
         .unwrap();
-    (
-        out.status.success(),
-        String::from_utf8_lossy(&out.stdout).into_owned(),
-    )
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    // On failure the reason is on stderr: carry it in the text the asserts print.
+    let text = if out.status.success() {
+        stdout
+    } else {
+        format!(
+            "{stdout}\n[exit {:?}] {}",
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr)
+        )
+    };
+    (out.status.success(), text)
 }
 
 fn tmp(name: &str) -> PathBuf {
@@ -120,7 +128,11 @@ fn kml_by_flight_mode() {
         ])
         .output()
         .unwrap();
-    assert!(out.status.success());
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let k = std::fs::read_to_string(&kml).unwrap();
     for name in [
         "<name>GUIDED</name>",

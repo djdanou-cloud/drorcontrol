@@ -950,6 +950,25 @@ fn main() -> ExitCode {
         }
         default_hook(info);
     }));
+    // Parsing this many subcommands and the large `run` future need more than the 1 MB main
+    // thread stack Windows gives (a debug build overflowed it in CI): run on a thread with a
+    // stack of its own.
+    match std::thread::Builder::new()
+        .name("dc-cli".into())
+        .stack_size(16 << 20)
+        .spawn(real_main)
+        .map(std::thread::JoinHandle::join)
+    {
+        Ok(Ok(code)) => code,
+        Ok(Err(_)) => ExitCode::FAILURE, // panicked; the hook has reported it
+        Err(e) => {
+            eprintln!("error: cannot start: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn real_main() -> ExitCode {
     let cli = Cli::parse();
     let rt = match tokio::runtime::Runtime::new() {
         Ok(rt) => rt,
