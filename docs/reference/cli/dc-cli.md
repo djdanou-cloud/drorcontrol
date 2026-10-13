@@ -1169,6 +1169,7 @@ Commands:
   check           Read a .waypoints file and list its items (offline)
   from-kml        A mission from a path drawn in Google Earth (the KML's first LineString): takeoff, a waypoint per point in drawing order, RTL. Offline; check and upload it as usual
   fence-from-kml  A geofence from polygons drawn in Google Earth: every KML polygon becomes an inclusion zone, or an exclusion zone when its name contains "exclusion", "no-fly", "no fly" or "nofly" (any case). Offline; check a mission against it with `mission check --fence`
+  rally-from-kml  Rally points from points (placemarks) drawn in Google Earth, at one altitude above home. Offline
   convert         Convert a mission between QGroundControl `.plan` and `.waypoints` (QGC WPL 110), by the file extensions. A .plan's geofence and rally points are listed; only the mission is written to a .waypoints file
   reverse         Fly the route backwards (offline): home, TAKEOFF and the final RTL/LAND stay in place
   shift           Move every located item by metres north/east (offline); home stays unless --home
@@ -1282,6 +1283,25 @@ Options:
       --out <OUT>        Output file (.waypoints fence items, or the geofence of a .plan; default: print)
       --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
       --compid <COMPID>  Our MAVLink component id [default: 190]
+      --tlog <TLOG>      Record everything to this .tlog file
+  -h, --help             Print help
+```
+
+#### `dc-cli mission rally-from-kml`
+
+```text
+Rally points from points (placemarks) drawn in Google Earth, at one altitude above home. Offline
+
+Usage: dc-cli mission rally-from-kml [OPTIONS] --alt <ALT> <KML>
+
+Arguments:
+  <KML>  The KML file
+
+Options:
+      --alt <ALT>        Altitude above home, m
+      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>  Our MAVLink component id [default: 190]
+      --out <OUT>        Output file (.waypoints rally items, or the rally points of a .plan; default: print)
       --tlog <TLOG>      Record everything to this .tlog file
   -h, --help             Print help
 ```

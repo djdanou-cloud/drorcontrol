@@ -530,6 +530,18 @@ enum MissionCmd {
         #[arg(long)]
         out: Option<std::path::PathBuf>,
     },
+    /// Rally points from points (placemarks) drawn in Google Earth, at one altitude above
+    /// home. Offline.
+    RallyFromKml {
+        /// The KML file.
+        kml: std::path::PathBuf,
+        /// Altitude above home, m.
+        #[arg(long)]
+        alt: f32,
+        /// Output file (.waypoints rally items, or the rally points of a .plan; default: print).
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
     /// Convert a mission between QGroundControl `.plan` and `.waypoints` (QGC WPL 110), by the
     /// file extensions. A .plan's geofence and rally points are listed; only the mission is
     /// written to a .waypoints file.
@@ -3713,6 +3725,51 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
                     fence.exclusion_polygons.len(),
                     items.len()
                 ),
+            )
+        }
+        MissionCmd::RallyFromKml { kml, alt, out } => {
+            if !(alt.is_finite() && *alt > 0.0) {
+                return Err("--alt must be above 0 m".into());
+            }
+            let text =
+                std::fs::read_to_string(kml).map_err(|e| format!("{}: {e}", kml.display()))?;
+            let marks =
+                protocols::kml::placemarks(&text).map_err(|e| format!("{}: {e}", kml.display()))?;
+            let items: Vec<dc_core::MissionItem> = marks
+                .iter()
+                .filter(|m| m.kind == "Point")
+                .filter_map(|m| {
+                    let &(lat, lon) = m.points.first()?;
+                    eprintln!(
+                        "rally {}: {lat:.7}, {lon:.7}",
+                        m.name.as_deref().unwrap_or("(unnamed)")
+                    );
+                    Some(dc_core::MissionItem {
+                        frame: 3,
+                        command: 5100,
+                        params: [0.0; 4],
+                        x: (lat * 1e7).round() as i32,
+                        y: (lon * 1e7).round() as i32,
+                        z: *alt,
+                        autocontinue: true,
+                    })
+                })
+                .collect();
+            if items.is_empty() {
+                return Err(format!("{}: no points", kml.display()));
+            }
+            let text = if out.as_deref().is_some_and(is_plan) {
+                protocols::plan::to_string(&protocols::plan::Plan {
+                    rally: items.clone(),
+                    ..Default::default()
+                })
+            } else {
+                protocols::wpl::to_string(&items)
+            };
+            write_or_print(
+                out.as_deref(),
+                &text,
+                &format!("{} rally points at {alt} m above home", items.len()),
             )
         }
         MissionCmd::Convert { input, output } => {
