@@ -258,6 +258,11 @@ permission rule for them). The prepared change is not in the repository.
 8. **FFT crate and Inter — done 2026-10-12:** `logs::spectrum` uses `rustfft` 6.4.1; the UI
    font token is Inter (`ui/tokens/tokens.json`, skill and mirrors synced).
 9. Phase 1 (Qt shell) once the above are in.
+10. **Hands-on tests (prepared 2026-10-13):** [`docs/dev/test-kit.md`](../dev/test-kit.md) —
+    which full-CI build to download, the Windows bench test (now with parameter write and
+    rollback, the optional in-flight warning, the new analyses and sanitizing before
+    sharing) and the Mac session (Phase 0 tasks plus the same flight-controller checks).
+    Every runbook command was walked against SITL on 2026-10-13.
 
 ## 8. Where things are (code map)
 

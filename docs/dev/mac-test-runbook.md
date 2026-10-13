@@ -5,7 +5,11 @@ container:
 * T0-05 (serial);
 * T0-06 (UI bridge frame timing);
 * T0-10 (first launch);
-* the go / no-go numbers for T0-07 (map) and T0-09 (video).
+* the go / no-go numbers for T0-07 (map) and T0-09 (video);
+* the command-line checks against a real flight controller (parameters, logs, parameter
+  write and rollback), the same as on Windows ([below](#flight-controller-checks-dc-cli)).
+
+Which build to use is in [the test kit](test-kit.md).
 
 Plan on one working day with one Apple Silicon Mac; add an Intel Mac for the full matrix.
 (A copy of this runbook was shared with the owner as a Claude Doc; this file is the source of
@@ -175,6 +179,16 @@ Record in `ui/spikes/s0-5-video/RESULTS.md` and ADR-0004.
 
 Note any confusing wording in `FIRST-LAUNCH.txt`.
 
+## Flight-controller checks (dc-cli)
+
+Run the [Windows bench test](windows-bench-test.md) steps 1–11 on the Mac, with the
+**propellers off**. The commands are the same with `$B` for `.\dc-cli.exe` and the Mac port
+name for `COM3`, e.g.
+`$B param-set --connect serial:/dev/cu.usbmodemXXXX:115200 DISARM_DELAY=12`. Start with
+`$B about` and keep its output. Use the CI build (`dc-cli-macos-arm64` or
+`dc-cli-macos-x86_64` from the run named in the test kit) or the one built in setup step 7.
+Before sharing any log, sanitize it (step 11; ADR-0012).
+
 ## Where results go
 
 | Task | Evidence | Recorded in |
@@ -184,6 +198,7 @@ Note any confusing wording in `FIRST-LAUNCH.txt`.
 | T0-07 | `s03-*.json`, `gpu.txt`, pinch/rotate verdict | `ui/spikes/s0-3-map/RESULTS.md`, ADR-0003 (go / no-go) |
 | T0-09 | `s05-*.json` | `ui/spikes/s0-5-video/RESULTS.md`, ADR-0004 |
 | T0-10 | Pass/fail per step | Coordination log; `packaging/macos/FIRST-LAUNCH.txt` fixes |
+| dc-cli checks | Console output of each step, `about` output, `report.txt`, `health.json`, `dc-audit.log`, sanitized logs only | Coordination log (findings become issues) |
 
 The plugging and unplugging in T0-05 and the pinch gestures in T0-07 need hands on the
 machine; everything else can be driven remotely if the Mac is connected to an agent session.

@@ -85,6 +85,7 @@ nav:
       - Hazard log: safety/hazards.md
   - Quality:
       - SITL harness: dev/sitl-harness.md
+      - Test kit (Windows, macOS): dev/test-kit.md
       - Mac test runbook: dev/mac-test-runbook.md
       - Windows bench test: dev/windows-bench-test.md
       - Parity inventory: parity/README.md
