@@ -520,6 +520,22 @@ enum LogCmd {
         /// Path to the .bin log.
         path: std::path::PathBuf,
     },
+    /// Write a copy with every position moved to a stand-in location (shapes and distances
+    /// kept), so the log can be shared without revealing where it was flown.
+    Sanitize {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+        /// Output .bin file.
+        #[arg(long)]
+        out: std::path::PathBuf,
+        /// Stand-in location "lat,lon" (default: ArduPilot's SITL home, Canberra).
+        #[arg(
+            long,
+            default_value = "-35.363261,149.165230",
+            allow_hyphen_values = true
+        )]
+        to: String,
+    },
     /// Landings: descent speed before touchdown, time to disarm.
     Landings {
         /// Path to the .bin log.
@@ -2573,6 +2589,44 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
         LogCmd::Cells { path } => print_log_cells(&open(path)?)?,
         LogCmd::Lanes { path } => print_log_lanes(&open(path)?)?,
         LogCmd::Landings { path } => print_log_landings(&open(path)?)?,
+        LogCmd::Sanitize { path, out, to } => {
+            let log = open(path)?;
+            let to = parse_polygon(to)?
+                .first()
+                .copied()
+                .ok_or("--to: expected lat,lon")?;
+            if out == path {
+                return Err("--out must differ from the input".into());
+            }
+            let (bytes, r) = logs::sanitize::sanitize(&log, to);
+            std::fs::write(out, bytes).map_err(|e| format!("{}: {e}", out.display()))?;
+            match r.reference {
+                Some(from) => println!(
+                    "moved {} position values in {} fields from around {:.4},{:.4} to {:.4},{:.4}; wrote {}",
+                    r.values,
+                    r.fields.len(),
+                    from.0,
+                    from.1,
+                    r.stand_in.0,
+                    r.stand_in.1,
+                    out.display()
+                ),
+                None => println!(
+                    "no POS/GPS fix to move relative to: zeroed {} position values; wrote {}",
+                    r.values,
+                    out.display()
+                ),
+            }
+            if !r.zeroed.is_empty() {
+                let what = if r.reference.is_some() {
+                    "zeroed (position fields not named latitude/longitude)"
+                } else {
+                    "position fields (zeroed)"
+                };
+                println!("{what}: {}", r.zeroed.join(", "));
+            }
+            println!("note: altitudes and GPS times are unchanged");
+        }
         LogCmd::Imu { path } => print_log_imu(&open(path)?)?,
         LogCmd::Gps { path } => print_log_gps(&open(path)?)?,
         LogCmd::Compass { path, instance } => print_log_compass(&open(path)?, instance)?,

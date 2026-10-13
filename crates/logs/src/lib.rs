@@ -29,6 +29,7 @@ pub mod notch;
 mod params;
 pub mod perf;
 pub mod rc;
+pub mod sanitize;
 pub mod sensors;
 pub mod spectrum;
 #[cfg(test)]
