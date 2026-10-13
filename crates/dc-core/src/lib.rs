@@ -46,12 +46,10 @@ pub use protocols::command::{
 use protocols::command::{AuditEvent, CommandPolicy, LinkInfo, LinkState, Target};
 pub use protocols::log_transfer::LogEntry;
 use protocols::log_transfer::{LogDownload, LogList, LogTransferConfig, LogTransferStatus};
-use protocols::mission::{
-    self, MISSION_TYPE_MISSION, MissionDownload, MissionUpload, TransferConfig,
-};
-/// Mission types for [`Core::upload_mission`], [`Core::download_mission`] and
+/// Mission types for [`Core::upload_items`], [`Core::download_mission`] and
 /// [`Core::download_items`].
 pub use protocols::mission::{Mismatch, MissionItem, MissionType, TransferStatus};
+use protocols::mission::{MissionDownload, TransferConfig};
 pub use protocols::params::snapshot::ParamSnapshot;
 use protocols::params::{DownloadConfig, DownloadStatus, ParamDownload};
 /// Parameter values, reports and saved baselines for parameter write/rollback clients.
@@ -68,9 +66,14 @@ pub use vehicle::{NavHealth, NavThresholds, PositionTrust, TESTED_FIRMWARE};
 pub mod annunciator;
 mod parameters;
 mod replay;
+mod vehicle_changes;
 pub use parameters::{
     ARMED_WRITE_WARNING, ArmedWrite, PARAM_HEARTBEAT_MAX_AGE, ParamOperationError, ParamReport,
     ParamRisk, ParamWriteResult, parameter_risk,
+};
+pub use vehicle_changes::{
+    ARMED_FENCE_RALLY_WARNING, ARMED_MISSION_UPLOAD_WARNING, ERASE_NOT_VERIFIED_HINT, EraseReport,
+    VehicleChange, VehicleChangeError, VehicleChangeSettings,
 };
 
 /// How to reach a vehicle. Parsed from strings such as `tcp:127.0.0.1:5760`.
@@ -413,6 +416,9 @@ pub struct CoreConfig {
     pub audit_log: Option<PathBuf>,
     /// Navigation-health thresholds (hazard H16; defaults mirror ArduPilot's EKF check).
     pub nav: NavThresholds,
+    /// Opt-in vehicle-change settings at start (all off by default); changed at run time
+    /// with [`Core::set_vehicle_change`].
+    pub vehicle_changes: VehicleChangeSettings,
 }
 
 impl CoreConfig {
@@ -493,6 +499,7 @@ impl Default for CoreConfig {
             policy: PolicyConfig::default(),
             audit_log: None,
             nav: NavThresholds::default(),
+            vehicle_changes: VehicleChangeSettings::default(),
         }
     }
 }
@@ -692,6 +699,8 @@ pub struct Core {
     parameters: Arc<parameters::ParameterState>,
     /// Held across opening a link, so concurrent connects cannot both pass the check.
     link_mode: Arc<tokio::sync::Mutex<LinkMode>>,
+    /// Opt-in vehicle-change settings in force.
+    vehicle_changes: Arc<std::sync::Mutex<VehicleChangeSettings>>,
 }
 
 impl Core {
@@ -714,6 +723,7 @@ impl Core {
         let policy = Arc::new(std::sync::Mutex::new(CommandPolicy::new(
             cfg.policy.clone(),
         )));
+        let vehicle_changes = Arc::new(std::sync::Mutex::new(cfg.vehicle_changes));
         let core = Core {
             cfg: Arc::new(cfg),
             hub,
@@ -730,6 +740,7 @@ impl Core {
             sequences: Arc::default(),
             parameters: Arc::default(),
             link_mode: Arc::default(),
+            vehicle_changes,
         };
 
         // Recorder: lossless, on a blocking thread so disk latency never touches routing.
@@ -1532,70 +1543,25 @@ impl Core {
         (dl.status().clone(), dl.items().to_vec())
     }
 
-    /// Upload `items` to `target`, then download the mission again and compare (hazard H4).
-    /// Only [`MissionReport::verified`] means the vehicle holds exactly this mission.
-    ///
-    /// Refused while the vehicle is armed or its armed state is unknown: an upload in flight
-    /// is a class C two-stage action (plan 08 §4.1) and that confirmation is not built for
-    /// missions yet.
+    /// Upload a mission to a vehicle known to be disarmed, then download it again and compare
+    /// (hazard H4). Only [`MissionReport::verified`] means the vehicle holds exactly this
+    /// mission. To an armed vehicle (opt-in setting and in-flight warning), or for a fence or
+    /// rally list, use [`Core::upload_items`].
     pub async fn upload_mission(
         &self,
         target: (u8, u8),
         items: Vec<MissionItem>,
     ) -> Result<MissionReport, Refusal> {
-        if self.facts(target.0).armed != Some(false) {
-            return Err(Refusal::Precondition(
-                "mission upload needs the vehicle known to be disarmed (in-flight upload needs \
-                 the two-stage confirmation, not built yet)"
-                    .into(),
-            ));
-        }
-        // ArduPilot reports MAV_STATE_BOOT until init_ardupilot() has finished, which includes
-        // initialising mission storage; an upload before that is refused as NO_SPACE (seen in
-        // SITL under load). Say what is really wrong instead.
-        let booting = self
-            .fleet()
-            .get(target.0)
-            .and_then(|v| v.heartbeat.as_ref())
-            .is_none_or(|h| h.value.system_status == MavState::BOOT.0);
-        if booting {
-            return Err(Refusal::Precondition(
-                "the vehicle is still booting (MAV_STATE_BOOT); upload once it reports ready"
-                    .into(),
-            ));
-        }
-        let (mut up, first) = MissionUpload::start(
+        self.upload_items(
             target,
-            items.clone(),
-            MISSION_TYPE_MISSION,
-            TransferConfig::default(),
-            Instant::now(),
-        );
-        self.drive(
-            target,
-            &mut up,
-            first,
-            MissionUpload::on_message,
-            MissionUpload::poll,
-            MissionUpload::status,
+            MissionType::Mission,
+            items,
+            ArmedWrite::DisarmedOnly,
         )
-        .await;
-        // Read back whatever the upload said: a lost final ACK or a partial write shows here.
-        let (readback, on_vehicle) = self.download_mission(target).await;
-        let mismatches = if readback == TransferStatus::Done {
-            mission::verify(&items, &on_vehicle, true)
-        } else {
-            Vec::new()
-        };
-        Ok(MissionReport {
-            upload: up.status().clone(),
-            readback,
-            on_vehicle,
-            mismatches,
-        })
+        .await
+        .map_err(|e| Refusal::Precondition(e.to_string()))
     }
 
-    /// Run a mission state machine until it finishes.
     /// The logs on the vehicle (read-only). Refused unless the vehicle is known to be disarmed:
     /// ArduPilot ignores log requests while armed.
     pub async fn list_logs(&self, target: (u8, u8)) -> Result<Vec<LogEntry>, String> {

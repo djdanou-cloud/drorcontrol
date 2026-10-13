@@ -73,6 +73,10 @@ and the code are newer. Where either disagrees with an owner instruction, the ow
     * Log erase without a prior download.
     * Hazard log: I1–I3 signed off (I3 amended by in-flight upload), H14 accepted, review
       approved.
+    * **Amended 2026-10-13 (owner's go-ahead for items 3–5):** in-flight mission upload,
+      fence/rally upload and log erase each sit behind an **opt-in setting, off by default,
+      with a short warning about its danger** (`armed-mission-upload`, `fence-rally-upload`,
+      `log-erase`; ADR-0012 amendment). With a setting on the operator can make that change.
     * Unchanged (not decided): ADR-0011 D2–D5 (two-stage in-flight disarm, reboot,
       termination; reboot blocked while armed; props-off for motor test), force-arm typed.
     * Closed source, clean-room; MAVLink XML/generated code and pymavlink approved;
@@ -136,14 +140,14 @@ and the code are newer. Where either disagrees with an owner instruction, the ow
 | H4 mission upload verified by read-back; ArduPilot storage rules; refused while armed | `protocols::mission`, `Core::upload_mission` | 30 % loss × 20 seeds; SITL: 20 % loss, 14 items, 0 differences |
 | Mission progress (`MISSION_CURRENT`, `MISSION_ITEM_REACHED`) in `VehicleState` | `vehicle::MissionProgress` | SITL: AUTO mission flight followed item by item to COMPLETE |
 | gRPC `Vehicle` carries `mode_name` (banner-confirmed only), `mission` progress, `landed` state, `nav` health (H16 trust + reasons), `link` state, `home` (HOME_POSITION, requested at 0.2 Hz) ADS-B `traffic` (ADSB_VEHICLE requested at 5 Hz; valid-flag fields only; forgotten after 60 s; distance, bearing and height relative to the vehicle once it has a position) `batteries` (BATTERY_STATUS at 2 Hz; pack voltage = sum of valid entries, cells only when measured), `vibration` (VIBRATION, 2 Hz), `wind` (WIND, 1 Hz), `rc` (RC_CHANNELS, 1 Hz), `servos` (SERVO_OUTPUT_RAW by port, 1 Hz) `radio` (RADIO_STATUS from a telemetry radio, under the system id it reports with) `rangefinders` (DISTANCE_SENSOR, 2 Hz, with an in-range flag) `terrain` (TERRAIN_REPORT, 1 Hz; flags extrapolated heights and the boot-time 0,0 report) and `autopilot_version` (AUTOPILOT_VERSION, requested once on connect like the banner; `tested` says whether the automated tests cover that firmware and major.minor, ArduCopter 4.7 today); `streams`: frames received / lost per component from MAVLink sequence numbers (total and last 10 s); `dc-cli telemetry` shows the loss and the firmware version (flagged when not covered by the tests) | `proto/dc/v1/core.proto`, `api::vehicle_to_pb` | unit test; checked against SITL through `dc-cli daemon` + `remote vehicles` |
-| Read-only download of the geofence and rally points (`Core::download_items`, `MissionType`; `dc-cli mission download --type fence|rally`). No fence/rally upload: a geofence is a failsafe boundary, so an upload path needs owner / safety-lead approval | `protocols::mission`, `dc-core`, `dc-cli` | SITL: fence and rally read back as set |
+| Read-only download of the geofence and rally points (`Core::download_items`, `MissionType`; `dc-cli mission download --type fence|rally`). Upload since 2026-10-13 behind the opt-in `fence-rally-upload` setting (§7) | `protocols::mission`, `dc-core`, `dc-cli` | SITL: fence and rally read back as set |
 | gRPC `DownloadItems` (mission / fence / rally, read-only); `dc-cli remote items --type …` | `proto/dc/v1/core.proto`, `api` | gRPC integration test (fake vehicle) |
 | `.tlog` replay link `tlog:PATH[@SPEED]` (1–100×): original timing, receive-only, allowed only as the core's sole link (no relaying of recorded traffic to a vehicle) | `dc-core/src/replay.rs`, `Core::connect` | `dc-core/tests/replay.rs`; daemon + `remote vehicles` on a SITL recording |
 | Dataflash log health checks (`logs::health`, `dc-cli log health`): vibration/clipping (ArduPilot wiki guidance, commit f4b21ca), battery vs the vehicle's BATT_LOW_VOLT/BATT_CRT_VOLT, EKF3 variances vs its FS_EKF_THRESH, ERR records with subsystem names, GPS (HDOP vs the vehicle's GPS_HDOP_GOOD, 3D-fix losses) and board voltage (BRD_VBUS_MIN to 5.8 V, the arming range; NaN = not measured) | `crates/logs/src/health.rs` | unit tests; both fixture logs |
 | `dc-cli tlog export FILE --gpx/--kml [--vehicle N]`: flight track from GLOBAL_POSITION_INT (GPX 1.1, KML 2.2 absolute altitude). `dc-cli log export FILE.bin` does the same from the EKF position (POS) with UTC from the GPS clock (`logs::track`) | `crates/dc-cli/src/track.rs` | unit tests; 70 s SITL recording, both files parse |
 | STATUSTEXT history: last 500 lines per vehicle in the core (outside the per-message fleet clone), gRPC `GetMessages`, `dc-cli remote messages` | `Core::messages`, `api` | `dc-core/tests/messages.rs` (cap via fast replay), gRPC test |
 | Mission statistics (`protocols::mission::stats`): navigation items, path length (great circle; 0,0 = current position as in `ModeAuto::get_loc_from_cmd`; RTL back home; DO_JUMP not expanded), highest altitude per frame, last nav command; printed by `dc-cli mission check/download` | `crates/protocols/src/mission.rs` | unit test |
-| Dataflash log download over MAVLink (`protocols::log_transfer`, `Core::list_logs/download_log`, `dc-cli log list/download`): refused unless disarmed (ArduPilot ignores log requests while armed); gaps re-requested as one span after the stream goes quiet; written to `.partial` then renamed. LOG_ERASE deliberately not implemented | `crates/protocols/src/log_transfer.rs` | unit tests; SITL: byte-identical to SITL's file through 10 % loss (46 kB/s) |
+| Dataflash log download over MAVLink (`protocols::log_transfer`, `Core::list_logs/download_log`, `dc-cli log list/download`): refused unless disarmed (ArduPilot ignores log requests while armed); gaps re-requested as one span after the stream goes quiet; written to `.partial` then renamed. LOG_ERASE since 2026-10-13 behind the opt-in `log-erase` setting (§7) | `crates/protocols/src/log_transfer.rs` | unit tests; SITL: byte-identical to SITL's file through 10 % loss (46 kB/s) |
 | Camera geotags (CAMERA_FEEDBACK): up to 20 000 per vehicle in the core, repeated image reports replace the earlier one; gRPC `GetGeotags`, `dc-cli remote geotags` (CSV). No camera trigger command (actuation goes through CommandPolicy) | `Core::geotags`, `api` | `dc-core/tests/geotags.rs` |
 | Mission events: `CoreEvent::Mission` / gRPC `MissionEvent` (item reached, current item, mission state) | `dc-core`, `api` | SITL AUTO flight: reached 2 and 3, current 4, Active, Complete |
 | gRPC `ListLogs` / `DownloadLog` (server stream: progress, then 1 MiB chunks, last has `done`); `dc-cli remote logs [--download ID --out FILE]` | `api` | gRPC test with a fake vehicle log; SITL via daemon (360 kB) |
@@ -250,7 +254,7 @@ vehicle is involved, and the audit log:
 
 1. **CI — done 2026-10-12:** pushes/PRs run Linux only (checks, tests, docs, SITL); Windows,
    macOS builds and packaging run nightly (02:17 UTC), on releases and on dispatch. The `sitl`
-   job runs all 17 scenarios on ArduCopter 4.7.1 **and 4.6.3** (both green locally);
+   job runs all scenarios (17 then, 18 now) on ArduCopter 4.7.1 **and 4.6.3** (both green locally);
    `TESTED_FIRMWARE` covers Copter 4.6 and 4.7.
 **Item 2 — done 2026-10-13** (the owner confirmed in-session, adding: also while armed and
 flying, behind a warning pop-up): no dangerous-parameter refusal; `ArmedWarningRequired` /
@@ -260,11 +264,15 @@ CLI done: `dc-cli param-set` (one confirmation, the in-flight warning as a secon
 (warning back until acknowledged; served only with `dc-cli daemon --param-dir DIR`; audited)
 and `dc-cli remote set-params`. Still to do for item 2: the Qt pop-up (Phase 1).
 
-Items 3–5 change the vehicle. They are approved in ADR-0012 but were **paused on 2026-10-12**:
-the agent's safety check stopped the first attempt (dropping the dangerous-parameter refusal
-and adding a gRPC parameter-write call), so they wait for the owner to confirm, in their own
-words in the session, that these vehicle-changing changes may be implemented (or to add a
-permission rule for them). The prepared change is not in the repository.
+**Items 3–5 — done 2026-10-13 (local commit)** after the owner's go-ahead in the session, with
+their condition: each behind an opt-in setting, **off by default**, with a warning about its
+danger (ADR-0012 amendment; `dc_core::VehicleChange`, `VehicleChangeSettings`,
+`Core::upload_items`, `Core::erase_logs`). CLI: `dc-cli settings [show|enable|disable]`
+(settings file in the platform config directory, or `DC_SETTINGS`), `dc-cli mission upload
+FILE [--type mission|fence|rally]`, `dc-cli log erase`. SITL scenario
+`in_flight_uploads_and_log_erase_need_their_settings` green on 4.7.1 and 4.6.3. Still to do:
+the settings screen and in-flight warning pop-ups in the Qt app (Phase 1); gRPC calls for
+upload and erase (the API has none yet).
 
 2. **Parameter writes for all parameters** (T0-18 follow-up): drop the dangerous-parameter
    refusal; a single confirmation, no typed text. Keep the disarmed-heartbeat freshness and

@@ -249,8 +249,15 @@ enum Cmd {
         #[command(subcommand)]
         what: LogCmd,
     },
-    /// Mission files (QGC WPL 110, Mission Planner's .waypoints): download, check, compare.
-    /// Read-only: uploads stay behind the core's interlocks and are not offered here yet.
+    /// Vehicle-change settings: in-flight mission upload, geofence/rally upload and log
+    /// erase. All off by default; each shows its danger when turned on. Without a
+    /// subcommand: show them.
+    Settings {
+        #[command(subcommand)]
+        what: Option<SettingsCmd>,
+    },
+    /// Mission files (QGC WPL 110, Mission Planner's .waypoints, QGC .plan): download,
+    /// upload, check, compare, generate.
     Mission {
         #[command(subcommand)]
         what: MissionCmd,
@@ -339,7 +346,32 @@ enum SearchPattern {
     Sector,
 }
 
-/// `--type` of `mission download`.
+#[derive(Subcommand)]
+enum SettingsCmd {
+    /// Show each setting, whether it is on, and its danger (and where the file is).
+    Show,
+    /// Turn a setting on, after showing its danger and asking once.
+    Enable {
+        /// armed-mission-upload, fence-rally-upload or log-erase.
+        name: String,
+        /// Turn it on without asking (scripts).
+        #[arg(long)]
+        yes: bool,
+        /// Hash-chained audit log to record the change in.
+        #[arg(long, default_value = "dc-audit.log")]
+        audit: std::path::PathBuf,
+    },
+    /// Turn a setting off.
+    Disable {
+        /// armed-mission-upload, fence-rally-upload or log-erase.
+        name: String,
+        /// Hash-chained audit log to record the change in.
+        #[arg(long, default_value = "dc-audit.log")]
+        audit: std::path::PathBuf,
+    },
+}
+
+/// `--type` of `mission download` and `mission upload`.
 #[derive(Clone, Copy, PartialEq, clap::ValueEnum)]
 enum ListKind {
     Mission,
@@ -467,6 +499,29 @@ enum TlogCmd {
 
 #[derive(Subcommand)]
 enum MissionCmd {
+    /// Upload a mission, geofence or rally points from a file (.plan, or .waypoints), then
+    /// read it back and compare. Asks once. A mission to a disarmed vehicle needs no
+    /// setting; to an armed one it needs the `armed-mission-upload` setting and the in-flight
+    /// warning acknowledged. Fence and rally need the `fence-rally-upload` setting (and the
+    /// warning when armed). An empty list clears it on the vehicle. Audited.
+    Upload {
+        #[command(flatten)]
+        vehicle: VehicleArgs,
+        /// The file: a .plan (its mission, geofence or rally points) or QGC WPL 110.
+        file: std::path::PathBuf,
+        /// Which list to upload.
+        #[arg(long = "type", value_enum, default_value_t = ListKind::Mission)]
+        kind: ListKind,
+        /// Confirm without asking (scripts).
+        #[arg(long)]
+        yes: bool,
+        /// Acknowledge the in-flight warning without asking (scripts): upload even if armed.
+        #[arg(long)]
+        armed_ok: bool,
+        /// Hash-chained audit log to append to.
+        #[arg(long, default_value = "dc-audit.log")]
+        audit: std::path::PathBuf,
+    },
     /// Download the vehicle's mission and print it (or write a .waypoints file).
     Download {
         #[command(flatten)]
@@ -755,7 +810,7 @@ enum LogCmd {
         vehicle: VehicleArgs,
     },
     /// Download a dataflash log from the vehicle over MAVLink (vehicle must be disarmed).
-    /// Written to OUT.partial and renamed when complete. Logs are never erased.
+    /// Written to OUT.partial and renamed when complete. Downloading never erases a log.
     Download {
         #[command(flatten)]
         vehicle: VehicleArgs,
@@ -765,6 +820,19 @@ enum LogCmd {
         /// Output file.
         #[arg(long)]
         out: std::path::PathBuf,
+    },
+    /// Erase every dataflash log on the vehicle (LOG_ERASE), then list them again to check.
+    /// Needs the `log-erase` setting and a disarmed vehicle; asks once. Cannot be undone.
+    /// Audited.
+    Erase {
+        #[command(flatten)]
+        vehicle: VehicleArgs,
+        /// Erase without asking (scripts).
+        #[arg(long)]
+        yes: bool,
+        /// Hash-chained audit log to append to.
+        #[arg(long, default_value = "dc-audit.log")]
+        audit: std::path::PathBuf,
     },
     /// Two flights side by side: time, altitude, distance, speeds, battery, motors, tracking.
     Compare {
@@ -1215,6 +1283,342 @@ fn ask(question: &str) -> Option<bool> {
     let mut line = String::new();
     std::io::stdin().lock().read_line(&mut line).ok()?;
     Some(matches!(line.trim(), "y" | "Y" | "yes" | "YES"))
+}
+
+/// Where the vehicle-change settings are kept: `$DC_SETTINGS`, else the platform's
+/// configuration directory.
+fn settings_path() -> Result<std::path::PathBuf, String> {
+    use std::path::PathBuf;
+    if let Some(p) = std::env::var_os("DC_SETTINGS") {
+        return Ok(PathBuf::from(p));
+    }
+    let home = || std::env::var_os("HOME").map(PathBuf::from);
+    let dir = if cfg!(windows) {
+        std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("DrorControl"))
+    } else if cfg!(target_os = "macos") {
+        home().map(|h| h.join("Library/Application Support/DrorControl"))
+    } else {
+        std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .or_else(|| home().map(|h| h.join(".config")))
+            .map(|d| d.join("drorcontrol"))
+    };
+    dir.map(|d| d.join("vehicle-changes.conf"))
+        .ok_or_else(|| "no configuration directory: set DC_SETTINGS to a file path".into())
+}
+
+/// The vehicle-change settings in force (all off when there is no settings file).
+fn load_settings() -> Result<dc_core::VehicleChangeSettings, String> {
+    let path = settings_path()?;
+    match std::fs::read_to_string(&path) {
+        Ok(text) => dc_core::VehicleChangeSettings::parse(&text)
+            .map_err(|e| format!("{}: {e}", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Default::default()),
+        Err(e) => Err(format!("{}: {e}", path.display())),
+    }
+}
+
+/// The refusal, with how to turn the setting on when that is what is missing.
+fn change_error(e: &dc_core::VehicleChangeError) -> String {
+    match e {
+        dc_core::VehicleChangeError::SettingOff(c) => format!(
+            "{e}: nothing was sent. To allow it: dc-cli settings enable {}",
+            c.key()
+        ),
+        _ => format!("{e}: nothing was sent"),
+    }
+}
+
+async fn settings_cmd(what: &SettingsCmd) -> Result<(), String> {
+    let path = settings_path()?;
+    let mut s = load_settings()?;
+    let (name, on, yes, audit) = match what {
+        SettingsCmd::Show => {
+            println!("settings file: {}", path.display());
+            for c in dc_core::VehicleChange::ALL {
+                println!(
+                    "{:<22} {:<3}  {}\n    {}",
+                    c.key(),
+                    if s.get(c) { "ON" } else { "off" },
+                    c.title(),
+                    c.warning()
+                );
+            }
+            return Ok(());
+        }
+        SettingsCmd::Enable { name, yes, audit } => (name, true, *yes, audit),
+        SettingsCmd::Disable { name, audit } => (name, false, true, audit),
+    };
+    let c = dc_core::VehicleChange::from_key(name).ok_or_else(|| {
+        format!(
+            "unknown setting {name:?}: one of {}",
+            dc_core::VehicleChange::ALL.map(|c| c.key()).join(", ")
+        )
+    })?;
+    if s.get(c) == on {
+        eprintln!("{} is already {}", c.key(), if on { "on" } else { "off" });
+        return Ok(());
+    }
+    if on {
+        eprintln!("{}\nWARNING: {}", c.title(), c.warning());
+        if !yes {
+            match ask(&format!("Turn on {}?", c.key())) {
+                Some(true) => {}
+                Some(false) => return Err("not confirmed: the setting stays off".into()),
+                None => return Err("no terminal to confirm on: pass --yes".into()),
+            }
+        }
+    }
+    s.set(c, on);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    std::fs::write(&path, s.to_text()).map_err(|e| format!("{}: {e}", path.display()))?;
+    // Record the change in the audit log, through the core like every other change.
+    let mut before = s;
+    before.set(c, !on);
+    let core = Core::start(CoreConfig {
+        audit_log: Some(audit.clone()),
+        vehicle_changes: before,
+        ..Default::default()
+    })
+    .await
+    .map_err(|e| format!("cannot start core: {e}"))?;
+    core.set_vehicle_change(c, on);
+    drop(core);
+    // The audit writer runs on its own thread; give it a moment to write the record.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    eprintln!(
+        "{} turned {} ({})",
+        c.key(),
+        if on { "ON" } else { "off" },
+        path.display()
+    );
+    Ok(())
+}
+
+/// Start a core that writes the audit log and carries the vehicle-change settings, connect,
+/// and find the vehicle (waiting a moment for its armed state).
+async fn start_for_change(
+    cli: &Cli,
+    vehicle: &VehicleArgs,
+    audit: &std::path::Path,
+    settings: dc_core::VehicleChangeSettings,
+) -> Result<(Core, u8), String> {
+    let core = Core::start(CoreConfig {
+        sysid: cli.sysid,
+        compid: cli.compid,
+        tlog: cli.tlog.clone(),
+        audit_log: Some(audit.to_path_buf()),
+        vehicle_changes: settings,
+        ..Default::default()
+    })
+    .await
+    .map_err(|e| format!("cannot start core: {e}"))?;
+    core.connect(&vehicle.connect)
+        .await
+        .map_err(|e| format!("cannot open {}: {e}", vehicle.connect))?;
+    let sysid = match vehicle.target {
+        Some(t) => t,
+        None => core
+            .wait_for_vehicle(Duration::from_secs(vehicle.wait))
+            .await
+            .ok_or_else(|| {
+                format!(
+                    "no vehicle heartbeat on {} within {} s",
+                    vehicle.connect, vehicle.wait
+                )
+            })?,
+    };
+    let t0 = Instant::now();
+    while core.facts(sysid).armed.is_none() && t0.elapsed() < Duration::from_secs(3) {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    // ArduPilot reports MAV_STATE_BOOT until its storage is ready: wait (up to --wait).
+    let booting = |core: &Core| {
+        core.fleet()
+            .get(sysid)
+            .and_then(|v| v.heartbeat.as_ref())
+            .is_none_or(|h| h.value.system_status == mavlink_codec::enums::MavState::BOOT.0)
+    };
+    if booting(&core) {
+        eprintln!("vehicle {sysid} is still booting; waiting");
+        let t0 = Instant::now();
+        while booting(&core) && t0.elapsed() < Duration::from_secs(vehicle.wait) {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    }
+    Ok((core, sysid))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn mission_upload(
+    cli: &Cli,
+    vehicle: &VehicleArgs,
+    file: &std::path::Path,
+    kind: ListKind,
+    yes: bool,
+    armed_ok: bool,
+    audit: &std::path::Path,
+) -> Result<(), String> {
+    use dc_core::{ArmedWrite, MissionType, VehicleChangeError};
+    let settings = load_settings()?;
+    let (kind, items) = match kind {
+        ListKind::Mission => (MissionType::Mission, read_mission(file)?),
+        ListKind::Fence => (MissionType::Fence, read_fence(file)?),
+        ListKind::Rally => (MissionType::Rally, read_rally(file)?),
+    };
+    let what = match kind {
+        MissionType::Mission => "mission",
+        MissionType::Fence => "geofence",
+        MissionType::Rally => "rally points",
+    };
+    // Refuse before connecting when the setting is off.
+    if kind != MissionType::Mission && !settings.fence_rally_upload {
+        return Err(change_error(&VehicleChangeError::SettingOff(
+            dc_core::VehicleChange::FenceRallyUpload,
+        )));
+    }
+    let (core, sysid) = start_for_change(cli, vehicle, audit, settings).await?;
+    let target = (sysid, vehicle.component);
+    let armed = core.facts(sysid).armed != Some(false);
+    eprintln!(
+        "vehicle {sysid}{}: {what}, {} items from {}{}",
+        match core.facts(sysid).armed {
+            Some(true) => " (ARMED)",
+            Some(false) => "",
+            None => " (armed state unknown)",
+        },
+        items.len(),
+        file.display(),
+        if items.is_empty() {
+            " (clears it on the vehicle)"
+        } else {
+            ""
+        }
+    );
+    if armed && kind == MissionType::Mission && !settings.armed_mission_upload {
+        return Err(change_error(&VehicleChangeError::SettingOff(
+            dc_core::VehicleChange::ArmedMissionUpload,
+        )));
+    }
+    if !yes {
+        match ask(&format!("Upload the {what} to vehicle {sysid}?")) {
+            Some(true) => {}
+            Some(false) => return Err("not confirmed: nothing was sent".into()),
+            None => return Err("no terminal to confirm on: pass --yes".into()),
+        }
+    }
+    let mut mode = if armed_ok {
+        ArmedWrite::Acknowledged
+    } else {
+        ArmedWrite::DisarmedOnly
+    };
+    let report = loop {
+        match core.upload_items(target, kind, items.clone(), mode).await {
+            Ok(r) => break r,
+            Err(VehicleChangeError::ArmedWarningRequired(w)) => {
+                eprintln!("WARNING: {w}");
+                match ask("Upload anyway, to the armed vehicle?") {
+                    Some(true) => mode = ArmedWrite::Acknowledged,
+                    Some(false) => {
+                        return Err("in-flight warning not acknowledged: nothing was sent".into());
+                    }
+                    None => {
+                        return Err(
+                            "vehicle armed: pass --armed-ok to acknowledge the in-flight warning"
+                                .into(),
+                        );
+                    }
+                }
+            }
+            Err(e) => return Err(change_error(&e)),
+        }
+    };
+    // Let the audit writer catch up before the process exits.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    if report.verified() {
+        eprintln!(
+            "verified: the vehicle holds exactly these {} items (read back)",
+            items.len()
+        );
+        return Ok(());
+    }
+    for m in &report.mismatches {
+        eprintln!(
+            "  item {}: {} sent {} vehicle {}",
+            m.seq.map_or("-".into(), |s| s.to_string()),
+            m.field,
+            m.draft,
+            m.vehicle
+        );
+    }
+    Err(format!(
+        "{what} NOT verified: upload {:?}, read-back {:?}, {} mismatches; check the vehicle",
+        report.upload,
+        report.readback,
+        report.mismatches.len()
+    ))
+}
+
+async fn log_erase(
+    cli: &Cli,
+    vehicle: &VehicleArgs,
+    yes: bool,
+    audit: &std::path::Path,
+) -> Result<(), String> {
+    let settings = load_settings()?;
+    if !settings.log_erase {
+        return Err(change_error(&dc_core::VehicleChangeError::SettingOff(
+            dc_core::VehicleChange::LogErase,
+        )));
+    }
+    let (core, sysid) = start_for_change(cli, vehicle, audit, settings).await?;
+    let target = (sysid, vehicle.component);
+    let logs = core.list_logs(target).await?;
+    let bytes: u64 = logs.iter().map(|e| u64::from(e.size)).sum();
+    eprintln!("vehicle {sysid}: {} logs, {bytes} bytes", logs.len());
+    eprintln!("WARNING: {}", dc_core::VehicleChange::LogErase.warning());
+    if !yes {
+        match ask(&format!(
+            "Erase all {} logs on vehicle {sysid}?",
+            logs.len()
+        )) {
+            Some(true) => {}
+            Some(false) => return Err("not confirmed: nothing was erased".into()),
+            None => return Err("no terminal to confirm on: pass --yes".into()),
+        }
+    }
+    let report = core
+        .erase_logs(target)
+        .await
+        .map_err(|e| change_error(&e))?;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    if report.verified() {
+        let new = report.new_logs();
+        eprintln!(
+            "erased: the {} earlier logs are gone{}",
+            report.before.len(),
+            if new.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "; the vehicle started {} new log(s) after the erase (normal after a flight)",
+                    new.len()
+                )
+            }
+        );
+        Ok(())
+    } else {
+        let old = report.still_listed();
+        for e in &old {
+            eprintln!("  still listed: log {} ({} bytes)", e.id, e.size);
+        }
+        Err(format!(
+            "NOT verified after 30 s: {}",
+            dc_core::ERASE_NOT_VERIFIED_HINT
+        ))
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1766,7 +2170,16 @@ async fn run(cli: Cli) -> Result<(), String> {
         Cmd::Log {
             what: what @ (LogCmd::List { .. } | LogCmd::Download { .. }),
         } => log_transfer(&cli, what).await,
+        Cmd::Log {
+            what:
+                LogCmd::Erase {
+                    vehicle,
+                    yes,
+                    audit,
+                },
+        } => log_erase(&cli, vehicle, *yes, audit).await,
         Cmd::Log { what } => log_cmd(what),
+        Cmd::Settings { what } => settings_cmd(what.as_ref().unwrap_or(&SettingsCmd::Show)).await,
         Cmd::Mission { what } => mission_cmd(&cli, what).await,
         Cmd::Tlog { what } => tlog_cmd(what),
         Cmd::Terrain { what } => terrain_cmd(what),
@@ -3518,6 +3931,17 @@ fn read_fence(path: &std::path::Path) -> Result<Vec<dc_core::MissionItem>, Strin
     read_mission(path)
 }
 
+/// Rally points from a file: a `.plan`'s rally points, else QGC WPL 110 rally items.
+fn read_rally(path: &std::path::Path) -> Result<Vec<dc_core::MissionItem>, String> {
+    if is_plan(path) {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        return protocols::plan::parse(&text)
+            .map(|p| p.rally)
+            .map_err(|e| format!("{}: {e}", path.display()));
+    }
+    read_mission(path)
+}
+
 /// A .plan's geofence as named polygons (circles as 36-sided polygons; exclusion zones
 /// named "No-fly …" so `fence-from-kml` reads them back as exclusions) and its rally
 /// points.
@@ -3715,6 +4139,14 @@ async fn download_mission(
 
 async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
     match what {
+        MissionCmd::Upload {
+            vehicle,
+            file,
+            kind,
+            yes,
+            armed_ok,
+            audit,
+        } => mission_upload(cli, vehicle, file, *kind, *yes, *armed_ok, audit).await,
         MissionCmd::Download { vehicle, kind, out } => {
             let kind = match kind {
                 ListKind::Mission => dc_core::MissionType::Mission,
@@ -4525,8 +4957,8 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
         Ok::<_, String>(log)
     };
     match what {
-        // Handled by log_transfer (they need a link).
-        LogCmd::List { .. } | LogCmd::Download { .. } => {}
+        // Handled by log_transfer / log_erase (they need a link).
+        LogCmd::List { .. } | LogCmd::Download { .. } | LogCmd::Erase { .. } => {}
         LogCmd::Info { path } => {
             let log = open(path)?;
             for (name, n) in log.counts() {

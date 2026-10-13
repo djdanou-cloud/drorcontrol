@@ -525,6 +525,41 @@ pub fn verify(draft: &[MissionItem], vehicle: &[MissionItem], skip_home: bool) -
     out
 }
 
+/// Compare an uploaded list of any type with the one read back. Missions as [`verify`] (home
+/// slot skipped). Fence and rally items as ArduPilot stores them (4.6.3 and 4.7.1,
+/// `MissionItemProtocol_Fence` / `_Rally`): a fence item keeps its command, position and
+/// param1 (vertex count or circle radius) and reads back in the global frame with no
+/// altitude; a rally point keeps its position, altitude frame and altitude in whole metres
+/// (truncated), and no params. Empty result = verified.
+pub fn verify_as(
+    kind: MissionType,
+    draft: &[MissionItem],
+    vehicle: &[MissionItem],
+) -> Vec<Mismatch> {
+    let canonical = |mut i: MissionItem| -> MissionItem {
+        match kind {
+            MissionType::Mission => ardupilot_canonical(i),
+            MissionType::Fence => {
+                (i.frame, i.z) = (0, 0.0);
+                i.params = [i.params[0], 0.0, 0.0, 0.0];
+                i
+            }
+            MissionType::Rally => {
+                i.frame = normalise_frame(i.frame);
+                i.z = i.z.trunc();
+                i.params = [0.0; 4];
+                i
+            }
+        }
+    };
+    if kind == MissionType::Mission {
+        return verify(draft, vehicle, true);
+    }
+    let draft: Vec<MissionItem> = draft.iter().map(|i| canonical(*i)).collect();
+    let vehicle: Vec<MissionItem> = vehicle.iter().map(|i| canonical(*i)).collect();
+    verify(&draft, &vehicle, false)
+}
+
 /// A mission flying `points` (latitude, longitude) in order at `alt_m` above home: home at
 /// the first point, TAKEOFF there, a waypoint per point, RTL. Same layout as a survey.
 pub fn route(points: &[(f64, f64)], alt_m: f32) -> Vec<MissionItem> {
@@ -549,6 +584,36 @@ pub fn route(points: &[(f64, f64)], alt_m: f32) -> Vec<MissionItem> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fence_and_rally_read_back_as_ardupilot_stores_them() {
+        let it = |command, frame, params: [f32; 4], z| MissionItem {
+            frame,
+            command,
+            params,
+            x: -353_632_610,
+            y: 1_491_652_300,
+            z,
+            autocontinue: true,
+        };
+        // Fence: sent relative-alt with an altitude, read back global, no altitude, param1 only.
+        let sent = [it(5001, 6, [4.0, 1.0, 0.0, 0.0], 12.0)];
+        let back = [it(5001, 0, [4.0, 0.0, 0.0, 0.0], 0.0)];
+        assert!(verify_as(MissionType::Fence, &sent, &back).is_empty());
+        let wrong = [it(5001, 0, [3.0, 0.0, 0.0, 0.0], 0.0)];
+        assert_eq!(
+            verify_as(MissionType::Fence, &sent, &wrong)[0].field,
+            "param1"
+        );
+        // Rally: GLOBAL_RELATIVE_ALT_INT comes back as GLOBAL_RELATIVE_ALT, whole metres.
+        let sent = [it(5100, 6, [1.0, 0.0, 0.0, 0.0], 30.7)];
+        let back = [it(5100, 3, [0.0; 4], 30.0)];
+        assert!(verify_as(MissionType::Rally, &sent, &back).is_empty());
+        let moved = [MissionItem { x: 1, ..back[0] }];
+        assert_eq!(verify_as(MissionType::Rally, &sent, &moved)[0].field, "x");
+        // A missing item is a count mismatch.
+        assert_eq!(verify_as(MissionType::Rally, &sent, &[])[0].field, "count");
+    }
 
     #[test]
     fn a_route_is_home_takeoff_waypoints_rtl() {

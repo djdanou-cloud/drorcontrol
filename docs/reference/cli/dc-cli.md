@@ -45,7 +45,8 @@ Commands:
   params-review   Which safety nets a parameter set has switched off (advisory; .param or .bin)
   params-diff     Compare two parameter sets, each a .param file or the parameters recorded in a .bin log
   log             Dataflash (.bin) log tools: index statistics and downsampled plots, with timings
-  mission         Mission files (QGC WPL 110, Mission Planner's .waypoints): download, check, compare. Read-only: uploads stay behind the core's interlocks and are not offered here yet
+  settings        Vehicle-change settings: in-flight mission upload, geofence/rally upload and log erase. All off by default; each shows its danger when turned on. Without a subcommand: show them
+  mission         Mission files (QGC WPL 110, Mission Planner's .waypoints, QGC .plan): download, upload, check, compare, generate
   coord           A position in every display format: decimal degrees, DMS, degrees and decimal minutes, UTM and MGRS (WGS-84)
   terrain         Ground elevation from SRTM .hgt tiles on disk (offline)
   tlog            Telemetry logs (.tlog, as recorded with --tlog or by Mission Planner)
@@ -461,7 +462,8 @@ Usage: dc-cli log [OPTIONS] <COMMAND>
 Commands:
   info         Index a log and print message counts, timings and memory use
   list         List the dataflash logs on the vehicle (over MAVLink; vehicle must be disarmed)
-  download     Download a dataflash log from the vehicle over MAVLink (vehicle must be disarmed). Written to OUT.partial and renamed when complete. Logs are never erased
+  download     Download a dataflash log from the vehicle over MAVLink (vehicle must be disarmed). Written to OUT.partial and renamed when complete. Downloading never erases a log
+  erase        Erase every dataflash log on the vehicle (LOG_ERASE), then list them again to check. Needs the `log-erase` setting and a disarmed vehicle; asks once. Cannot be undone. Audited
   compare      Two flights side by side: time, altitude, distance, speeds, battery, motors, tracking
   report       Every analysis at once: summary, health, motors, attitude, battery, compass, wind, sensors, RC link, notch advice and parameter changes
   summary      Flight summary: armed time, highest altitude, top speed, distance, battery used
@@ -542,7 +544,7 @@ Options:
 #### `dc-cli log download`
 
 ```text
-Download a dataflash log from the vehicle over MAVLink (vehicle must be disarmed). Written to OUT.partial and renamed when complete. Logs are never erased
+Download a dataflash log from the vehicle over MAVLink (vehicle must be disarmed). Written to OUT.partial and renamed when complete. Downloading never erases a log
 
 Usage: dc-cli log download [OPTIONS] --connect <CONNECT> --out <OUT>
 
@@ -556,6 +558,26 @@ Options:
       --wait <WAIT>            Seconds to wait for a vehicle heartbeat [default: 15]
       --id <ID>                Log number from `log list` (default: the newest)
       --out <OUT>              Output file
+  -h, --help                   Print help
+```
+
+#### `dc-cli log erase`
+
+```text
+Erase every dataflash log on the vehicle (LOG_ERASE), then list them again to check. Needs the `log-erase` setting and a disarmed vehicle; asks once. Cannot be undone. Audited
+
+Usage: dc-cli log erase [OPTIONS] --connect <CONNECT>
+
+Options:
+      --connect <CONNECT>      Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
+      --sysid <SYSID>          Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>        Our MAVLink component id [default: 190]
+      --target <TARGET>        Target system id (default: first vehicle heard)
+      --component <COMPONENT>  Target component id [default: 1]
+      --tlog <TLOG>            Record everything to this .tlog file
+      --wait <WAIT>            Seconds to wait for a vehicle heartbeat [default: 15]
+      --yes                    Erase without asking (scripts)
+      --audit <AUDIT>          Hash-chained audit log to append to [default: dc-audit.log]
   -h, --help                   Print help
 ```
 
@@ -1158,14 +1180,86 @@ Options:
   -h, --help                 Print help
 ```
 
+### `dc-cli settings`
+
+```text
+Vehicle-change settings: in-flight mission upload, geofence/rally upload and log erase. All off by default; each shows its danger when turned on. Without a subcommand: show them
+
+Usage: dc-cli settings [OPTIONS] [COMMAND]
+
+Commands:
+  show     Show each setting, whether it is on, and its danger (and where the file is)
+  enable   Turn a setting on, after showing its danger and asking once
+  disable  Turn a setting off
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>  Our MAVLink component id [default: 190]
+      --tlog <TLOG>      Record everything to this .tlog file
+  -h, --help             Print help
+```
+
+#### `dc-cli settings show`
+
+```text
+Show each setting, whether it is on, and its danger (and where the file is)
+
+Usage: dc-cli settings show [OPTIONS]
+
+Options:
+      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>  Our MAVLink component id [default: 190]
+      --tlog <TLOG>      Record everything to this .tlog file
+  -h, --help             Print help
+```
+
+#### `dc-cli settings enable`
+
+```text
+Turn a setting on, after showing its danger and asking once
+
+Usage: dc-cli settings enable [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  armed-mission-upload, fence-rally-upload or log-erase
+
+Options:
+      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --yes              Turn it on without asking (scripts)
+      --audit <AUDIT>    Hash-chained audit log to record the change in [default: dc-audit.log]
+      --compid <COMPID>  Our MAVLink component id [default: 190]
+      --tlog <TLOG>      Record everything to this .tlog file
+  -h, --help             Print help
+```
+
+#### `dc-cli settings disable`
+
+```text
+Turn a setting off
+
+Usage: dc-cli settings disable [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  armed-mission-upload, fence-rally-upload or log-erase
+
+Options:
+      --audit <AUDIT>    Hash-chained audit log to record the change in [default: dc-audit.log]
+      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>  Our MAVLink component id [default: 190]
+      --tlog <TLOG>      Record everything to this .tlog file
+  -h, --help             Print help
+```
+
 ### `dc-cli mission`
 
 ```text
-Mission files (QGC WPL 110, Mission Planner's .waypoints): download, check, compare. Read-only: uploads stay behind the core's interlocks and are not offered here yet
+Mission files (QGC WPL 110, Mission Planner's .waypoints, QGC .plan): download, upload, check, compare, generate
 
 Usage: dc-cli mission [OPTIONS] <COMMAND>
 
 Commands:
+  upload          Upload a mission, geofence or rally points from a file (.plan, or .waypoints), then read it back and compare. Asks once. A mission to a disarmed vehicle needs no setting; to an armed one it needs the `armed-mission-upload` setting and the in-flight warning acknowledged. Fence and rally need the `fence-rally-upload` setting (and the warning when armed). An empty list clears it on the vehicle. Audited
   download        Download the vehicle's mission and print it (or write a .waypoints file)
   survey          Generate a survey grid ("lawnmower") over a polygon as a .waypoints mission: takeoff, parallel lines flown alternately, RTL. Offline; upload it like any other mission
   check           Read a .waypoints file and list its items (offline)
@@ -1189,6 +1283,31 @@ Options:
       --compid <COMPID>  Our MAVLink component id [default: 190]
       --tlog <TLOG>      Record everything to this .tlog file
   -h, --help             Print help
+```
+
+#### `dc-cli mission upload`
+
+```text
+Upload a mission, geofence or rally points from a file (.plan, or .waypoints), then read it back and compare. Asks once. A mission to a disarmed vehicle needs no setting; to an armed one it needs the `armed-mission-upload` setting and the in-flight warning acknowledged. Fence and rally need the `fence-rally-upload` setting (and the warning when armed). An empty list clears it on the vehicle. Audited
+
+Usage: dc-cli mission upload [OPTIONS] --connect <CONNECT> <FILE>
+
+Arguments:
+  <FILE>  The file: a .plan (its mission, geofence or rally points) or QGC WPL 110
+
+Options:
+      --connect <CONNECT>      Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
+      --sysid <SYSID>          Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>        Our MAVLink component id [default: 190]
+      --target <TARGET>        Target system id (default: first vehicle heard)
+      --component <COMPONENT>  Target component id [default: 1]
+      --tlog <TLOG>            Record everything to this .tlog file
+      --wait <WAIT>            Seconds to wait for a vehicle heartbeat [default: 15]
+      --type <KIND>            Which list to upload [default: mission] [possible values: mission, fence, rally]
+      --yes                    Confirm without asking (scripts)
+      --armed-ok               Acknowledge the in-flight warning without asking (scripts): upload even if armed
+      --audit <AUDIT>          Hash-chained audit log to append to [default: dc-audit.log]
+  -h, --help                   Print help
 ```
 
 #### `dc-cli mission download`

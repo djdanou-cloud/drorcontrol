@@ -1780,3 +1780,246 @@ async fn survey_grid_uploads_and_verifies() {
     assert!(report.verified(), "{:?}", report.mismatches);
     assert_eq!(report.on_vehicle.len(), mission.len());
 }
+
+/// Owner, 2026-10-13 (ADR-0012 as amended): in-flight mission upload, geofence/rally upload
+/// and log erase are opt-in settings, off by default. Flying in GUIDED, each upload is
+/// refused while its setting is off; on, it still needs the in-flight warning acknowledged,
+/// then it is read back and verified, and the vehicle flies the new mission in AUTO. After
+/// landing, the flight's log is erased the same way and the list is empty.
+#[tokio::test(flavor = "multi_thread")]
+async fn in_flight_uploads_and_log_erase_need_their_settings() {
+    use dc_core::{
+        ArmedWrite, Command, CommandState, MissionItem, MissionType, PositionTrust, VehicleChange,
+        VehicleChangeError,
+    };
+    let Some(cfg) = SitlConfig::copter_or_skip() else {
+        return;
+    };
+    let sitl = Sitl::start(&cfg).unwrap();
+    let core = core_on(sitl.addr()).await;
+    assert_eq!(
+        core.wait_for_vehicle(Duration::from_secs(60)).await,
+        Some(1)
+    );
+    until(Duration::from_secs(90), "position good (EKF)", || {
+        core.nav_health(1).trust == PositionTrust::Good
+    })
+    .await;
+    until(Duration::from_secs(20), "booted", || {
+        core.fleet().get(1).is_some_and(|v| {
+            v.heartbeat
+                .as_ref()
+                .is_some_and(|h| h.value.system_status != 1)
+        })
+    })
+    .await;
+    assert_eq!(core.vehicle_changes(), Default::default(), "all off");
+    let (lat0, lon0) = core
+        .fleet()
+        .get(1)
+        .and_then(|v| v.position.clone())
+        .map(|p| (p.value.lat_deg, p.value.lon_deg))
+        .expect("position");
+    let item = |command: u16, frame: u8, lat: f64, lon: f64, alt: f32| MissionItem {
+        frame,
+        command,
+        params: [0.0; 4],
+        x: (lat * 1e7) as i32,
+        y: (lon * 1e7) as i32,
+        z: alt,
+        autocontinue: true,
+    };
+    // Mission A goes about 55 m north; mission B, uploaded in flight, about 55 m east.
+    let route = |dlat: f64, dlon: f64| {
+        vec![
+            item(16, 0, lat0, lon0, 0.0),
+            item(22, 3, 0.0, 0.0, 15.0),
+            item(16, 3, lat0 + dlat, lon0 + dlon, 15.0),
+            item(20, 2, 0.0, 0.0, 0.0),
+        ]
+    };
+    let report = core
+        .upload_mission((1, 1), route(0.0005, 0.0))
+        .await
+        .unwrap();
+    assert!(report.verified(), "{:?}", report.mismatches);
+
+    let mode = |name| dc_core::Firmware::Copter.mode_number(name).unwrap();
+    let s = command(
+        &core,
+        Command::SetMode {
+            custom_mode: mode("GUIDED"),
+        },
+    )
+    .await;
+    assert_eq!(s.state, CommandState::Verified, "{}", s.summary());
+    let t0 = Instant::now();
+    loop {
+        let s = command(&core, Command::Arm).await;
+        if s.state == CommandState::Verified {
+            break;
+        }
+        assert!(
+            t0.elapsed() < Duration::from_secs(60),
+            "never armed: {}",
+            s.summary()
+        );
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+    let s = command(&core, Command::Takeoff { alt_m: 10.0 }).await;
+    assert!(
+        matches!(s.state, CommandState::Verified | CommandState::Accepted),
+        "{}",
+        s.summary()
+    );
+    let pos = || {
+        core.fleet()
+            .get(1)
+            .and_then(|v| v.position.clone())
+            .map(|p| p.value)
+    };
+    until(Duration::from_secs(60), "climb to 8 m", || {
+        pos().is_some_and(|p| p.alt_rel_m > 8.0)
+    })
+    .await;
+    assert_eq!(core.facts(1).armed, Some(true));
+
+    // Settings off: refused, nothing sent, even with the warning acknowledged.
+    let mission_b = route(0.0, 0.0006);
+    let fence = vec![MissionItem {
+        params: [300.0, 0.0, 0.0, 0.0],
+        ..item(5004, 5, lat0, lon0, 0.0)
+    }];
+    let rally = vec![item(5100, 6, lat0 + 0.0003, lon0, 30.0)];
+    for (kind, items, setting) in [
+        (
+            MissionType::Mission,
+            &mission_b,
+            VehicleChange::ArmedMissionUpload,
+        ),
+        (MissionType::Fence, &fence, VehicleChange::FenceRallyUpload),
+        (MissionType::Rally, &rally, VehicleChange::FenceRallyUpload),
+    ] {
+        let err = core
+            .upload_items((1, 1), kind, items.clone(), ArmedWrite::Acknowledged)
+            .await
+            .expect_err("setting off");
+        assert_eq!(err, VehicleChangeError::SettingOff(setting), "{kind:?}");
+    }
+    let (_, on_vehicle) = core.download_mission((1, 1)).await;
+    assert!(
+        protocols::mission::verify(&route(0.0005, 0.0), &on_vehicle, true).is_empty(),
+        "mission A still on the vehicle"
+    );
+
+    // Settings on: the in-flight warning first, then uploaded and verified while flying.
+    core.set_vehicle_change(VehicleChange::ArmedMissionUpload, true);
+    core.set_vehicle_change(VehicleChange::FenceRallyUpload, true);
+    assert_eq!(
+        core.upload_items(
+            (1, 1),
+            MissionType::Mission,
+            mission_b.clone(),
+            ArmedWrite::DisarmedOnly
+        )
+        .await
+        .expect_err("warning first"),
+        VehicleChangeError::ArmedWarningRequired(dc_core::ARMED_MISSION_UPLOAD_WARNING)
+    );
+    for (kind, items) in [
+        (MissionType::Mission, &mission_b),
+        (MissionType::Fence, &fence),
+        (MissionType::Rally, &rally),
+    ] {
+        let t = Instant::now();
+        let r = core
+            .upload_items((1, 1), kind, items.clone(), ArmedWrite::Acknowledged)
+            .await
+            .unwrap();
+        eprintln!(
+            "in-flight {kind:?} upload verified={} in {:.2} s",
+            r.verified(),
+            t.elapsed().as_secs_f32()
+        );
+        assert!(r.verified(), "{kind:?}: {:?} {:?}", r.upload, r.mismatches);
+    }
+    assert_eq!(core.facts(1).armed, Some(true), "still flying");
+
+    // AUTO flies mission B (east), not A (north), then RTL lands and disarms.
+    let s = command(
+        &core,
+        Command::SetMode {
+            custom_mode: mode("AUTO"),
+        },
+    )
+    .await;
+    assert_eq!(s.state, CommandState::Verified, "{}", s.summary());
+    let m_per_deg = 111_320.0;
+    let (mut max_east, mut max_north) = (0f64, 0f64);
+    let t0 = Instant::now();
+    while core.facts(1).armed != Some(false) {
+        assert!(t0.elapsed() < Duration::from_secs(240), "not landed");
+        if let Some(p) = pos() {
+            max_east = max_east.max((p.lon_deg - lon0) * m_per_deg * lat0.to_radians().cos());
+            max_north = max_north.max((p.lat_deg - lat0) * m_per_deg);
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    eprintln!("flew {max_east:.0} m east, {max_north:.0} m north");
+    assert!(
+        max_east > 45.0,
+        "reached mission B's waypoint: {max_east:.0} m east"
+    );
+    assert!(
+        max_north < 15.0,
+        "did not fly mission A: {max_north:.0} m north"
+    );
+
+    // Log erase: off, refused; on, the flight's log is erased and the list is empty.
+    // ArduPilot keeps logging for 15 s of its own time after disarming
+    // (HAL_LOGGER_ARM_PERSIST) and starts a new log if erased then. Under load SITL's clock
+    // can fall behind the wall clock, so wait until the log stops growing rather than for a
+    // fixed time. Compare sizes only: the time reported for the newest log changes with
+    // every listing (seen on 4.6.3).
+    let sizes = |l: &[dc_core::LogEntry]| l.iter().map(|e| (e.id, e.size)).collect::<Vec<_>>();
+    let mut before = core.list_logs((1, 1)).await.unwrap();
+    let t0 = Instant::now();
+    loop {
+        tokio::time::sleep(Duration::from_secs(4)).await;
+        let now = core.list_logs((1, 1)).await.unwrap();
+        if sizes(&now) == sizes(&before) {
+            before = now;
+            break;
+        }
+        assert!(t0.elapsed() < Duration::from_secs(120), "log never closed");
+        before = now;
+    }
+    eprintln!(
+        "log closed {:.0} s after landing",
+        t0.elapsed().as_secs_f32()
+    );
+    assert!(!before.is_empty(), "the flight left a log");
+    assert_eq!(
+        core.erase_logs((1, 1)).await.expect_err("setting off"),
+        VehicleChangeError::SettingOff(VehicleChange::LogErase)
+    );
+    assert_eq!(
+        sizes(&core.list_logs((1, 1)).await.unwrap()),
+        sizes(&before),
+        "nothing erased"
+    );
+    core.set_vehicle_change(VehicleChange::LogErase, true);
+    let t = Instant::now();
+    let r = core.erase_logs((1, 1)).await.unwrap();
+    eprintln!(
+        "erased {} logs in {:.1} s",
+        r.before.len(),
+        t.elapsed().as_secs_f32()
+    );
+    assert!(r.verified(), "{r:?}");
+    // ArduPilot 4.6.3 starts a small new log right after the erase (its log file was still
+    // open since the flight); the flight's log itself is gone.
+    for e in &r.new_logs() {
+        assert!(e.size < before[0].size / 10, "{r:?}");
+    }
+}

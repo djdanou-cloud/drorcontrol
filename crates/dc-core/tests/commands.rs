@@ -398,8 +398,8 @@ async fn unconfirmed_mode_change_alerts_the_pilot() {
     let _ = stop.send(true);
 }
 
-/// Plan 08 §4.1: a mission upload in flight is class C; until that confirmation exists for
-/// missions the core refuses it while the vehicle is armed.
+/// A mission upload to an armed vehicle is refused unless the opt-in setting
+/// `armed-mission-upload` is on (off by default; ADR-0012 amendment, 2026-10-13).
 #[tokio::test(flavor = "multi_thread")]
 async fn mission_upload_is_refused_while_armed() {
     let (core, v, stop) = setup(CoreConfig::default()).await;
@@ -411,6 +411,108 @@ async fn mission_upload_is_refused_while_armed() {
         .expect_err("refused while armed");
     assert!(matches!(err, Refusal::Precondition(_)), "{err:?}");
     let _ = stop.send(true);
+}
+
+/// Owner, 2026-10-13: in-flight mission upload, fence/rally upload and log erase are opt-in
+/// settings, all off by default. Off, each is refused before anything is sent.
+#[tokio::test(flavor = "multi_thread")]
+async fn vehicle_change_settings_are_off_by_default_and_refuse() {
+    use dc_core::{ArmedWrite, MissionType, VehicleChange, VehicleChangeError};
+    let (core, v, stop) = setup(CoreConfig::default()).await;
+    assert_eq!(
+        core.vehicle_changes(),
+        dc_core::VehicleChangeSettings::default()
+    );
+    for kind in [MissionType::Fence, MissionType::Rally] {
+        let err = core
+            .upload_items((1, 1), kind, Vec::new(), ArmedWrite::Acknowledged)
+            .await
+            .expect_err("fence/rally upload is off");
+        assert_eq!(
+            err,
+            VehicleChangeError::SettingOff(VehicleChange::FenceRallyUpload)
+        );
+    }
+    assert_eq!(
+        core.erase_logs((1, 1)).await.expect_err("log erase is off"),
+        VehicleChangeError::SettingOff(VehicleChange::LogErase)
+    );
+    v.lock().unwrap().armed = true;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let err = core
+        .upload_items(
+            (1, 1),
+            MissionType::Mission,
+            Vec::new(),
+            ArmedWrite::Acknowledged,
+        )
+        .await
+        .expect_err("armed mission upload is off");
+    assert_eq!(
+        err,
+        VehicleChangeError::SettingOff(VehicleChange::ArmedMissionUpload)
+    );
+    assert!(err.to_string().contains("armed-mission-upload"), "{err}");
+    let _ = stop.send(true);
+}
+
+/// With the settings on, an armed vehicle still needs the in-flight warning acknowledged, a
+/// log erase still needs it disarmed (ArduPilot ignores log requests while armed), and
+/// turning a setting on or off is in the audit log.
+#[tokio::test(flavor = "multi_thread")]
+async fn vehicle_change_settings_on_still_warn_and_are_audited() {
+    use dc_core::{
+        ARMED_FENCE_RALLY_WARNING, ARMED_MISSION_UPLOAD_WARNING, ArmedWrite, MissionType,
+        VehicleChange, VehicleChangeError,
+    };
+    let log = tmp("audit-settings");
+    let _ = std::fs::remove_file(&log);
+    let (core, v, stop) = setup(CoreConfig {
+        audit_log: Some(log.clone()),
+        ..Default::default()
+    })
+    .await;
+    for c in VehicleChange::ALL {
+        core.set_vehicle_change(c, true);
+    }
+    v.lock().unwrap().armed = true;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let warn = |kind| {
+        let core = &core;
+        async move {
+            core.upload_items((1, 1), kind, Vec::new(), ArmedWrite::DisarmedOnly)
+                .await
+                .expect_err("needs the warning")
+        }
+    };
+    assert_eq!(
+        warn(MissionType::Mission).await,
+        VehicleChangeError::ArmedWarningRequired(ARMED_MISSION_UPLOAD_WARNING)
+    );
+    assert_eq!(
+        warn(MissionType::Fence).await,
+        VehicleChangeError::ArmedWarningRequired(ARMED_FENCE_RALLY_WARNING)
+    );
+    let err = core.erase_logs((1, 1)).await.expect_err("armed");
+    assert!(
+        matches!(&err, VehicleChangeError::Refused(why) if why.contains("armed")),
+        "{err:?}"
+    );
+    core.set_vehicle_change(VehicleChange::LogErase, false);
+    core.set_vehicle_change(VehicleChange::LogErase, false); // no change: no record
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let text = std::fs::read_to_string(&log).unwrap();
+    audit::verify(text.as_bytes()).expect("valid chain");
+    for key in ["armed-mission-upload", "fence-rally-upload"] {
+        assert!(text.contains(&format!("setting {key} turned ON")), "{text}");
+    }
+    assert_eq!(
+        text.matches("setting log-erase turned").count(),
+        2,
+        "{text}"
+    );
+    let _ = stop.send(true);
+    let _ = std::fs::remove_file(&log);
 }
 
 /// ArduPilot reports MAV_STATE_BOOT until its mission storage is ready; an upload then would be

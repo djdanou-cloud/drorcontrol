@@ -9,7 +9,8 @@
 //!   only after the stream has gone quiet;
 //! * with no logs, the listing is a single `LOG_ENTRY` with id 0 and `num_logs` 0.
 //!
-//! `LOG_ERASE` is deliberately not implemented here: it deletes every log on the vehicle.
+//! `LOG_ERASE` (it deletes every log on the vehicle) is not part of these transfers: it is
+//! `dc_core::Core::erase_logs`, behind the opt-in `log-erase` setting.
 
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};

@@ -49,6 +49,26 @@ confirmations or certification paperwork; the software must be lean, permissive 
 | 18 | gRPC API | Configurable bind address, including all interfaces, for distributed field set-ups; secured with a pre-shared key (bearer token). |
 | 21 | CI minutes | Full 4-OS SITL matrices on releases and schedules only; lean checks on pushes and PRs. |
 
+### Amendment, 2026-10-13: opt-in settings for items 2, 3, 4 and 6
+The owner, giving the go-ahead for in-flight mission upload, CLI upload without a state lock,
+fence and rally upload and log erase, added a condition: **each sits behind a setting the
+operator can change, off by default, with a short warning about its danger.** With the
+setting on, the operator can make these changes to the vehicle.
+
+| Setting (`dc_core::VehicleChange`) | Off (default) | On |
+|---|---|---|
+| `armed-mission-upload` | Mission upload only to a vehicle known to be disarmed (as before) | Also to an armed or flying vehicle (or one whose state is unknown), after the in-flight warning ("Update mission on active vehicle?") is acknowledged |
+| `fence-rally-upload` | No geofence or rally upload, on the ground or in flight | Upload on the ground; in flight after the in-flight warning |
+| `log-erase` | No log erase | `LOG_ERASE` of every log, vehicle disarmed (ArduPilot 4.6.3 and 4.7.1 ignore log requests while armed: `AP_Logger::handle_log_message`) |
+
+In every case: one confirmation before sending; every upload read back and compared (only a
+verified read-back counts), the erase checked by listing the logs until none from before is left (ArduPilot starts a small new log at once after an erase following a flight; a log only grows, so it is told apart by size); turning
+a setting on or off and every action written to the audit log. Mission upload to a disarmed
+vehicle needs no setting (T0-19, unchanged). The core holds the settings
+(`CoreConfig::vehicle_changes`, `Core::set_vehicle_change`) and refuses with
+`VehicleChangeError::SettingOff` before sending anything, so every client (CLI, gRPC, the
+Qt app) gets the same rule. The CLI keeps them in a settings file (`dc-cli settings`).
+
 ## What stays unchanged
 Not part of these decisions, so ADR-0011 and the core keep them:
 * Two-stage (slide, no typed text) confirmation for in-flight disarm, autopilot reboot and

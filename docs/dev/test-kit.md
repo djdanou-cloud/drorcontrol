@@ -48,6 +48,27 @@ from.
   `tlog export --kml` (track by flight mode with the mission).
 * **Sharing safely**: `log sanitize`, `tlog sanitize`, `log trim`.
 
+## Also new: changing the vehicle behind settings (2026-10-13)
+
+Three settings, all **off** until you turn them on; each shows its danger when you do:
+
+```
+dc-cli settings                                  # show them and where the file is
+dc-cli settings enable fence-rally-upload        # armed-mission-upload, log-erase
+dc-cli settings disable fence-rally-upload
+```
+
+Then, against the flight controller (props off):
+
+* `dc-cli mission upload X.plan --connect …` (disarmed: no setting needed), and
+  `--type fence` / `--type rally` (needs `fence-rally-upload`). Each upload is read back
+  and compared; it says `verified` or lists the differences.
+* `dc-cli log erase --connect …` (needs `log-erase`, vehicle disarmed): erases every log.
+  **Download any log you want to keep first.** Wait 15 s after landing (or a failed arming
+  attempt): ArduPilot keeps logging that long and would start a new log straight away.
+* With a setting off, each of these says which setting to turn on and sends nothing.
+* Everything is recorded in `dc-audit.log` (`dc-cli audit-verify --print`).
+
 ## Also new: mission planning (offline, 2026-10-13)
 
 None of these talk to the vehicle; they make and check files to load as usual.
