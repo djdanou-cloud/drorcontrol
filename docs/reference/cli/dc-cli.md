@@ -459,6 +459,7 @@ Commands:
   imu          IMU health: temperatures, error counts, unhealthy samples while armed, sample rates
   sanitize     Write a copy with every position moved to a stand-in location (shapes and distances kept), so the log can be shared without revealing where it was flown
   trim         Write a smaller copy holding only a time window (default: the armed time with a margin), with the formats, parameters and boot messages that explain it
+  failsafes    Every failsafe in order: what triggered, what the vehicle did, when it cleared
   takeoffs     Takeoffs: time from arming to liftoff, climb, attitude error just after liftoff
   landings     Landings: descent speed before touchdown, time to disarm
   lanes        EKF lane switches (primary core changes), flagged when armed
@@ -823,6 +824,23 @@ Options:
       --tlog <TLOG>      Record everything to this .tlog file
       --until <UNTIL>    Window end, seconds since boot
       --margin <MARGIN>  Seconds kept before the first arming and after the last disarm [default: 10]
+  -h, --help             Print help
+```
+
+#### `dc-cli log failsafes`
+
+```text
+Every failsafe in order: what triggered, what the vehicle did, when it cleared
+
+Usage: dc-cli log failsafes [OPTIONS] <PATH>
+
+Arguments:
+  <PATH>  Path to the .bin log
+
+Options:
+      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>  Our MAVLink component id [default: 190]
+      --tlog <TLOG>      Record everything to this .tlog file
   -h, --help             Print help
 ```
 

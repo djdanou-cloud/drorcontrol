@@ -18,6 +18,7 @@ pub mod dataflash;
 pub mod downsample;
 pub mod esc;
 pub mod export;
+pub mod failsafe;
 pub mod flight;
 pub mod gps;
 pub mod health;

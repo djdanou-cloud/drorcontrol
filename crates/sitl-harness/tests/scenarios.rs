@@ -826,6 +826,33 @@ async fn flight_with_gcs_failsafe_on_link_loss() {
         Some(1),
         "ON_GROUND"
     );
+    // The flight log records the GCS failsafe and the switch to RTL it caused.
+    tokio::time::sleep(Duration::from_secs(3)).await; // let the log reach the disk
+    let bin = std::fs::read_dir(sitl.dir().join("logs"))
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("bin")))
+        .max_by_key(|p| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0))
+        .expect("a flight log");
+    let fs = logs::failsafe::failsafes(&logs::Log::open(&bin).unwrap());
+    eprintln!("failsafes: {fs:?}");
+    use logs::failsafe::FailsafeEvent as F;
+    assert!(
+        fs.iter().any(|(_, e)| matches!(
+            e,
+            F::Triggered {
+                what: "FAILSAFE_GCS",
+                ..
+            }
+        )) && fs.iter().any(|(_, e)| matches!(
+            e,
+            F::ModeChange {
+                mode: 6,
+                reason: "GCS failsafe"
+            }
+        )),
+        "{fs:?}"
+    );
 }
 
 /// Plan 08 §2 "Flight" with a mission: upload (verified by read-back), arm and climb in GUIDED,

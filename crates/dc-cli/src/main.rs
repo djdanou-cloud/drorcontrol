@@ -698,6 +698,11 @@ enum LogCmd {
         #[arg(long, default_value_t = 10.0)]
         margin: f64,
     },
+    /// Every failsafe in order: what triggered, what the vehicle did, when it cleared.
+    Failsafes {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+    },
     /// Takeoffs: time from arming to liftoff, climb, attitude error just after liftoff.
     Takeoffs {
         /// Path to the .bin log.
@@ -2214,6 +2219,27 @@ fn print_log_imu(log: &logs::Log) -> Result<(), String> {
     Ok(())
 }
 
+fn print_log_failsafes(log: &logs::Log) -> Result<(), String> {
+    use logs::failsafe::FailsafeEvent as F;
+    let fs = logs::failsafe::failsafes(log);
+    if fs.is_empty() {
+        println!("no failsafe in this log");
+        return Ok(());
+    }
+    let fw = log_firmware(&logs::flight::events(log));
+    for (t, e) in fs {
+        let what = match e {
+            F::Triggered { what, code } => format!("{what} triggered (code {code})"),
+            F::Resolved { what } => format!("{what} cleared"),
+            F::ModeChange { mode, reason } => {
+                format!("mode -> {} ({reason})", mode_label(fw, mode))
+            }
+        };
+        println!("{:9.1} s  {what}", t as f64 / 1e6);
+    }
+    Ok(())
+}
+
 fn print_log_takeoffs(log: &logs::Log) -> Result<(), String> {
     let k = logs::takeoff::takeoffs(log);
     if k.is_empty() {
@@ -3660,6 +3686,7 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                 ("Health checks", Box::new(|| print_log_health(&log))),
                 ("Motors and hover", Box::new(|| print_log_motors(&log))),
                 ("Attitude tracking", Box::new(|| print_log_attitude(&log))),
+                ("Failsafes", Box::new(|| print_log_failsafes(&log))),
                 ("Takeoffs", Box::new(|| print_log_takeoffs(&log))),
                 ("Landings", Box::new(|| print_log_landings(&log))),
                 ("Battery", Box::new(|| print_log_battery(&log, &0))),
@@ -3749,6 +3776,7 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
         LogCmd::Perf { path } => print_log_perf(&open(path)?)?,
         LogCmd::Cells { path } => print_log_cells(&open(path)?)?,
         LogCmd::Lanes { path } => print_log_lanes(&open(path)?)?,
+        LogCmd::Failsafes { path } => print_log_failsafes(&open(path)?)?,
         LogCmd::Takeoffs { path } => print_log_takeoffs(&open(path)?)?,
         LogCmd::Trim {
             path,
