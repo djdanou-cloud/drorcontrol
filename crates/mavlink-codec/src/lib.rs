@@ -43,7 +43,7 @@ pub mod dialect {
     include!(concat!(env!("OUT_DIR"), "/dialect.rs"));
 }
 
-pub use dialect::{Message, enums, message_info, message_infos, messages};
+pub use dialect::{Message, enums, message_fields, message_info, message_infos, messages};
 pub use frame::{EncodeError, Frame, FrameParser, Header, ParserStats, Version, encode};
 
 /// Behaviour shared by every generated message struct.
@@ -84,6 +84,25 @@ pub struct MessageInfo {
     pub target_system_ofs: Option<usize>,
     /// Payload offset of a `target_component` field, if any.
     pub target_component_ofs: Option<usize>,
+}
+
+/// Where one field sits in a payload ([`message_fields`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FieldLayout {
+    /// Message ID.
+    pub msg_id: u32,
+    /// Field name as in the XML.
+    pub name: &'static str,
+    /// Byte offset in the (untruncated) payload.
+    pub offset: usize,
+    /// Element type as in the XML (`int32_t`, `float`, `char`, ...).
+    pub ty: &'static str,
+    /// Array length, 0 for a scalar.
+    pub array_len: u8,
+    /// Units attribute (e.g. `degE7`), if any.
+    pub units: Option<&'static str>,
+    /// Declared after `<extensions/>`.
+    pub extension: bool,
 }
 
 /// A message ID that is not part of the compiled dialect.

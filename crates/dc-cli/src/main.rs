@@ -24,6 +24,7 @@
 //! through the safety interlocks (`CommandPolicy`, plan 08 §4) once they exist.
 
 mod tlog;
+mod tlog_sanitize;
 mod track;
 
 use std::process::ExitCode;
@@ -204,6 +205,22 @@ enum ListKind {
 
 #[derive(Subcommand)]
 enum TlogCmd {
+    /// Write a copy with every position moved to a stand-in location (shapes and distances
+    /// kept), so the recording can be shared without revealing where it was flown.
+    Sanitize {
+        /// The .tlog file.
+        file: std::path::PathBuf,
+        /// Output .tlog file.
+        #[arg(long)]
+        out: std::path::PathBuf,
+        /// Stand-in location "lat,lon" (default: ArduPilot's SITL home, Canberra).
+        #[arg(
+            long,
+            default_value = "-35.363261,149.165230",
+            allow_hyphen_values = true
+        )]
+        to: String,
+    },
     /// Time span, systems, message counts, maximum altitude, and a timeline of mode changes,
     /// arming and STATUSTEXT.
     Info {
@@ -1618,6 +1635,59 @@ fn load_params(path: &std::path::Path) -> Result<std::collections::BTreeMap<Stri
 fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
     let file = match what {
         TlogCmd::Info { file } => file,
+        TlogCmd::Sanitize { file, out, to } => {
+            let to = parse_polygon(to)?
+                .first()
+                .copied()
+                .ok_or("--to: expected lat,lon")?;
+            if out == file {
+                return Err("--out must differ from the input".into());
+            }
+            let f = std::fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()))?;
+            let (bytes, r, err) = tlog_sanitize::sanitize(std::io::BufReader::new(f), to);
+            std::fs::write(out, bytes).map_err(|e| format!("{}: {e}", out.display()))?;
+            match r.reference {
+                Some(from) => println!(
+                    "moved {} position values in {} of {} frames from around {:.4},{:.4} to {:.4},{:.4}; wrote {}",
+                    r.values,
+                    r.changed,
+                    r.frames,
+                    from.0,
+                    from.1,
+                    to.0,
+                    to.1,
+                    out.display()
+                ),
+                None => println!(
+                    "no GLOBAL_POSITION_INT/GPS_RAW_INT fix to move relative to: zeroed {} position values in {} of {} frames; wrote {}",
+                    r.values,
+                    r.changed,
+                    r.frames,
+                    out.display()
+                ),
+            }
+            if !r.fields.is_empty() {
+                let f: Vec<&str> = r.fields.iter().map(String::as_str).collect();
+                println!("fields: {}", f.join(", "));
+            }
+            if r.unsigned > 0 {
+                println!(
+                    "{} signed frames changed and are now unsigned (no key to re-sign)",
+                    r.unsigned
+                );
+            }
+            if r.unknown > 0 {
+                println!(
+                    "warning: {} frames of messages outside the dialect copied unchanged (not checked for positions)",
+                    r.unknown
+                );
+            }
+            if let Some(e) = err {
+                println!("warning: stopped at a bad record ({e}); the rest was not written");
+            }
+            println!("note: altitudes and times are unchanged");
+            return Ok(());
+        }
         TlogCmd::Changes { file, vehicle } => {
             let f = std::fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()))?;
             let (sys, changes) = tlog::param_changes(std::io::BufReader::new(f), *vehicle)

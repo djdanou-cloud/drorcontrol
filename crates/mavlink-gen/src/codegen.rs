@@ -462,6 +462,32 @@ fn gen_info_table(o: &mut String, msgs: &[Message]) {
     o.push_str("/// Wire metadata for message `id`, without decoding anything (used by the framer and router).\n");
     o.push_str("pub fn message_info(id: u32) -> Option<&'static crate::MessageInfo> {\n    MESSAGE_INFO.binary_search_by_key(&id, |m| m.id).ok().map(|i| &MESSAGE_INFO[i])\n}\n\n");
     o.push_str("/// Wire metadata for every message, sorted by ID.\npub fn message_infos() -> &'static [crate::MessageInfo] {\n    &MESSAGE_INFO\n}\n");
+    gen_layout_table(o, msgs);
+}
+
+/// Every field's wire position, so tools can find fields by name or units without decoding
+/// (e.g. every `degE7` position for log sanitising).
+fn gen_layout_table(o: &mut String, msgs: &[Message]) {
+    let n: usize = msgs.iter().map(|m| m.fields.len()).sum();
+    let _ = writeln!(o, "\nstatic FIELD_LAYOUT: [crate::FieldLayout; {n}] = [");
+    for m in msgs {
+        let mut ofs = 0;
+        for f in m.wire_fields() {
+            let _ = writeln!(
+                o,
+                "    crate::FieldLayout {{ msg_id: {}, name: {:?}, offset: {ofs}, ty: {:?}, array_len: {}, units: {:?}, extension: {} }},",
+                m.id,
+                f.name,
+                f.ty.prim.crc_name(),
+                f.ty.array_len.unwrap_or(0),
+                f.units,
+                f.extension,
+            );
+            ofs += f.ty.wire_size();
+        }
+    }
+    o.push_str("];\n\n");
+    o.push_str("/// Fields of message `id` in wire order (empty for an unknown ID).\npub fn message_fields(id: u32) -> &'static [crate::FieldLayout] {\n    let a = FIELD_LAYOUT.partition_point(|f| f.msg_id < id);\n    let b = FIELD_LAYOUT.partition_point(|f| f.msg_id <= id);\n    &FIELD_LAYOUT[a..b]\n}\n");
 }
 
 #[cfg(test)]
