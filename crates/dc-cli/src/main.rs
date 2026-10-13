@@ -932,6 +932,24 @@ enum RemoteCmd {
 }
 
 fn main() -> ExitCode {
+    // `dc-cli … | head`: when the reader closes the pipe, printing fails and `println!`
+    // panics. End quietly instead, like other command-line tools (Unix EPIPE is os error 32,
+    // Windows ERROR_NO_DATA 232); every other panic is reported as before.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let p = info.payload();
+        let msg = p
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| p.downcast_ref::<&str>().copied())
+            .unwrap_or("");
+        if msg.starts_with("failed printing to stdout")
+            && (msg.contains("os error 32") || msg.contains("os error 232"))
+        {
+            std::process::exit(0);
+        }
+        default_hook(info);
+    }));
     let cli = Cli::parse();
     let rt = match tokio::runtime::Runtime::new() {
         Ok(rt) => rt,
