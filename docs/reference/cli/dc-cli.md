@@ -402,16 +402,18 @@ Options:
 ```text
 Which safety nets a parameter set has switched off (advisory; .param or .bin)
 
-Usage: dc-cli params-review [OPTIONS] <FILE>
+Usage: dc-cli params-review [OPTIONS] [FILE]
 
 Arguments:
-  <FILE>  A .param file or a .bin log
+  [FILE]  A .param file or a .bin log (or use --connect for the vehicle itself)
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --connect <CONNECT>  Review the parameters on a vehicle instead (downloads them; read-only)
+      --sysid <SYSID>      Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>    Our MAVLink component id [default: 190]
+      --wait <WAIT>        Seconds to wait for a vehicle heartbeat (with --connect) [default: 15]
+      --tlog <TLOG>        Record everything to this .tlog file
+  -h, --help               Print help
 ```
 
 ### `dc-cli params-diff`

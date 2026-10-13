@@ -224,8 +224,15 @@ enum Cmd {
     },
     /// Which safety nets a parameter set has switched off (advisory; .param or .bin).
     ParamsReview {
-        /// A .param file or a .bin log.
-        file: std::path::PathBuf,
+        /// A .param file or a .bin log (or use --connect for the vehicle itself).
+        #[arg(required_unless_present = "connect")]
+        file: Option<std::path::PathBuf>,
+        /// Review the parameters on a vehicle instead (downloads them; read-only).
+        #[arg(long, conflicts_with = "file")]
+        connect: Option<LinkSpec>,
+        /// Seconds to wait for a vehicle heartbeat (with --connect).
+        #[arg(long, default_value_t = 15)]
+        wait: u64,
     },
     /// Compare two parameter sets, each a .param file or the parameters recorded in a .bin log.
     ParamsDiff {
@@ -1510,8 +1517,30 @@ async fn run(cli: Cli) -> Result<(), String> {
         Cmd::Mission { what } => mission_cmd(&cli, what).await,
         Cmd::Tlog { what } => tlog_cmd(what),
         Cmd::ParamsDiff { a, b } => params_diff(a, b),
-        Cmd::ParamsReview { file } => {
-            print_params_review(&load_params(file)?);
+        Cmd::ParamsReview {
+            file,
+            connect,
+            wait,
+        } => {
+            let params = match (file, connect) {
+                (Some(f), _) => load_params(f)?,
+                (None, Some(link)) => {
+                    let core = start(&cli, link).await?;
+                    let sysid = core
+                        .wait_for_vehicle(Duration::from_secs(*wait))
+                        .await
+                        .ok_or_else(|| format!("no vehicle heartbeat on {link} within {wait} s"))?;
+                    eprintln!("vehicle {sysid}: downloading parameters…");
+                    core.download_params((sysid, 1), |_, _| {})
+                        .await
+                        .map_err(|e| e.to_string())?
+                        .into_iter()
+                        .map(|(k, p)| (k, f64::from(p.value)))
+                        .collect()
+                }
+                (None, None) => return Err("give a file or --connect".into()),
+            };
+            print_params_review(&params);
             Ok(())
         }
         Cmd::Soak {
