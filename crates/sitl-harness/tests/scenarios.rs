@@ -1252,6 +1252,16 @@ async fn auto_mission_flight_reports_progress_to_landing() {
         !imus.is_empty() && imus.iter().all(|f| f.level == logs::health::Level::Ok),
         "{imus:?}"
     );
+    // Clean simulated GPS and compass: no EKF reset in flight.
+    let resets: Vec<_> = findings
+        .iter()
+        .filter(|f| f.check == "ekf resets")
+        .collect();
+    eprintln!("ekf resets: {resets:?}");
+    assert!(
+        resets.len() == 1 && resets[0].level == logs::health::Level::Ok,
+        "{resets:?}"
+    );
     let status: Vec<_> = findings
         .into_iter()
         .filter(|f| f.check == "ekf status")

@@ -32,6 +32,12 @@
 //!   than 90° in 3-D, 60° in the horizontal plane or 200 mG in horizontal length
 //!   (`Compass::consistent`, `AP_COMPASS_MAX_*`); compasses with `COMPASS_USE*` 0 are not
 //!   compared. Plan 05 §2.3 adds cautions at 600 mG offsets and 30° horizontal disagreement.
+//! * EKF resets: `XKF4.OFN`/`OFE` hold the most recent position reset (m) and change when a
+//!   new one happens; `EV` 62 `EKF_YAW_RESET` is Copter reacting to an EKF yaw reset
+//!   (`ekf_check.cpp`; it also fires at the first yaw alignment on the ground). Counted while
+//!   flying, on the primary core. A yaw reset within 2 s of EKF3's own planned alignment
+//!   message ("in-flight yaw alignment complete", "yaw aligned…", `AP_NavEKF3_MagFusion.cpp`)
+//!   is the normal alignment after takeoff; "ground mag anomaly, yaw re-aligned" is not.
 //! * `POWR` Flags/AccFlags are `AP_HAL::AnalogIn::PowerStatusFlag` (4.7.1 and 4.6.3): 1 brick
 //!   valid, 2 servo rail valid, 4 USB connected, 8 peripheral over-current, 16 high-power
 //!   peripheral over-current, 32 power status changed since boot; AccFlags holds every flag
@@ -487,6 +493,120 @@ fn compass_consistency(log: &Log, params: &BTreeMap<String, f64>, out: &mut Vec<
     }
 }
 
+/// Yaw resets `(time)` split into (expected, unexpected) using the EKF's own messages
+/// `(time, text)`: a planned alignment within 2 s explains a reset.
+pub fn classify_yaw_resets(resets: &[u64], texts: &[(u64, String)]) -> (Vec<u64>, Vec<u64>) {
+    let planned = |t: u64| {
+        texts.iter().any(|(m, text)| {
+            m.abs_diff(t) <= 2_000_000
+                && text.starts_with("EKF3 ")
+                && !text.contains("anomaly")
+                && (text.contains("in-flight yaw alignment complete")
+                    || text.contains("yaw aligned"))
+        })
+    };
+    resets.iter().partition(|t| planned(**t))
+}
+
+/// Position resets in `(time, north, east)` samples of the most recent reset offset: each
+/// change of the offset is a new reset; returns (time, size m).
+pub fn position_resets(samples: &[(u64, f64, f64)]) -> Vec<(u64, f64)> {
+    samples
+        .windows(2)
+        .filter(|w| w[0].1 != w[1].1 || w[0].2 != w[1].2)
+        .map(|w| (w[1].0, w[1].1.hypot(w[1].2)))
+        .collect()
+}
+
+fn ekf_resets(log: &Log, out: &mut Vec<Finding>) {
+    let (flying, _) = crate::flight::flying_periods(log);
+    if flying.is_empty() {
+        return;
+    }
+    let mut samples = Vec::new();
+    for core in instances(log, "XKF4", "C") {
+        let inst = Some(("C", core));
+        let (Some(n), Some(e), Some(pi)) = (
+            log.column("XKF4", "OFN", inst),
+            log.column("XKF4", "OFE", inst),
+            log.column("XKF4", "PI", inst),
+        ) else {
+            continue;
+        };
+        for k in 0..n.values.len().min(e.values.len()).min(pi.values.len()) {
+            if pi.values[k] == core {
+                samples.push((n.time_us[k], n.values[k], e.values[k]));
+            }
+        }
+    }
+    if samples.is_empty() {
+        return;
+    }
+    samples.sort_by_key(|s| s.0);
+    let pos: Vec<(u64, f64)> = position_resets(&samples)
+        .into_iter()
+        .filter(|(t, _)| crate::flight::in_periods(&flying, *t))
+        .collect();
+    let yaw: Vec<u64> = log
+        .column("EV", "Id", None)
+        .map(|c| {
+            c.time_us
+                .iter()
+                .zip(&c.values)
+                .filter(|(t, id)| **id == 62.0 && crate::flight::in_periods(&flying, **t))
+                .map(|(t, _)| *t)
+                .collect()
+        })
+        .unwrap_or_default();
+    let texts: Vec<(u64, String)> = crate::flight::events(log)
+        .into_iter()
+        .filter_map(|(t, e)| match e {
+            crate::flight::Event::Text(s) => Some((t, s)),
+            _ => None,
+        })
+        .collect();
+    let (expected, yaw) = classify_yaw_resets(&yaw, &texts);
+    if pos.is_empty() && yaw.is_empty() {
+        out.push(Finding {
+            check: "ekf resets",
+            level: Level::Ok,
+            text: if expected.is_empty() {
+                "no EKF position or yaw reset while flying".into()
+            } else {
+                format!(
+                    "no unexpected EKF reset while flying ({} planned in-flight yaw alignment)",
+                    expected.len()
+                )
+            },
+            at_us: expected.first().copied(),
+        });
+        return;
+    }
+    if let Some(&(t, _)) = pos.first() {
+        let largest = pos.iter().map(|p| p.1).fold(0.0, f64::max);
+        out.push(Finding {
+            check: "ekf resets",
+            level: Level::Caution,
+            text: format!(
+                "{} EKF position reset(s) while flying, largest {largest:.1} m (the position jumped; often a GPS glitch recovery)",
+                pos.len()
+            ),
+            at_us: Some(t),
+        });
+    }
+    if let Some(&t) = yaw.first() {
+        out.push(Finding {
+            check: "ekf resets",
+            level: Level::Caution,
+            text: format!(
+                "{} EKF yaw reset(s) while flying (heading jumped; often compass interference)",
+                yaw.len()
+            ),
+            at_us: Some(t),
+        });
+    }
+}
+
 /// Power-status problems from `(time, Flags, armed)` samples and the final AccFlags:
 /// (level, text, time).
 pub fn power_problems(samples: &[(u64, u16, bool)], acc: u16) -> Vec<(Level, String, Option<u64>)> {
@@ -756,6 +876,7 @@ pub fn assess(log: &Log) -> Vec<Finding> {
     gps(log, &params, &mut out);
     board_voltage(log, &params, &mut out);
     power_flags(log, &mut out);
+    ekf_resets(log, &mut out);
     errors(log, &mut out);
     out
 }
@@ -763,6 +884,37 @@ pub fn assess(log: &Log) -> Vec<Finding> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn planned_yaw_alignments_explain_yaw_resets() {
+        let m = |t: u64, s: &str| (t, s.to_string());
+        let texts = [
+            m(
+                48_000_000,
+                "EKF3 IMU0 MAG0 in-flight yaw alignment complete",
+            ),
+            m(
+                90_000_000,
+                "EKF3 IMU0 MAG0 ground mag anomaly, yaw re-aligned",
+            ),
+        ];
+        let (ok, bad) = classify_yaw_resets(&[48_900_000, 90_100_000, 120_000_000], &texts);
+        assert_eq!(ok, [48_900_000]);
+        assert_eq!(bad, [90_100_000, 120_000_000]);
+    }
+
+    #[test]
+    fn a_change_of_the_reset_offset_is_a_reset() {
+        let s = [
+            (1, 0.0, 0.0),
+            (2, 0.0, 0.0),
+            (3, 3.0, 4.0),
+            (4, 3.0, 4.0),
+            (5, 0.0, 1.0),
+        ];
+        assert_eq!(position_resets(&s), [(3, 5.0), (5, 1.0)]);
+        assert!(position_resets(&s[..2]).is_empty());
+    }
 
     #[test]
     fn power_flags_are_read_as_the_hal_defines_them() {
