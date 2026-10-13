@@ -503,7 +503,8 @@ enum MissionCmd {
         #[arg(long)]
         params: Option<std::path::PathBuf>,
         /// Check the whole path against this geofence (fence items as saved by
-        /// `mission download --type fence --out`); exits with failure on a breach.
+        /// `mission download --type fence --out` or `mission fence-from-kml`, or a .plan's
+        /// geofence); exits with failure on a breach.
         #[arg(long)]
         fence: Option<std::path::PathBuf>,
     },
@@ -516,6 +517,16 @@ enum MissionCmd {
         #[arg(long)]
         alt: f32,
         /// Output file (.waypoints or .plan; default: print).
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
+    /// A geofence from polygons drawn in Google Earth: every KML polygon becomes an inclusion
+    /// zone, or an exclusion zone when its name contains "exclusion", "no-fly", "no fly" or
+    /// "nofly" (any case). Offline; check a mission against it with `mission check --fence`.
+    FenceFromKml {
+        /// The KML file.
+        kml: std::path::PathBuf,
+        /// Output file (.waypoints fence items, or the geofence of a .plan; default: print).
         #[arg(long)]
         out: Option<std::path::PathBuf>,
     },
@@ -3233,6 +3244,25 @@ fn read_mission(path: &std::path::Path) -> Result<Vec<dc_core::MissionItem>, Str
     protocols::wpl::parse(&text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// Fence items from a file: a `.plan`'s geofence, else QGC WPL 110 fence items.
+fn read_fence(path: &std::path::Path) -> Result<Vec<dc_core::MissionItem>, String> {
+    if is_plan(path) {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        return protocols::plan::parse(&text)
+            .map(|p| p.fence)
+            .map_err(|e| format!("{}: {e}", path.display()));
+    }
+    read_mission(path)
+}
+
+/// A KML polygon named as a no-fly zone.
+fn is_exclusion_name(name: &str) -> bool {
+    let n = name.to_lowercase();
+    ["exclusion", "no-fly", "no fly", "nofly"]
+        .iter()
+        .any(|k| n.contains(k))
+}
+
 /// The mission as text for `path`: `.plan` JSON for a `.plan` path, else QGC WPL 110.
 fn mission_text(path: Option<&std::path::Path>, items: &[dc_core::MissionItem]) -> String {
     if path.is_some_and(is_plan) {
@@ -3589,7 +3619,7 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
             };
             print_time_estimate(&items, &speeds, params.is_some());
             if let Some(fence_file) = fence {
-                let zones = protocols::fence::Fence::from_items(&read_mission(fence_file)?)
+                let zones = protocols::fence::Fence::from_items(&read_fence(fence_file)?)
                     .map_err(|e| format!("{}: {e}", fence_file.display()))?;
                 let fp = match params {
                     Some(p) => protocols::fence::FenceParams::from_params(&load_params(p)?),
@@ -3637,6 +3667,52 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
                 out.as_deref(),
                 &mission_text(out.as_deref(), &items),
                 &format!("{} waypoints from the path", pts.len()),
+            )
+        }
+        MissionCmd::FenceFromKml { kml, out } => {
+            let text =
+                std::fs::read_to_string(kml).map_err(|e| format!("{}: {e}", kml.display()))?;
+            let marks =
+                protocols::kml::placemarks(&text).map_err(|e| format!("{}: {e}", kml.display()))?;
+            let mut fence = protocols::fence::Fence::default();
+            for m in marks.iter().filter(|m| m.kind == "Polygon") {
+                let name = m.name.as_deref().unwrap_or("(unnamed)");
+                if m.points.len() < 3 {
+                    return Err(format!("polygon {name}: fewer than 3 vertices"));
+                }
+                let exclude = is_exclusion_name(name);
+                eprintln!(
+                    "{} zone {name}: {} vertices",
+                    if exclude { "exclusion" } else { "inclusion" },
+                    m.points.len()
+                );
+                if exclude {
+                    fence.exclusion_polygons.push(m.points.clone());
+                } else {
+                    fence.inclusion_polygons.push(m.points.clone());
+                }
+            }
+            if fence.is_empty() {
+                return Err(format!("{}: no polygons", kml.display()));
+            }
+            let items = fence.to_items();
+            let text = if out.as_deref().is_some_and(is_plan) {
+                protocols::plan::to_string(&protocols::plan::Plan {
+                    fence: items.clone(),
+                    ..Default::default()
+                })
+            } else {
+                protocols::wpl::to_string(&items)
+            };
+            write_or_print(
+                out.as_deref(),
+                &text,
+                &format!(
+                    "{} inclusion and {} exclusion zones, {} fence items",
+                    fence.inclusion_polygons.len(),
+                    fence.exclusion_polygons.len(),
+                    items.len()
+                ),
             )
         }
         MissionCmd::Convert { input, output } => {

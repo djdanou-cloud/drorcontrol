@@ -70,6 +70,38 @@ impl Fence {
         Ok(f)
     }
 
+    /// As fence items (inverse of `from_items`): polygons as consecutive 5001/5002 vertices
+    /// with the vertex count in param1, circles as 5003/5004 with the radius, frame 0
+    /// (global, the altitude is unused).
+    pub fn to_items(&self) -> Vec<MissionItem> {
+        let e7 = |d: f64| (d * 1e7).round() as i32;
+        let one = |command: u16, p1: f64, (lat, lon): (f64, f64)| MissionItem {
+            frame: 0,
+            command,
+            params: [p1 as f32, 0.0, 0.0, 0.0],
+            x: e7(lat),
+            y: e7(lon),
+            z: 0.0,
+            autocontinue: true,
+        };
+        let mut out = Vec::new();
+        for (command, polys) in [
+            (5001, &self.inclusion_polygons),
+            (5002, &self.exclusion_polygons),
+        ] {
+            for poly in polys {
+                out.extend(poly.iter().map(|&v| one(command, poly.len() as f64, v)));
+            }
+        }
+        for (command, circles) in [
+            (5003, &self.inclusion_circles),
+            (5004, &self.exclusion_circles),
+        ] {
+            out.extend(circles.iter().map(|&(c, r)| one(command, r, c)));
+        }
+        out
+    }
+
     /// No zones at all.
     pub fn is_empty(&self) -> bool {
         self.inclusion_polygons.is_empty()
@@ -323,5 +355,40 @@ mod tests {
         };
         assert!(check_path(&inside_first, &two, &union, 5.0).is_empty());
         assert!(Fence::from_items(&[it(5001, 4.0, 0.0, 0.0)]).is_err());
+    }
+
+    #[test]
+    fn items_round_trip() {
+        let f = Fence {
+            inclusion_polygons: vec![vec![(47.0, 8.0), (47.001, 8.0), (47.001, 8.001)]],
+            exclusion_polygons: vec![vec![
+                (47.0002, 8.0002),
+                (47.0004, 8.0002),
+                (47.0004, 8.0004),
+                (47.0002, 8.0004),
+            ]],
+            inclusion_circles: vec![],
+            exclusion_circles: vec![((47.0005, 8.0005), 20.0)],
+        };
+        let items = f.to_items();
+        let cmds: Vec<_> = items.iter().map(|i| (i.command, i.params[0])).collect();
+        assert_eq!(
+            cmds,
+            [
+                (5001, 3.0),
+                (5001, 3.0),
+                (5001, 3.0),
+                (5002, 4.0),
+                (5002, 4.0),
+                (5002, 4.0),
+                (5002, 4.0),
+                (5004, 20.0)
+            ]
+        );
+        let back = Fence::from_items(&items).unwrap();
+        assert_eq!(back.exclusion_polygons[0].len(), 4);
+        assert!((back.inclusion_polygons[0][1].0 - 47.001).abs() < 1e-7);
+        let ((lat, lon), r) = back.exclusion_circles[0];
+        assert!((lat - 47.0005).abs() < 1e-7 && (lon - 8.0005).abs() < 1e-7 && r == 20.0);
     }
 }
