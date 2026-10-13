@@ -1245,12 +1245,14 @@ Arguments:
   <FILE>  The file
 
 Options:
-      --params <PARAMS>  The vehicle's parameters (.param or .bin) for the flight-time estimate's speeds (default: ArduCopter 4.7 defaults) and the parameter fences (FENCE_TYPE circle and altitude) of the --fence check
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --fence <FENCE>    Check the whole path against this geofence (fence items as saved by `mission download --type fence --out` or `mission fence-from-kml`, or a .plan's geofence); exits with failure on a breach
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --params <PARAMS>                The vehicle's parameters (.param or .bin) for the flight-time estimate's speeds (default: ArduCopter 4.7 defaults) and the parameter fences (FENCE_TYPE circle and altitude) of the --fence check
+      --sysid <SYSID>                  Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>                Our MAVLink component id [default: 190]
+      --fence <FENCE>                  Check the whole path against this geofence (fence items as saved by `mission download --type fence --out` or `mission fence-from-kml`, or a .plan's geofence); exits with failure on a breach
+      --dem <DEM>                      Check the height above the ground along every leg with the SRTM tiles in this directory (heights above home taken from the ground at home); exits with failure below --min-clearance
+      --tlog <TLOG>                    Record everything to this .tlog file
+      --min-clearance <MIN_CLEARANCE>  Lowest acceptable height above the ground with --dem, m [default: 20]
+  -h, --help                           Print help
 ```
 
 #### `dc-cli mission corridor`

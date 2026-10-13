@@ -11,6 +11,9 @@
 
 use std::collections::HashMap;
 
+use crate::mission::{self, MissionItem};
+use crate::survey::Plane;
+
 /// Why a tile cannot be read.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TerrainError {
@@ -165,6 +168,125 @@ impl Terrain {
     }
 }
 
+/// Lowest clearance over terrain on one leg of a mission.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LegClearance {
+    /// Item the leg flies to.
+    pub seq: u16,
+    /// Lowest height above the ground on the leg, m.
+    pub min_m: f64,
+    /// Where (latitude, longitude).
+    pub at: (f64, f64),
+    /// Ground elevation there, m.
+    pub ground_m: f64,
+}
+
+/// Terrain clearance along a mission.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ClearanceReport {
+    /// Ground elevation at home, m (`None`: no data there, nothing checked).
+    pub home_ground_m: Option<f64>,
+    /// Every horizontal leg with terrain data.
+    pub legs: Vec<LegClearance>,
+    /// Samples without terrain data (missing tile or void).
+    pub no_data: usize,
+}
+
+fn is_terrain_frame(frame: u8) -> bool {
+    matches!(frame, 10 | 11)
+}
+
+/// Points every `step_m` along the mission's path (for loading the tiles it crosses).
+pub fn sample_points(items: &[MissionItem], step_m: f64) -> Vec<(f64, f64)> {
+    let path = mission::path(items);
+    let mut out: Vec<(f64, f64)> = path.iter().map(|p| (p.lat, p.lon)).collect();
+    for w in path.windows(2) {
+        out.extend(leg_samples((w[0].lat, w[0].lon), (w[1].lat, w[1].lon), step_m).map(|s| s.1));
+    }
+    out
+}
+
+/// (fraction, point) every `step_m` from a to b, both ends included; nothing for a leg
+/// under 1 m long (straight up or down).
+fn leg_samples(
+    a: (f64, f64),
+    b: (f64, f64),
+    step_m: f64,
+) -> impl Iterator<Item = (f64, (f64, f64))> {
+    let plane = Plane::new(a);
+    let d = {
+        let (x, y) = plane.to_xy(b);
+        x.hypot(y)
+    };
+    let n = if d < 1.0 {
+        0
+    } else {
+        (d / step_m.max(1.0)).ceil().max(1.0) as usize
+    };
+    let count = if n == 0 { 0 } else { n + 1 };
+    (0..count).map(move |k| {
+        let f = k as f64 / n as f64;
+        (f, (a.0 + (b.0 - a.0) * f, a.1 + (b.1 - a.1) * f))
+    })
+}
+
+/// The mission's height above the ground along every horizontal leg, sampled every
+/// `step_m`. Heights above home are taken from the ground at home (the vehicle starts
+/// there); a leg to an item in a terrain frame (10, 11) is flown at its height above the
+/// ground, blended from the leg's start, as ArduPilot does with terrain data. Climbs and
+/// descents straight up or down (takeoff, landing) are not legs.
+pub fn clearance(items: &[MissionItem], t: &Terrain, step_m: f64) -> ClearanceReport {
+    let path = mission::path(items);
+    let Some(home_ground) = path.first().and_then(|h| t.elevation(h.lat, h.lon)) else {
+        return ClearanceReport::default();
+    };
+    let mut r = ClearanceReport {
+        home_ground_m: Some(home_ground),
+        ..Default::default()
+    };
+    let frame = |seq: u16| items.get(usize::from(seq)).map_or(0, |i| i.frame);
+    // Height above the ground at a path point (terrain frames as they are).
+    let agl = |p: &mission::PathPoint, ground: f64| {
+        if p.seq != 0 && is_terrain_frame(frame(p.seq)) {
+            p.alt_rel_m
+        } else {
+            home_ground + p.alt_rel_m - ground
+        }
+    };
+    for w in path.windows(2) {
+        let (a, b) = (&w[0], &w[1]);
+        let (Some(ga), Some(gb)) = (t.elevation(a.lat, a.lon), t.elevation(b.lat, b.lon)) else {
+            r.no_data += 1;
+            continue;
+        };
+        let (agl_a, agl_b) = (agl(a, ga), agl(b, gb));
+        let (msl_a, msl_b) = (ga + agl_a, gb + agl_b);
+        let follows = is_terrain_frame(frame(b.seq));
+        let mut low: Option<LegClearance> = None;
+        for (f, (lat, lon)) in leg_samples((a.lat, a.lon), (b.lat, b.lon), step_m) {
+            let Some(g) = t.elevation(lat, lon) else {
+                r.no_data += 1;
+                continue;
+            };
+            let c = if follows {
+                agl_a + (agl_b - agl_a) * f
+            } else {
+                msl_a + (msl_b - msl_a) * f - g
+            };
+            if low.is_none_or(|l| c < l.min_m) {
+                low = Some(LegClearance {
+                    seq: b.seq,
+                    min_m: c,
+                    at: (lat, lon),
+                    ground_m: g,
+                });
+            }
+        }
+        r.legs.extend(low);
+    }
+    r
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -224,5 +346,53 @@ pub(crate) mod tests {
         set.add(t);
         assert_eq!(set.elevation(-35.5, 149.0 + 400.0 * step), Some(600.0));
         assert_eq!(set.elevation(-34.5, 149.5), None, "no tile");
+    }
+
+    #[test]
+    fn clearance_over_rising_ground() {
+        let mut t = Terrain::default();
+        t.add(ramp("S36E149.hgt", 500));
+        let step = 1.0 / 1200.0;
+        let lat: f64 = -35.5;
+        let (lon_home, lon_far) = (149.0 + 120.0 * step, 149.0 + 240.0 * step);
+        // Ground: 530 m at home, rising east to 560 m.
+        let wp = |frame: u8, command: u16, lon: f64, z: f32| MissionItem {
+            frame,
+            command,
+            params: [0.0; 4],
+            x: (lat * 1e7).round() as i32,
+            y: (lon * 1e7).round() as i32,
+            z,
+            autocontinue: true,
+        };
+        let m = vec![
+            wp(0, 16, lon_home, 0.0),
+            wp(3, 22, 0.0, 40.0),
+            wp(3, 16, lon_far, 40.0),
+            wp(2, 20, 0.0, 0.0),
+        ];
+        let r = clearance(&m, &t, 10.0);
+        assert!((r.home_ground_m.unwrap() - 530.0).abs() < 0.01);
+        assert_eq!(r.no_data, 0);
+        // Out at 570 m MSL over ground rising to 560: 10 m at the far end; RTL back the same.
+        let out = r.legs.iter().find(|l| l.seq == 2).unwrap();
+        assert!((out.min_m - 10.0).abs() < 0.2, "{out:?}");
+        assert!((out.ground_m - 560.0).abs() < 0.2);
+        assert_eq!(
+            r.legs.len(),
+            2,
+            "out and back; takeoff and landing are vertical"
+        );
+        // The same waypoint in the terrain frame keeps 40 m over the ground.
+        let mut tf = m.clone();
+        tf[2].frame = 10;
+        let r = clearance(&tf, &t, 10.0);
+        let out = r.legs.iter().find(|l| l.seq == 2).unwrap();
+        assert!((out.min_m - 40.0).abs() < 0.2, "{out:?}");
+        // No tile at home: nothing checked.
+        let mut away = m.clone();
+        away[0].x = -340_000_000;
+        assert_eq!(clearance(&away, &t, 10.0), ClearanceReport::default());
+        assert!(sample_points(&m, 10.0).len() > 20);
     }
 }

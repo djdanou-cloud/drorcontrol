@@ -535,6 +535,14 @@ enum MissionCmd {
         /// geofence); exits with failure on a breach.
         #[arg(long)]
         fence: Option<std::path::PathBuf>,
+        /// Check the height above the ground along every leg with the SRTM tiles in this
+        /// directory (heights above home taken from the ground at home); exits with failure
+        /// below --min-clearance.
+        #[arg(long)]
+        dem: Option<std::path::PathBuf>,
+        /// Lowest acceptable height above the ground with --dem, m.
+        #[arg(long, default_value_t = 20.0, requires = "dem")]
+        min_clearance: f64,
     },
     /// Corridor scan along a path (a road, river, power line): parallel lines covering
     /// --width centred on the path, flown back and forth. Offline; check and upload as usual.
@@ -3152,6 +3160,56 @@ fn load_terrain(
     Ok((t, missing))
 }
 
+/// `mission check --dem`: the lowest height above the ground per leg.
+fn terrain_check(
+    items: &[dc_core::MissionItem],
+    dir: &std::path::Path,
+    min_m: f64,
+) -> Result<(), String> {
+    const STEP_M: f64 = 10.0;
+    let (t, missing) = load_terrain(dir, protocols::terrain::sample_points(items, STEP_M))?;
+    if !missing.is_empty() {
+        eprintln!(
+            "terrain: missing tiles in {}: {}",
+            dir.display(),
+            missing.join(", ")
+        );
+    }
+    let r = protocols::terrain::clearance(items, &t, STEP_M);
+    let Some(home) = r.home_ground_m else {
+        return Err("terrain: no elevation at home, nothing checked".into());
+    };
+    let low: Vec<_> = r.legs.iter().filter(|l| l.min_m < min_m).collect();
+    for l in &low {
+        let how = if l.min_m < 0.0 {
+            format!("{:.0} m BELOW the ground", -l.min_m)
+        } else {
+            format!("only {:.0} m above the ground", l.min_m)
+        };
+        println!(
+            "terrain: leg to item {} {how} ({:.0} m) at {:.7},{:.7}",
+            l.seq, l.ground_m, l.at.0, l.at.1
+        );
+    }
+    if r.no_data > 0 {
+        eprintln!("terrain: {} samples without data (not checked)", r.no_data);
+    }
+    if let Some(m) = r.legs.iter().min_by(|a, b| a.min_m.total_cmp(&b.min_m)) {
+        eprintln!(
+            "terrain: ground at home {home:.0} m; lowest {:.0} m above the ground on the leg to item {} (SRTM, every {STEP_M} m)",
+            m.min_m, m.seq
+        );
+    }
+    if low.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "{} legs come closer than {min_m} m to the ground",
+            low.len()
+        ))
+    }
+}
+
 fn terrain_cmd(what: &TerrainCmd) -> Result<(), String> {
     match what {
         TerrainCmd::Elevation { dem, points } => {
@@ -3748,6 +3806,8 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
             file,
             params,
             fence,
+            dem,
+            min_clearance,
         } => {
             let items = read_mission(file)?;
             print_mission(&items);
@@ -3794,6 +3854,9 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
                         " (zones only; --params adds FENCE_TYPE circle and altitude)"
                     }
                 );
+            }
+            if let Some(dir) = dem {
+                terrain_check(&items, dir, *min_clearance)?;
             }
             Ok(())
         }
