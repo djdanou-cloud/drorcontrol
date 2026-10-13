@@ -26,6 +26,7 @@
 
 mod tlog;
 mod tlog_health;
+mod tlog_link;
 mod tlog_sanitize;
 mod track;
 
@@ -303,6 +304,18 @@ enum ListKind {
 
 #[derive(Subcommand)]
 enum TlogCmd {
+    /// Link quality over time (range tests): frames received and lost per window, the
+    /// radio's signal, and the longest heartbeat gap.
+    Link {
+        /// The .tlog file.
+        file: std::path::PathBuf,
+        /// Window length, s.
+        #[arg(long, default_value_t = 10.0)]
+        window: f64,
+        /// Vehicle system id (default: the first autopilot heard).
+        #[arg(long)]
+        vehicle: Option<u8>,
+    },
     /// Index the recording for playback: checkpoints, key events, and what a seek to a time
     /// would restore (the latest message of each stream).
     Index {
@@ -2555,6 +2568,33 @@ fn load_params(path: &std::path::Path) -> Result<std::collections::BTreeMap<Stri
 fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
     let file = match what {
         TlogCmd::Info { file } => file,
+        TlogCmd::Link {
+            file,
+            window,
+            vehicle,
+        } => {
+            let f = std::fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()))?;
+            let (sys, tl) = tlog_link::timeline(std::io::BufReader::new(f), *vehicle, *window)
+                .map_err(|e| format!("{}: {e}", file.display()))?;
+            let sys = sys.ok_or_else(|| format!("{}: no autopilot heard", file.display()))?;
+            println!("vehicle {sys}, {window} s windows:");
+            println!("     start   received  lost   loss  radio rssi/remote  longest hb gap");
+            let opt = |v: Option<u8>| v.map_or("-".to_string(), |x| x.to_string());
+            let first = tl.first().map_or(0, |w| w.start_us);
+            for w in &tl {
+                println!(
+                    "{:8.0} s  {:8}  {:4}  {:5.1} %  {:>5}/{:<5}         {:5.1} s",
+                    (w.start_us - first) as f64 / 1e6,
+                    w.received,
+                    w.lost,
+                    w.loss() * 100.0,
+                    opt(w.rssi),
+                    opt(w.remrssi),
+                    w.max_hb_gap_s
+                );
+            }
+            return Ok(());
+        }
         TlogCmd::Index { file, at } => {
             let open = || std::fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()));
             let t0 = Instant::now();

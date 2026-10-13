@@ -1334,6 +1334,7 @@ Telemetry logs (.tlog, as recorded with --tlog or by Mission Planner)
 Usage: dc-cli tlog [OPTIONS] <COMMAND>
 
 Commands:
+  link      Link quality over time (range tests): frames received and lost per window, the radio's signal, and the longest heartbeat gap
   index     Index the recording for playback: checkpoints, key events, and what a seek to a time would restore (the latest message of each stream)
   health    Health checks from the telemetry (vibration, battery, EKF, GPS, errors), for when there is no dataflash log: the same thresholds as `log health`
   sanitize  Write a copy with every position moved to a stand-in location (shapes and distances kept), so the recording can be shared without revealing where it was flown
@@ -1350,6 +1351,25 @@ Options:
       --compid <COMPID>  Our MAVLink component id [default: 190]
       --tlog <TLOG>      Record everything to this .tlog file
   -h, --help             Print help
+```
+
+#### `dc-cli tlog link`
+
+```text
+Link quality over time (range tests): frames received and lost per window, the radio's signal, and the longest heartbeat gap
+
+Usage: dc-cli tlog link [OPTIONS] <FILE>
+
+Arguments:
+  <FILE>  The .tlog file
+
+Options:
+      --sysid <SYSID>      Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --window <WINDOW>    Window length, s [default: 10]
+      --compid <COMPID>    Our MAVLink component id [default: 190]
+      --vehicle <VEHICLE>  Vehicle system id (default: the first autopilot heard)
+      --tlog <TLOG>        Record everything to this .tlog file
+  -h, --help               Print help
 ```
 
 #### `dc-cli tlog index`
