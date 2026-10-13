@@ -10,6 +10,7 @@ pub mod fence;
 pub mod kml;
 pub mod log_transfer;
 pub mod mission;
+pub mod mission_edit;
 pub mod params;
 pub mod pattern;
 pub mod plan;
