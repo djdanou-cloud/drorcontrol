@@ -309,6 +309,9 @@ struct VehicleArgs {
 enum SearchPattern {
     /// Expanding square (IAMSAR): legs of 1, 1, 2, 2, 3, 3 … × --spacing, turning right.
     Square,
+    /// Sector search (IAMSAR): three triangles of side --radius through the datum, 120°
+    /// right turns.
+    Sector,
 }
 
 /// `--type` of `mission download`.
@@ -550,11 +553,14 @@ enum MissionCmd {
         #[arg(long, allow_hyphen_values = true)]
         datum: String,
         /// Track spacing, m (square).
-        #[arg(long)]
-        spacing: f64,
+        #[arg(long, required_if_eq("pattern", "square"))]
+        spacing: Option<f64>,
         /// Side of the square searched, m (square).
-        #[arg(long)]
-        extent: f64,
+        #[arg(long, required_if_eq("pattern", "square"))]
+        extent: Option<f64>,
+        /// Leg length, m (sector).
+        #[arg(long, required_if_eq("pattern", "sector"))]
+        radius: Option<f64>,
         /// First leg's direction, degrees clockwise from north.
         #[arg(long, default_value_t = 0.0)]
         track: f64,
@@ -3760,6 +3766,7 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
             datum,
             spacing,
             extent,
+            radius,
             track,
             alt,
             out,
@@ -3773,9 +3780,19 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
             };
             let (wps, what) = match pattern {
                 SearchPattern::Square => (
-                    protocols::pattern::expanding_square(d, *spacing, *extent, *track)
-                        .map_err(|e| e.to_string())?,
+                    protocols::pattern::expanding_square(
+                        d,
+                        spacing.ok_or("--spacing is needed")?,
+                        extent.ok_or("--extent is needed")?,
+                        *track,
+                    )
+                    .map_err(|e| e.to_string())?,
                     "expanding square",
+                ),
+                SearchPattern::Sector => (
+                    protocols::pattern::sector(d, radius.ok_or("--radius is needed")?, *track)
+                        .map_err(|e| e.to_string())?,
+                    "sector search",
                 ),
             };
             let items = protocols::mission::route(&wps, *alt);

@@ -135,6 +135,25 @@ pub fn expanding_square(
     Ok(out)
 }
 
+/// IAMSAR sector search (single pattern) from `datum`: three equilateral triangles of side
+/// `radius_m`, the first leg out on `track_deg`, every turn 120° to the right, each return
+/// leg through the datum; the out legs end 60° apart all round. Starts and ends at the datum.
+pub fn sector(
+    datum: (f64, f64),
+    radius_m: f64,
+    track_deg: f64,
+) -> Result<Vec<(f64, f64)>, PatternError> {
+    positive(radius_m, "search radius")?;
+    let plane = Plane::new(datum);
+    let mut out = vec![datum];
+    // Corner bearings from the datum, in flying order (derived from the 120° right turns).
+    for b in [0.0, 60.0, 240.0, 300.0, 120.0, 180.0] {
+        out.push(plane.to_latlon(step((0.0, 0.0), track_deg + b, radius_m)));
+    }
+    out.push(datum);
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,5 +225,38 @@ mod tests {
             "{exy:?}"
         );
         assert!(expanding_square(d, 0.0, 10.0, 0.0).is_err());
+    }
+
+    #[test]
+    fn sector_legs_are_equal_with_right_turns_of_120() {
+        let d = (-35.36, 149.16);
+        let p = Plane::new(d);
+        let pts = sector(d, 100.0, 30.0).unwrap();
+        assert_eq!(pts.len(), 8);
+        let xy: Vec<_> = pts.iter().map(|&q| p.to_xy(q)).collect();
+        let bearing = |a: (f64, f64), b: (f64, f64)| (b.0 - a.0).atan2(b.1 - a.1).to_degrees();
+        let mut prev: Option<f64> = None;
+        for w in xy.windows(2) {
+            let len = (w[1].0 - w[0].0).hypot(w[1].1 - w[0].1);
+            // Legs through the datum are two radii long; all others one.
+            assert!(
+                (len - 100.0).abs() < 0.01 || (len - 200.0).abs() < 0.01,
+                "{len}"
+            );
+            let b = bearing(w[0], w[1]);
+            if let Some(pb) = prev {
+                let turn = (b - pb).rem_euclid(360.0);
+                assert!((turn - 120.0).abs() < 0.01, "right turn of 120: {turn}");
+            }
+            prev = Some(b);
+        }
+        assert!(
+            (bearing(xy[0], xy[1]) - 30.0).abs() < 0.01,
+            "first leg on the track"
+        );
+        assert!(
+            xy[7].0.abs() < 1e-6 && xy[7].1.abs() < 1e-6,
+            "ends at the datum"
+        );
     }
 }

@@ -1278,7 +1278,7 @@ Options:
 ```text
 Search and rescue pattern from a datum (last known position). Offline; check and upload as usual
 
-Usage: dc-cli mission search [OPTIONS] --pattern <PATTERN> --datum <DATUM> --spacing <SPACING> --extent <EXTENT> --alt <ALT>
+Usage: dc-cli mission search [OPTIONS] --pattern <PATTERN> --datum <DATUM> --alt <ALT>
 
 Options:
       --pattern <PATTERN>
@@ -1286,6 +1286,7 @@ Options:
 
           Possible values:
           - square: Expanding square (IAMSAR): legs of 1, 1, 2, 2, 3, 3 … × --spacing, turning right
+          - sector: Sector search (IAMSAR): three triangles of side --radius through the datum, 120° right turns
 
       --sysid <SYSID>
           Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
@@ -1308,6 +1309,9 @@ Options:
 
       --extent <EXTENT>
           Side of the square searched, m (square)
+
+      --radius <RADIUS>
+          Leg length, m (sector)
 
       --track <TRACK>
           First leg's direction, degrees clockwise from north
