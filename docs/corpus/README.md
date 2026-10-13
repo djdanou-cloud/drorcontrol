@@ -10,6 +10,7 @@ cut with `scripts/dataflash_vectors.py` and check the whole file locally with th
 |---|---|---|---|
 | `crates/logs/tests/data/sitl-copter-4.7.1-head.{bin,json}` | First 900 kB of an ArduCopter 4.7.1 SITL log, with pymavlink reference values | Generated here from SITL (`scripts/build_sitl.sh`). No real vehicle. | `logs` pymavlink cross-check, corruption test |
 | `crates/logs/tests/data/copter-4.6.2-matekh743-head.{bin,json}` | First 900 kB of log `00000083.BIN`: ArduCopter V4.6.2 on a MatekH743-bdshot (quad X, DShot600, CRSF, optical flow, rangefinder), with pymavlink reference values | Provided by the repository owner on 2026-10-11 for use as test data in this repository | `logs` pymavlink cross-check, `params_vs_file` |
+| `crates/dc-cli/tests/data/sitl-copter-4.7.1-auto.tlog` | 136 s telemetry recording (245 kB) of the SITL AUTO scenario: GUIDED takeoff, 4-item mission, RTL, landing, recorded by the core with `DC_SITL_TLOG` | Generated here from SITL (`auto_mission_flight_reports_progress_to_landing`). No real vehicle; the position is ArduPilot's simulated home (Canberra). | `dc-cli` `tlog_fixture` tests (info, health, index, link, sanitize, KML) |
 | `crates/protocols/tests/data/u3_whoop_260725.param` | Mission Planner `.param` file, 1551 parameters, same airframe saved at another time | Provided by the repository owner on 2026-10-11 for use as test data in this repository | `params_vs_file` |
 
 ## What the owner-provided files reveal
