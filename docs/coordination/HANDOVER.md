@@ -283,6 +283,16 @@ permission rule for them). The prepared change is not in the repository.
     sharing) and the Mac session (Phase 0 tasks plus the same flight-controller checks).
     Every runbook command was walked against SITL on 2026-10-13.
 
+11. **Mission planning batch (2026-10-13, local commits, not yet pushed):** QGC `.plan`
+    files, mission CSV, routes/fences/rally points from KML and back, corridor scan, SAR
+    expanding square and sector search, SRTM terrain (elevation, clearance check, profile,
+    terrain-following by planning), RTL climb in the mission path, mission and fence lint
+    additions, the mission edit model (undo/redo, DO_JUMP renumbering), units and
+    coordinate formats (UTM/MGRS checked against PROJ), and the annunciator state model.
+    Rows in §5. Next for these: bridge `MissionEditor`, `units` and `Annunciator` to QML in
+    Phase 1; feed the annunciator from vehicle state; GeoTIFF/Copernicus DEMs and the
+    TERRAIN_DATA service (plan 01 §5.3).
+
 ## 8. Where things are (code map)
 
 | Area | Path | Notes |

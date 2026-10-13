@@ -48,6 +48,21 @@ from.
   `tlog export --kml` (track by flight mode with the mission).
 * **Sharing safely**: `log sanitize`, `tlog sanitize`, `log trim`.
 
+## Also new: mission planning (offline, 2026-10-13)
+
+None of these talk to the vehicle; they make and check files to load as usual.
+
+* **QGroundControl `.plan` files** everywhere a mission is read or written, and
+  `mission convert`; `mission export --csv`.
+* **From Google Earth:** draw a path, polygons and points, save as KML, then
+  `mission from-kml`, `mission fence-from-kml` (name a polygon "no-fly" for an exclusion
+  zone) and `mission rally-from-kml`; `mission export X.plan --kml` goes the other way.
+* **Patterns:** `mission corridor`, `mission search --pattern square|sector`.
+* **Terrain:** put SRTM `.hgt` tiles for your field in a folder, then
+  `terrain elevation`, `mission check --dem DIR`, `mission profile --dem DIR` and
+  `mission terrain-follow --dem DIR --agl A`.
+* **Positions:** `dc-cli coord LAT,LON` prints decimal, DMS, DDM, UTM and MGRS.
+
 ## What to send back
 
 From each session: the console output of every step, `dc-cli about`, `report.txt`,

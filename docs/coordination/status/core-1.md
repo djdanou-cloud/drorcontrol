@@ -3,8 +3,8 @@ agent: core-1
 role: workstream-agent
 workstream: WS-CORE
 state: idle
-task: idle: batch 7 pushed; full CI run started for Windows/macOS builds
-updated: 2026-10-13T08:07:13Z
+task: idle: batch 8 (20 commits) committed locally, not pushed
+updated: 2026-10-13T10:05:36Z
 ---
 
 ## Current focus
