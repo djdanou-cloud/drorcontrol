@@ -46,6 +46,7 @@ Commands:
   params-diff     Compare two parameter sets, each a .param file or the parameters recorded in a .bin log
   log             Dataflash (.bin) log tools: index statistics and downsampled plots, with timings
   mission         Mission files (QGC WPL 110, Mission Planner's .waypoints): download, check, compare. Read-only: uploads stay behind the core's interlocks and are not offered here yet
+  terrain         Ground elevation from SRTM .hgt tiles on disk (offline)
   tlog            Telemetry logs (.tlog, as recorded with --tlog or by Mission Planner)
   cot             Cursor-on-Target position events for every vehicle (ATAK/WinTAK/TAK), printed or sent over UDP (e.g. the ATAK multicast 239.2.3.1:6969)
   telemetry       Print a telemetry summary once per second
@@ -1499,6 +1500,42 @@ Options:
       --tlog <TLOG>            Record everything to this .tlog file
       --wait <WAIT>            Seconds to wait for a vehicle heartbeat [default: 15]
   -h, --help                   Print help
+```
+
+### `dc-cli terrain`
+
+```text
+Ground elevation from SRTM .hgt tiles on disk (offline)
+
+Usage: dc-cli terrain [OPTIONS] <COMMAND>
+
+Commands:
+  elevation  Elevation above the geoid (EGM96) at each point, bilinear between samples
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>  Our MAVLink component id [default: 190]
+      --tlog <TLOG>      Record everything to this .tlog file
+  -h, --help             Print help
+```
+
+#### `dc-cli terrain elevation`
+
+```text
+Elevation above the geoid (EGM96) at each point, bilinear between samples
+
+Usage: dc-cli terrain elevation [OPTIONS] --dem <DEM> <POINTS>
+
+Arguments:
+  <POINTS>  Points as "lat,lon;lat,lon;..."
+
+Options:
+      --dem <DEM>        Directory holding the tiles (e.g. S36E149.hgt, 1″ or 3″)
+      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>  Our MAVLink component id [default: 190]
+      --tlog <TLOG>      Record everything to this .tlog file
+  -h, --help             Print help
 ```
 
 ### `dc-cli tlog`

@@ -255,6 +255,11 @@ enum Cmd {
         #[command(subcommand)]
         what: MissionCmd,
     },
+    /// Ground elevation from SRTM .hgt tiles on disk (offline).
+    Terrain {
+        #[command(subcommand)]
+        what: TerrainCmd,
+    },
     /// Telemetry logs (.tlog, as recorded with --tlog or by Mission Planner).
     Tlog {
         #[command(subcommand)]
@@ -302,6 +307,19 @@ struct VehicleArgs {
     /// Seconds to wait for a vehicle heartbeat.
     #[arg(long, default_value_t = 15)]
     wait: u64,
+}
+
+#[derive(Subcommand)]
+enum TerrainCmd {
+    /// Elevation above the geoid (EGM96) at each point, bilinear between samples.
+    Elevation {
+        /// Directory holding the tiles (e.g. S36E149.hgt, 1″ or 3″).
+        #[arg(long)]
+        dem: std::path::PathBuf,
+        /// Points as "lat,lon;lat,lon;...".
+        #[arg(allow_hyphen_values = true)]
+        points: String,
+    },
 }
 
 /// `--pattern` of `mission search`.
@@ -1702,6 +1720,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         Cmd::Log { what } => log_cmd(what),
         Cmd::Mission { what } => mission_cmd(&cli, what).await,
         Cmd::Tlog { what } => tlog_cmd(what),
+        Cmd::Terrain { what } => terrain_cmd(what),
         Cmd::ParamsDiff { a, b } => params_diff(a, b),
         Cmd::ParamsReview {
             file,
@@ -3100,6 +3119,56 @@ fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
         eprintln!("warning: stopped early: {why}");
     }
     Ok(())
+}
+
+/// The SRTM tiles under `dir` covering `points` (file names as published, upper or lower
+/// case). Tiles that are not there are listed by name.
+fn load_terrain(
+    dir: &std::path::Path,
+    points: impl IntoIterator<Item = (f64, f64)>,
+) -> Result<(protocols::terrain::Terrain, Vec<String>), String> {
+    let mut t = protocols::terrain::Terrain::default();
+    let mut missing = Vec::new();
+    let names: std::collections::BTreeSet<String> = points
+        .into_iter()
+        .map(|(lat, lon)| protocols::terrain::tile_name(lat, lon))
+        .collect();
+    for name in names {
+        let found = [name.clone(), name.to_lowercase()]
+            .into_iter()
+            .map(|n| dir.join(n))
+            .find(|p| p.is_file());
+        match found {
+            Some(p) => {
+                let bytes = std::fs::read(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+                t.add(
+                    protocols::terrain::HgtTile::from_bytes(&name, &bytes)
+                        .map_err(|e| format!("{}: {e}", p.display()))?,
+                );
+            }
+            None => missing.push(name),
+        }
+    }
+    Ok((t, missing))
+}
+
+fn terrain_cmd(what: &TerrainCmd) -> Result<(), String> {
+    match what {
+        TerrainCmd::Elevation { dem, points } => {
+            let pts = parse_polygon(points)?;
+            let (t, missing) = load_terrain(dem, pts.iter().copied())?;
+            for (lat, lon) in &pts {
+                match t.elevation(*lat, *lon) {
+                    Some(e) => println!("{lat:.7},{lon:.7}  {e:.1} m"),
+                    None => println!("{lat:.7},{lon:.7}  no data"),
+                }
+            }
+            if !missing.is_empty() {
+                eprintln!("missing tiles in {}: {}", dem.display(), missing.join(", "));
+            }
+            Ok(())
+        }
+    }
 }
 
 /// Polygon vertices from "lat,lon;lat,lon;...".
