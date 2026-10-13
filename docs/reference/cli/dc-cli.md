@@ -36,6 +36,7 @@ Commands:
   param-set       Change parameters on the vehicle (ADR-0012): every change is listed and confirmed once; if the vehicle is armed, its in-flight warning must be acknowledged too. A baseline of all parameters is saved first, each value is read back, and every step is audited
   param-rollback  Restore parameters from a baseline saved by `param-set` (the vehicle in the baseline): the named ones, or with --changed every one that now differs (except values the autopilot maintains itself). Same confirmation, in-flight warning, new recovery baseline, read-back and audit as `param-set`
   daemon          Run the core with the gRPC API (proto/dc/v1/core.proto) until interrupted
+  audit-verify    Check an audit log's hash chain (commands and parameter writes): every record links to the one before, so an edited, removed or reordered line is found. Prints the records with --print
   remote          Talk to a running daemon over gRPC
   ports           List serial ports with board hints; optionally watch hotplug or probe for MAVLink
   soak            Serial integrity soak: stream MAVLink frames out of `tx` and verify them on `rx` (same port with a TX-RX loopback jumper, or two adapters cross-wired)
@@ -142,6 +143,24 @@ Options:
       --param-dir <PARAM_DIR>    Allow parameter writes over the API (SetParams), saving each baseline in this directory; without it the API cannot change parameters
       --audit <AUDIT>            Hash-chained audit log (commands and parameter writes) [default: dc-audit.log]
   -h, --help                     Print help
+```
+
+### `dc-cli audit-verify`
+
+```text
+Check an audit log's hash chain (commands and parameter writes): every record links to the one before, so an edited, removed or reordered line is found. Prints the records with --print
+
+Usage: dc-cli audit-verify [OPTIONS] [FILE]
+
+Arguments:
+  [FILE]  The audit log (default dc-audit.log) [default: dc-audit.log]
+
+Options:
+      --print            Also print the records (time UTC, vehicle, command id, text)
+      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>  Our MAVLink component id [default: 190]
+      --tlog <TLOG>      Record everything to this .tlog file
+  -h, --help             Print help
 ```
 
 ### `dc-cli remote`

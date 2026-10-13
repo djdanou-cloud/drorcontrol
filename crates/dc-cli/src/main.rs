@@ -159,6 +159,17 @@ enum Cmd {
         #[arg(long, default_value = "dc-audit.log")]
         audit: std::path::PathBuf,
     },
+    /// Check an audit log's hash chain (commands and parameter writes): every record links
+    /// to the one before, so an edited, removed or reordered line is found. Prints the
+    /// records with --print.
+    AuditVerify {
+        /// The audit log (default dc-audit.log).
+        #[arg(default_value = "dc-audit.log")]
+        file: std::path::PathBuf,
+        /// Also print the records (time UTC, vehicle, command id, text).
+        #[arg(long)]
+        print: bool,
+    },
     /// Talk to a running daemon over gRPC.
     Remote {
         /// Daemon URL.
@@ -1253,8 +1264,35 @@ async fn param_rollback(
     }
 }
 
+fn audit_verify(file: &std::path::Path, print: bool) -> Result<(), String> {
+    let open = || std::fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()));
+    let (n, last) = protocols::audit::verify(std::io::BufReader::new(open()?)).map_err(|b| {
+        format!(
+            "{}: chain broken at line {}: {} (the log was edited, truncated mid-line or reordered there)",
+            file.display(),
+            b.line,
+            b.reason
+        )
+    })?;
+    if print {
+        use std::io::BufRead;
+        for line in std::io::BufReader::new(open()?).lines() {
+            let line = line.map_err(|e| e.to_string())?;
+            let c: Vec<&str> = line.split('\t').collect();
+            let t = c[0].parse::<u64>().map_or(c[0].to_string(), tlog::utc);
+            println!("{t}  sys {}  cmd {}  {}", c[1], c[2], c[3]);
+        }
+    }
+    println!(
+        "{}: {n} records, chain intact; last hash {last}",
+        file.display()
+    );
+    Ok(())
+}
+
 async fn run(cli: Cli) -> Result<(), String> {
     match &cli.cmd {
+        Cmd::AuditVerify { file, print } => audit_verify(file, *print),
         Cmd::ParamRollback {
             connect,
             baseline,
