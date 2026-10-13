@@ -3,8 +3,9 @@
 Everything needed for a hands-on test session with a real flight controller, in the order
 to do it. Two runbooks hold the steps:
 
-* [Windows bench test](windows-bench-test.md): about 1½ hours, one PC and a flight
-  controller on USB.
+* [Windows bench test](windows-bench-test.md): about 2 hours, one PC and a flight
+  controller on USB, nothing flown. Copy [`bench/bench-test.plan`](bench/bench-test.plan)
+  next to `dc-cli.exe` for the upload steps.
 * [Mac test session](mac-test-runbook.md): the Phase 0 platform tasks (serial, UI bridge,
   map, video, first launch) and the same flight-controller checks as on Windows.
 
@@ -26,8 +27,8 @@ from.
 
 ## Before you start
 
-* **Propellers off** for every step. Only the optional in-flight-warning step arms the
-  vehicle, on the bench, held or strapped down.
+* **Nothing is flown.** **Propellers off** for every step. Only the optional armed steps
+  arm the vehicle, on the bench, held or strapped down, and in them you answer "no".
 * Close Mission Planner, QGroundControl and anything else that could hold the serial port.
 * Have to hand: a real flight's `.bin` log (ideally with a hover), your usual `.param`
   file and mission, and a telemetry radio pair if you want the range step.
@@ -58,7 +59,8 @@ dc-cli settings enable fence-rally-upload        # armed-mission-upload, log-era
 dc-cli settings disable fence-rally-upload
 ```
 
-Then, against the flight controller (props off):
+Then, against the flight controller (props off; Windows bench test steps 11–14 and 16 walk
+through all of it, with a backup and restore of your own mission, fence and rally points):
 
 * `dc-cli mission upload X.plan --connect …` (disarmed: no setting needed), and
   `--type fence` / `--type rally` (needs `fence-rally-upload`). Each upload is read back

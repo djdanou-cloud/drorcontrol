@@ -1,0 +1,157 @@
+{
+ "fileType": "Plan",
+ "geoFence": {
+  "circles": [],
+  "polygons": [
+   {
+    "inclusion": true,
+    "polygon": [
+     [
+      -35.362,
+      149.164
+     ],
+     [
+      -35.362,
+      149.168
+     ],
+     [
+      -35.366,
+      149.168
+     ],
+     [
+      -35.366,
+      149.164
+     ]
+    ],
+    "version": 1
+   },
+   {
+    "inclusion": false,
+    "polygon": [
+     [
+      -35.3635,
+      149.1665
+     ],
+     [
+      -35.3635,
+      149.1667
+     ],
+     [
+      -35.3637,
+      149.1667
+     ]
+    ],
+    "version": 1
+   }
+  ],
+  "version": 2
+ },
+ "groundStation": "DrorControl",
+ "mission": {
+  "firmwareType": 3,
+  "items": [
+   {
+    "autoContinue": true,
+    "command": 22,
+    "doJumpId": 1,
+    "frame": 3,
+    "params": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     30.0
+    ],
+    "type": "SimpleItem"
+   },
+   {
+    "autoContinue": true,
+    "command": 16,
+    "doJumpId": 2,
+    "frame": 3,
+    "params": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     -35.3632,
+     149.1652,
+     30.0
+    ],
+    "type": "SimpleItem"
+   },
+   {
+    "autoContinue": true,
+    "command": 16,
+    "doJumpId": 3,
+    "frame": 3,
+    "params": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     -35.3632,
+     149.1662,
+     30.0
+    ],
+    "type": "SimpleItem"
+   },
+   {
+    "autoContinue": true,
+    "command": 16,
+    "doJumpId": 4,
+    "frame": 3,
+    "params": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     -35.3642,
+     149.1662,
+     30.0
+    ],
+    "type": "SimpleItem"
+   },
+   {
+    "autoContinue": true,
+    "command": 20,
+    "doJumpId": 5,
+    "frame": 2,
+    "params": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0,
+     0,
+     0.0
+    ],
+    "type": "SimpleItem"
+   }
+  ],
+  "plannedHomePosition": [
+   -35.3632,
+   149.1652,
+   0.0
+  ],
+  "version": 2
+ },
+ "rallyPoints": {
+  "points": [
+   [
+    -35.3635,
+    149.1655,
+    25.0
+   ],
+   [
+    -35.3645,
+    149.1665,
+    25.0
+   ]
+  ],
+  "version": 2
+ },
+ "version": 1
+}
