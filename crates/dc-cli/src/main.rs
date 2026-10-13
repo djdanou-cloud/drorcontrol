@@ -659,6 +659,12 @@ enum LogCmd {
     Health {
         /// Path to the .bin log.
         path: std::path::PathBuf,
+        /// Print the findings as JSON (schema `dc.health/1`) for scripts and CI.
+        #[arg(long)]
+        json: bool,
+        /// Exit with an error when any finding is at this level or worse.
+        #[arg(long, value_enum)]
+        fail_on: Option<FailOn>,
     },
     /// Export the flight track (EKF position, UTC from the GPS clock) as GPX and/or KML.
     Export {
@@ -1217,6 +1223,73 @@ fn print_log_changes(log: &logs::Log) -> Result<(), String> {
         );
     }
     eprintln!("{} changes", changes.len());
+    Ok(())
+}
+
+/// Health level that fails `log health --fail-on`.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum FailOn {
+    Caution,
+    Warning,
+}
+
+fn level_name(l: logs::health::Level) -> &'static str {
+    match l {
+        logs::health::Level::Ok => "ok",
+        logs::health::Level::Caution => "caution",
+        logs::health::Level::Warning => "warning",
+    }
+}
+
+/// `log health --json`: `{"schema": "dc.health/1", "log", "overall", "findings": [{"check",
+/// "level", "text", "at_s"}]}`; levels are `ok`, `caution`, `warning`; `overall` is the worst
+/// (null without findings); `at_s` is seconds since boot or null.
+fn health_json(path: &std::path::Path, findings: &[logs::health::Finding]) -> String {
+    let worst = findings.iter().map(|f| f.level).max();
+    let list: Vec<serde_json::Value> = findings
+        .iter()
+        .map(|f| {
+            serde_json::json!({
+                "check": f.check,
+                "level": level_name(f.level),
+                "text": f.text,
+                "at_s": f.at_us.map(|t| t as f64 / 1e6),
+            })
+        })
+        .collect();
+    serde_json::to_string_pretty(&serde_json::json!({
+        "schema": "dc.health/1",
+        "log": path.display().to_string(),
+        "overall": worst.map(level_name),
+        "findings": list,
+    }))
+    .expect("JSON values serialise")
+}
+
+fn log_health(
+    path: &std::path::Path,
+    log: &logs::Log,
+    json: bool,
+    fail_on: Option<FailOn>,
+) -> Result<(), String> {
+    let findings = logs::health::assess(log);
+    if json {
+        println!("{}", health_json(path, &findings));
+    } else {
+        print_log_health(log)?;
+    }
+    let limit = match fail_on {
+        None => return Ok(()),
+        Some(FailOn::Caution) => logs::health::Level::Caution,
+        Some(FailOn::Warning) => logs::health::Level::Warning,
+    };
+    let bad = findings.iter().filter(|f| f.level >= limit).count();
+    if bad > 0 {
+        return Err(format!(
+            "{bad} finding(s) at {} or worse",
+            level_name(limit)
+        ));
+    }
     Ok(())
 }
 
@@ -2867,7 +2940,11 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                 }
             }
         }
-        LogCmd::Health { path } => print_log_health(&open(path)?)?,
+        LogCmd::Health {
+            path,
+            json,
+            fail_on,
+        } => log_health(path, &open(path)?, *json, *fail_on)?,
         LogCmd::Plot {
             path,
             msg,
@@ -3367,5 +3444,38 @@ fn print_fleet(core: &Core) {
             parts.join(" | "),
             age
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn health_json_schema() {
+        let f = [
+            logs::health::Finding {
+                check: "gps",
+                level: logs::health::Level::Ok,
+                text: "fine".into(),
+                at_us: None,
+            },
+            logs::health::Finding {
+                check: "arming",
+                level: logs::health::Level::Caution,
+                text: "PreArm: \"x\"".into(),
+                at_us: Some(1_500_000),
+            },
+        ];
+        let v: serde_json::Value =
+            serde_json::from_str(&health_json(std::path::Path::new("a.bin"), &f)).unwrap();
+        assert_eq!(v["schema"], "dc.health/1");
+        assert_eq!(v["overall"], "caution");
+        assert_eq!(v["findings"][0]["at_s"], serde_json::Value::Null);
+        assert_eq!(v["findings"][1]["at_s"], 1.5);
+        assert_eq!(v["findings"][1]["text"], "PreArm: \"x\"");
+        let empty: serde_json::Value =
+            serde_json::from_str(&health_json(std::path::Path::new("a.bin"), &[])).unwrap();
+        assert_eq!(empty["overall"], serde_json::Value::Null);
     }
 }

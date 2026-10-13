@@ -329,6 +329,7 @@ dependencies = [
  "mavlink-codec",
  "protocols",
  "recorder",
+ "serde_json",
  "serialport",
  "tokio",
  "tonic",
