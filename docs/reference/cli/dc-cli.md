@@ -1167,6 +1167,7 @@ Commands:
   download  Download the vehicle's mission and print it (or write a .waypoints file)
   survey    Generate a survey grid ("lawnmower") over a polygon as a .waypoints mission: takeoff, parallel lines flown alternately, RTL. Offline; upload it like any other mission
   check     Read a .waypoints file and list its items (offline)
+  convert   Convert a mission between QGroundControl `.plan` and `.waypoints` (QGC WPL 110), by the file extensions. A .plan's geofence and rally points are listed; only the mission is written to a .waypoints file
   reverse   Fly the route backwards (offline): home, TAKEOFF and the final RTL/LAND stay in place
   shift     Move every located item by metres north/east (offline); home stays unless --home
   diff      Compare two mission files (offline); exits with failure on any difference
@@ -1242,6 +1243,24 @@ Options:
       --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
       --compid <COMPID>  Our MAVLink component id [default: 190]
       --fence <FENCE>    Check the whole path against this geofence (fence items as saved by `mission download --type fence --out`); exits with failure on a breach
+      --tlog <TLOG>      Record everything to this .tlog file
+  -h, --help             Print help
+```
+
+#### `dc-cli mission convert`
+
+```text
+Convert a mission between QGroundControl `.plan` and `.waypoints` (QGC WPL 110), by the file extensions. A .plan's geofence and rally points are listed; only the mission is written to a .waypoints file
+
+Usage: dc-cli mission convert [OPTIONS] <INPUT> <OUTPUT>
+
+Arguments:
+  <INPUT>   Input file (.plan or .waypoints)
+  <OUTPUT>  Output file (.plan or .waypoints)
+
+Options:
+      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>  Our MAVLink component id [default: 190]
       --tlog <TLOG>      Record everything to this .tlog file
   -h, --help             Print help
 ```

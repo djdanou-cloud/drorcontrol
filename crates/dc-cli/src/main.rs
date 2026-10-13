@@ -507,6 +507,15 @@ enum MissionCmd {
         #[arg(long)]
         fence: Option<std::path::PathBuf>,
     },
+    /// Convert a mission between QGroundControl `.plan` and `.waypoints` (QGC WPL 110), by the
+    /// file extensions. A .plan's geofence and rally points are listed; only the mission is
+    /// written to a .waypoints file.
+    Convert {
+        /// Input file (.plan or .waypoints).
+        input: std::path::PathBuf,
+        /// Output file (.plan or .waypoints).
+        output: std::path::PathBuf,
+    },
     /// Fly the route backwards (offline): home, TAKEOFF and the final RTL/LAND stay in place.
     Reverse {
         /// The .waypoints file.
@@ -2884,7 +2893,7 @@ fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
             } else {
                 print_mission(&items);
             }
-            let text = protocols::wpl::to_string(&items);
+            let text = mission_text(out.as_deref(), &items);
             return write_or_print(
                 out.as_deref(),
                 &text,
@@ -3128,9 +3137,33 @@ fn bin_kml_parts(log: &logs::Log) -> (Vec<(u32, track::Point)>, Vec<track::Waypo
     (points, wps.into_values().collect())
 }
 
+fn is_plan(path: &std::path::Path) -> bool {
+    path.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("plan"))
+}
+
+/// A mission file: QGroundControl `.plan` (JSON) by extension, else QGC WPL 110
+/// (`.waypoints`, Mission Planner).
 fn read_mission(path: &std::path::Path) -> Result<Vec<dc_core::MissionItem>, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    if is_plan(path) {
+        return protocols::plan::parse(&text)
+            .map(|p| p.mission)
+            .map_err(|e| format!("{}: {e}", path.display()));
+    }
     protocols::wpl::parse(&text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// The mission as text for `path`: `.plan` JSON for a `.plan` path, else QGC WPL 110.
+fn mission_text(path: Option<&std::path::Path>, items: &[dc_core::MissionItem]) -> String {
+    if path.is_some_and(is_plan) {
+        protocols::plan::to_string(&protocols::plan::Plan {
+            mission: items.to_vec(),
+            ..Default::default()
+        })
+    } else {
+        protocols::wpl::to_string(items)
+    }
 }
 
 fn print_mission(items: &[dc_core::MissionItem]) {
@@ -3280,7 +3313,7 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
             let items = download_mission(cli, vehicle, kind).await?;
             eprintln!("{} items (including home)", items.len());
             print_stats(&items);
-            let text = protocols::wpl::to_string(&items);
+            let text = mission_text(out.as_deref(), &items);
             match out {
                 Some(path) => {
                     std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -3395,7 +3428,7 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
                     );
                 }
             }
-            let text = protocols::wpl::to_string(&items);
+            let text = mission_text(out.as_deref(), &items);
             write_or_print(out.as_deref(), &text, &format!("{} items", items.len()))
         }
         MissionCmd::Export { file, gpx, kml } => {
@@ -3501,13 +3534,48 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
             }
             Ok(())
         }
+        MissionCmd::Convert { input, output } => {
+            let text =
+                std::fs::read_to_string(input).map_err(|e| format!("{}: {e}", input.display()))?;
+            let plan = if is_plan(input) {
+                protocols::plan::parse(&text).map_err(|e| format!("{}: {e}", input.display()))?
+            } else {
+                protocols::plan::Plan {
+                    mission: protocols::wpl::parse(&text)
+                        .map_err(|e| format!("{}: {e}", input.display()))?,
+                    ..Default::default()
+                }
+            };
+            let out = if is_plan(output) {
+                protocols::plan::to_string(&plan)
+            } else {
+                if !plan.fence.is_empty() || !plan.rally.is_empty() {
+                    eprintln!(
+                        "note: {} fence and {} rally items are not written to a .waypoints file (keep the .plan, or download/upload them separately)",
+                        plan.fence.len(),
+                        plan.rally.len()
+                    );
+                }
+                protocols::wpl::to_string(&plan.mission)
+            };
+            print_stats(&plan.mission);
+            std::fs::write(output, out).map_err(|e| format!("{}: {e}", output.display()))?;
+            eprintln!(
+                "wrote {} ({} mission items incl. home, {} fence, {} rally)",
+                output.display(),
+                plan.mission.len(),
+                plan.fence.len(),
+                plan.rally.len()
+            );
+            Ok(())
+        }
         MissionCmd::Reverse { file, out } => {
             let items = read_mission(file)?;
             let r = protocols::mission::reverse(&items).map_err(|e| e.to_string())?;
             print_stats(&r);
             write_or_print(
                 out.as_deref(),
-                &protocols::wpl::to_string(&r),
+                &mission_text(out.as_deref(), &r),
                 &format!("{} items reversed", r.len()),
             )
         }
@@ -3523,7 +3591,7 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
             print_stats(&s);
             write_or_print(
                 out.as_deref(),
-                &protocols::wpl::to_string(&s),
+                &mission_text(out.as_deref(), &s),
                 &format!("{} items, moved {north} m north, {east} m east", s.len()),
             )
         }
