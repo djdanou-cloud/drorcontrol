@@ -76,6 +76,21 @@ enum Cmd {
         #[arg(long, default_value_t = 15)]
         wait: u64,
     },
+    /// Read named parameters without downloading the whole list (fast over a radio).
+    ParamGet {
+        /// Link, e.g. tcp:127.0.0.1:5760.
+        #[arg(long)]
+        connect: LinkSpec,
+        /// Target system id (default: first vehicle heard).
+        #[arg(long)]
+        target: Option<u8>,
+        /// Parameter names.
+        #[arg(required = true)]
+        names: Vec<String>,
+        /// Seconds to wait for a vehicle heartbeat.
+        #[arg(long, default_value_t = 15)]
+        wait: u64,
+    },
     /// Change parameters on the vehicle (ADR-0012): every change is listed and confirmed once;
     /// if the vehicle is armed, its in-flight warning must be acknowledged too. A baseline of
     /// all parameters is saved first, each value is read back, and every step is audited.
@@ -1293,6 +1308,36 @@ fn audit_verify(file: &std::path::Path, print: bool) -> Result<(), String> {
 async fn run(cli: Cli) -> Result<(), String> {
     match &cli.cmd {
         Cmd::AuditVerify { file, print } => audit_verify(file, *print),
+        Cmd::ParamGet {
+            connect,
+            target,
+            names,
+            wait,
+        } => {
+            let core = start(&cli, connect).await?;
+            let sysid = match target {
+                Some(t) => *t,
+                None => core
+                    .wait_for_vehicle(Duration::from_secs(*wait))
+                    .await
+                    .ok_or_else(|| format!("no vehicle heartbeat on {connect} within {wait} s"))?,
+            };
+            let mut missing = 0;
+            for n in names {
+                let n = n.to_ascii_uppercase();
+                match core.read_param((sysid, 1), &n).await {
+                    Ok(p) => println!("{n},{}", p.value),
+                    Err(e) => {
+                        eprintln!("{e}");
+                        missing += 1;
+                    }
+                }
+            }
+            if missing > 0 {
+                return Err(format!("{missing} parameter(s) not read"));
+            }
+            Ok(())
+        }
         Cmd::ParamRollback {
             connect,
             baseline,

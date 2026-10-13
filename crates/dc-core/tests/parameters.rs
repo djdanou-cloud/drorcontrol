@@ -603,3 +603,13 @@ async fn parameter_writes_and_armed_refusals_are_audited() {
     std::fs::remove_file(snapshot).unwrap();
     std::fs::remove_file(log).unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn one_parameter_is_read_by_name_without_a_download() {
+    let (core, state, task) = setup().await;
+    let p = core.read_param((1, 1), "B").await.unwrap();
+    assert_eq!((p.value, p.ty), (8.0, MavParamType::REAL32.0));
+    assert!(core.read_param((1, 1), "NOPE").await.is_err());
+    assert!(state.lock().unwrap().sets.is_empty(), "read-only");
+    task.abort();
+}

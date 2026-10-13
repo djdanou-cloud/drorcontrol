@@ -33,6 +33,7 @@ Usage: dc-cli [OPTIONS] <COMMAND>
 
 Commands:
   params          Download all parameters and print them (or write a .param file)
+  param-get       Read named parameters without downloading the whole list (fast over a radio)
   param-set       Change parameters on the vehicle (ADR-0012): every change is listed and confirmed once; if the vehicle is armed, its in-flight warning must be acknowledged too. A baseline of all parameters is saved first, each value is read back, and every step is audited
   param-rollback  Restore parameters from a baseline saved by `param-set` (the vehicle in the baseline): the named ones, or with --changed every one that now differs (except values the autopilot maintains itself). Same confirmation, in-flight warning, new recovery baseline, read-back and audit as `param-set`
   daemon          Run the core with the gRPC API (proto/dc/v1/core.proto) until interrupted
@@ -75,6 +76,26 @@ Options:
       --compare <COMPARE>      Compare the vehicle with this .param file or .bin log instead of printing; exits with failure on any difference (read-only)
       --wait <WAIT>            Seconds to wait for a vehicle heartbeat [default: 15]
   -h, --help                   Print help
+```
+
+### `dc-cli param-get`
+
+```text
+Read named parameters without downloading the whole list (fast over a radio)
+
+Usage: dc-cli param-get [OPTIONS] --connect <CONNECT> <NAMES>...
+
+Arguments:
+  <NAMES>...  Parameter names
+
+Options:
+      --connect <CONNECT>  Link, e.g. tcp:127.0.0.1:5760
+      --sysid <SYSID>      Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>    Our MAVLink component id [default: 190]
+      --target <TARGET>    Target system id (default: first vehicle heard)
+      --tlog <TLOG>        Record everything to this .tlog file
+      --wait <WAIT>        Seconds to wait for a vehicle heartbeat [default: 15]
+  -h, --help               Print help
 ```
 
 ### `dc-cli param-set`

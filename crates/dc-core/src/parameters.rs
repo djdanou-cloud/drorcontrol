@@ -265,6 +265,46 @@ impl Core {
         Ok(())
     }
 
+    /// Read one parameter by name (`PARAM_REQUEST_READ`, retried each second, up to 5 s):
+    /// read-only, for checking a few values without downloading the whole list.
+    pub async fn read_param(&self, target: (u8, u8), name: &str) -> Result<Param, String> {
+        let read = Message::ParamRequestRead(ParamRequestRead {
+            target_system: target.0,
+            target_component: target.1,
+            param_id: encode_id(name),
+            param_index: -1,
+        });
+        let mut rx = self.incoming.subscribe();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut last_send: Option<Instant> = None;
+        let mut tick = tokio::time::interval(Duration::from_millis(25));
+        while Instant::now() < deadline {
+            if last_send.is_none_or(|at| at.elapsed() >= RETRY) {
+                if !self.send(&read).await {
+                    return Err("parameter transport closed".into());
+                }
+                last_send = Some(Instant::now());
+            }
+            tokio::select! {
+                _ = tick.tick() => {},
+                incoming = rx.recv() => match incoming {
+                    Ok(inc) if (inc.sysid, inc.compid) == target => {
+                        if let Message::ParamValue(p) = &inc.msg
+                            && decode_id(&p.param_id) == name
+                        {
+                            return Ok(Param { value: p.param_value, ty: p.param_type, index: p.param_index });
+                        }
+                    }
+                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => return Err("receive stream closed".into()),
+                }
+            }
+        }
+        Err(format!(
+            "{name}: no answer within 5 s (unknown name, or link down)"
+        ))
+    }
+
     /// The vehicle's latest heartbeat says armed.
     fn reported_armed(&self, sysid: u8) -> bool {
         self.fleet()
