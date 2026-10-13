@@ -117,6 +117,13 @@ enum Cmd {
         /// File holding the API key clients must present (else the DC_API_TOKEN variable).
         #[arg(long)]
         token_file: Option<std::path::PathBuf>,
+        /// Allow parameter writes over the API (SetParams), saving each baseline in this
+        /// directory; without it the API cannot change parameters.
+        #[arg(long)]
+        param_dir: Option<std::path::PathBuf>,
+        /// Hash-chained audit log (commands and parameter writes).
+        #[arg(long, default_value = "dc-audit.log")]
+        audit: std::path::PathBuf,
     },
     /// Talk to a running daemon over gRPC.
     Remote {
@@ -761,6 +768,19 @@ enum RemoteCmd {
         #[arg(long)]
         out: Option<std::path::PathBuf>,
     },
+    /// Change parameters through the daemon (it must run with --param-dir): confirm once; if
+    /// the vehicle is armed, acknowledge its in-flight warning too.
+    SetParams {
+        /// Changes as NAME=VALUE.
+        #[arg(required = true, value_name = "NAME=VALUE")]
+        changes: Vec<String>,
+        /// Confirm the changes without asking (scripts).
+        #[arg(long)]
+        yes: bool,
+        /// Acknowledge the in-flight warning without asking (scripts).
+        #[arg(long)]
+        armed_ok: bool,
+    },
     /// Download the mission, geofence or rally points through the daemon and list them.
     Items {
         /// Which list.
@@ -1076,7 +1096,14 @@ async fn run(cli: Cli) -> Result<(), String> {
             connect,
             listen,
             token_file,
+            param_dir,
+            audit,
         } => {
+            if let Some(d) = param_dir
+                && !d.is_dir()
+            {
+                return Err(format!("--param-dir {}: not a directory", d.display()));
+            }
             let token = api_token(token_file.as_deref())?;
             if token.is_none() && !listen.ip().is_loopback() {
                 return Err(format!(
@@ -1087,6 +1114,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 sysid: cli.sysid,
                 compid: cli.compid,
                 tlog: cli.tlog.clone(),
+                audit_log: Some(audit.clone()),
                 ..Default::default()
             };
             let core = Core::start(cfg)
@@ -1101,7 +1129,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             // Returning lets main drop the runtime, which flushes and closes the .tlog and
             // the links.
             tokio::select! {
-                r = api::serve_with(core, *listen, api::ServeOptions { token }) => r.map_err(|e| format!("gRPC server: {e}")),
+                r = api::serve_with(core, *listen, api::ServeOptions { token, param_dir: param_dir.clone() }) => r.map_err(|e| format!("gRPC server: {e}")),
                 _ = shutdown_signal() => Ok(()),
             }
         }
@@ -3613,6 +3641,74 @@ async fn remote(
             {
                 println!("{v:?}");
             }
+        }
+        RemoteCmd::SetParams {
+            changes,
+            yes,
+            armed_ok,
+        } => {
+            let mut assignments = Vec::new();
+            for ch in changes {
+                let (name, value) = ch
+                    .split_once('=')
+                    .ok_or_else(|| format!("{ch:?}: expected NAME=VALUE"))?;
+                let value: f64 = value
+                    .trim()
+                    .parse()
+                    .map_err(|_| format!("{ch:?}: value is not a number"))?;
+                let name = name.trim().to_ascii_uppercase();
+                let label = match dc_core::parameter_risk(&name) {
+                    dc_core::ParamRisk::Dangerous => "  (failsafe/arming/fence/safety setting)",
+                    dc_core::ParamRisk::Ordinary => "",
+                };
+                eprintln!("  {name} = {value}{label}");
+                assignments.push(pb::ParamAssignment { name, value });
+            }
+            if !*yes {
+                match ask("Write these parameters to the vehicle?") {
+                    Some(true) => {}
+                    Some(false) => return Err("not confirmed: nothing written".into()),
+                    None => return Err("no terminal to confirm on: pass --yes".into()),
+                }
+            }
+            let mut req = pb::SetParamsRequest {
+                sysid: 0,
+                compid: 0,
+                changes: assignments,
+                acknowledge_armed_warning: *armed_ok,
+            };
+            let mut reply = c.set_params(req.clone()).await.map_err(err)?.into_inner();
+            if !reply.armed_warning.is_empty() {
+                eprintln!("WARNING: {}", reply.armed_warning);
+                match ask("The vehicle is ARMED. Write anyway, in flight?") {
+                    Some(true) => {}
+                    Some(false) => {
+                        return Err("in-flight warning not acknowledged: nothing written".into());
+                    }
+                    None => {
+                        return Err(
+                            "vehicle armed: pass --armed-ok to acknowledge the in-flight warning"
+                                .into(),
+                        );
+                    }
+                }
+                req.acknowledge_armed_warning = true;
+                reply = c.set_params(req).await.map_err(err)?.into_inner();
+            }
+            eprintln!("baseline on the daemon's host: {}", reply.snapshot);
+            for r in &reply.results {
+                println!("{} {:?} {}", r.name, r.status(), r.value);
+            }
+            if !reply.interruption.is_empty() {
+                eprintln!("stopped: {}", reply.interruption);
+            }
+            if !reply.verified {
+                return Err(format!(
+                    "not all {} change(s) verified; the baseline holds the previous values",
+                    reply.planned
+                ));
+            }
+            println!("all {} change(s) verified by read-back", reply.planned);
         }
         RemoteCmd::Params { out } => {
             let list = c

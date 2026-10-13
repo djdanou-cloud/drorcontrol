@@ -113,6 +113,8 @@ Options:
       --listen <LISTEN>          gRPC listen address, e.g. 0.0.0.0:50051 for a field network. Beyond loopback an API key is required (--token-file or DC_API_TOKEN) [default: 127.0.0.1:50051]
       --tlog <TLOG>              Record everything to this .tlog file
       --token-file <TOKEN_FILE>  File holding the API key clients must present (else the DC_API_TOKEN variable)
+      --param-dir <PARAM_DIR>    Allow parameter writes over the API (SetParams), saving each baseline in this directory; without it the API cannot change parameters
+      --audit <AUDIT>            Hash-chained audit log (commands and parameter writes) [default: dc-audit.log]
   -h, --help                     Print help
 ```
 
@@ -124,16 +126,17 @@ Talk to a running daemon over gRPC
 Usage: dc-cli remote [OPTIONS] <COMMAND>
 
 Commands:
-  info      Daemon identity
-  vehicles  Vehicles and their latest telemetry
-  params    Download parameters through the daemon
-  items     Download the mission, geofence or rally points through the daemon and list them
-  messages  The vehicle's recent STATUSTEXT lines (the "Messages" view), oldest first
-  geotags   Photos the vehicle reported taking (CAMERA_FEEDBACK) as CSV, for geotagging
-  logs      List the vehicle's dataflash logs, or download one through the daemon
-  links     The daemon's router: links, routes (which link each system is heard on), counters
-  events    Print events (STATUSTEXT, links) for a while
-  help      Print this message or the help of the given subcommand(s)
+  info        Daemon identity
+  vehicles    Vehicles and their latest telemetry
+  params      Download parameters through the daemon
+  set-params  Change parameters through the daemon (it must run with --param-dir): confirm once; if the vehicle is armed, acknowledge its in-flight warning too
+  items       Download the mission, geofence or rally points through the daemon and list them
+  messages    The vehicle's recent STATUSTEXT lines (the "Messages" view), oldest first
+  geotags     Photos the vehicle reported taking (CAMERA_FEEDBACK) as CSV, for geotagging
+  logs        List the vehicle's dataflash logs, or download one through the daemon
+  links       The daemon's router: links, routes (which link each system is heard on), counters
+  events      Print events (STATUSTEXT, links) for a while
+  help        Print this message or the help of the given subcommand(s)
 
 Options:
       --grpc <GRPC>              Daemon URL [default: http://127.0.0.1:50051]
@@ -182,6 +185,25 @@ Usage: dc-cli remote params [OPTIONS]
 Options:
       --out <OUT>        Write a .param file instead of printing
       --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>  Our MAVLink component id [default: 190]
+      --tlog <TLOG>      Record everything to this .tlog file
+  -h, --help             Print help
+```
+
+#### `dc-cli remote set-params`
+
+```text
+Change parameters through the daemon (it must run with --param-dir): confirm once; if the vehicle is armed, acknowledge its in-flight warning too
+
+Usage: dc-cli remote set-params [OPTIONS] <NAME=VALUE>...
+
+Arguments:
+  <NAME=VALUE>...  Changes as NAME=VALUE
+
+Options:
+      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --yes              Confirm the changes without asking (scripts)
+      --armed-ok         Acknowledge the in-flight warning without asking (scripts)
       --compid <COMPID>  Our MAVLink component id [default: 190]
       --tlog <TLOG>      Record everything to this .tlog file
   -h, --help             Print help

@@ -223,8 +223,9 @@ vehicle is involved, and the audit log:
 flying, behind a warning pop-up): no dangerous-parameter refusal; `ArmedWarningRequired` /
 `ArmedWrite::Acknowledged` in the core; SITL in-flight write verified on 4.7.1 and 4.6.3.
 CLI done: `dc-cli param-set` (one confirmation, the in-flight warning as a second prompt,
-`--yes`/`--armed-ok` for scripts); every write is in the audit log. Still to do for item 2:
-gRPC (a write call that returns the warning and takes the acknowledgement) and the Qt pop-up.
+`--yes`/`--armed-ok` for scripts); every write is in the audit log. gRPC done: `SetParams`
+(warning back until acknowledged; served only with `dc-cli daemon --param-dir DIR`; audited)
+and `dc-cli remote set-params`. Still to do for item 2: the Qt pop-up (Phase 1).
 
 Items 3–5 change the vehicle. They are approved in ADR-0012 but were **paused on 2026-10-12**:
 the agent's safety check stopped the first attempt (dropping the dangerous-parameter refusal

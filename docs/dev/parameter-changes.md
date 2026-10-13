@@ -23,6 +23,12 @@ asks once, and if the vehicle is armed shows the warning and asks again; `--yes`
 `--armed-ok` answer those for scripts, and without a terminal nothing is written unless they
 are given.
 
+**gRPC:** `SetParams` (proto `dc.v1`) takes the changes and `acknowledge_armed_warning`;
+an armed vehicle without the acknowledgement gets `armed_warning` back and nothing is sent.
+The daemon serves it only when started with `--param-dir DIR` (where baselines are saved;
+clients cannot choose paths) and audits to `--audit` (default `dc-audit.log`).
+`dc-cli remote set-params NAME=VALUE…` is the matching client (same prompts as `param-set`).
+
 SITL (4.7.1 and 4.6.3): `DISARM_DELAY` written while hovering in GUIDED, refused with the
 warning first, then verified in 0.7 s, baseline included; the vehicle's own log records the
 change. Its fixed freshness limit is **1.5 seconds**, independent of the

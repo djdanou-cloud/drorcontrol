@@ -318,6 +318,7 @@ async fn api_key_is_required_when_set() {
         grpc,
         api::ServeOptions {
             token: Some("s3cret-field-key".into()),
+            ..Default::default()
         },
     ));
     let channel = tonic::transport::Endpoint::from_shared(url)

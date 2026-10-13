@@ -1,8 +1,9 @@
 // DrorControl core API, version 1.
 //
 // Served by `dc-cli daemon` (and later the desktop app's embedded core) over gRPC.
-// Read-only in v1: parameter writes and vehicle commands arrive with the command-safety
-// layer (CommandPolicy, plan 08 §4) so remote clients cannot bypass interlocks.
+// Read-only apart from SetParams (ADR-0012 item 1), which the daemon serves only when
+// started with a baseline directory. Vehicle commands arrive with the command-safety layer
+// (CommandPolicy, plan 08 §4) so remote clients cannot bypass interlocks.
 //
 // Compatibility: fields are only ever added (buf breaking-change check in CI, plan 06).
 syntax = "proto3";
@@ -36,6 +37,14 @@ service Core {
   rpc DownloadLog(DownloadLogRequest) returns (stream LogDownloadUpdate);
   // The router: open links, learned routes and counters (diagnostics).
   rpc GetLinkStats(GetLinkStatsRequest) returns (LinkStats);
+  // Change parameters (ADR-0012 item 1). The client shows the changes and asks the operator
+  // once before calling. The daemon saves a baseline of every parameter in its own baseline
+  // directory first, then writes each value and reads it back. If the vehicle is armed and
+  // acknowledge_armed_warning is false, nothing is sent and the reply carries armed_warning:
+  // show it as a warning pop-up and, if the operator acknowledges it, call again with
+  // acknowledge_armed_warning = true. FAILED_PRECONDITION when the daemon has no baseline
+  // directory (writes off).
+  rpc SetParams(SetParamsRequest) returns (SetParamsReply);
 }
 
 message GetInfoRequest {}
@@ -454,6 +463,41 @@ message ParamList {
   uint32 sysid = 1;
   uint32 compid = 2;
   repeated Param params = 3;
+}
+
+message ParamAssignment {
+  string name = 1;
+  double value = 2;
+}
+
+message SetParamsRequest {
+  uint32 sysid = 1;          // 0 = first vehicle heard
+  uint32 compid = 2;         // 0 = autopilot (1); only the autopilot is accepted
+  repeated ParamAssignment changes = 3;
+  bool acknowledge_armed_warning = 4;
+}
+
+enum ParamWriteStatus {
+  PARAM_WRITE_STATUS_VERIFIED = 0;     // the explicit read-back matched
+  PARAM_WRITE_STATUS_MISMATCH = 1;     // the vehicle reports another value (see value)
+  PARAM_WRITE_STATUS_UNCONFIRMED = 2;  // no read-back in time: outcome unknown
+}
+
+message ParamWriteResult {
+  string name = 1;
+  ParamWriteStatus status = 2;
+  float value = 3;           // the value read back (VERIFIED, MISMATCH)
+}
+
+message SetParamsReply {
+  // Set when nothing was sent because the vehicle is armed: the text to show.
+  string armed_warning = 1;
+  // The baseline file on the daemon's host (for a rollback), when one was written.
+  string snapshot = 2;
+  uint32 planned = 3;
+  repeated ParamWriteResult results = 4;
+  string interruption = 5;   // why the batch stopped early, if it did
+  bool verified = 6;         // every planned change verified
 }
 
 message StreamTelemetryRequest {

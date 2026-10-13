@@ -27,6 +27,8 @@ pub struct ServeOptions {
     /// Pre-shared key every call must present as `authorization: Bearer <key>`; `None` serves
     /// without authentication (loopback only, enforced by the daemon).
     pub token: Option<String>,
+    /// Where `SetParams` saves parameter baselines; `None` turns parameter writes off.
+    pub param_dir: Option<std::path::PathBuf>,
 }
 
 /// Equal-length, constant-time comparison (no early exit on the first differing byte).
@@ -62,12 +64,21 @@ use pb::core_server::{Core as CoreApi, CoreServer};
 #[derive(Clone)]
 pub struct CoreService {
     core: Core,
+    param_dir: Option<std::path::PathBuf>,
 }
 
 impl CoreService {
-    /// Wrap a core.
+    /// Wrap a core (parameter writes off).
     pub fn new(core: Core) -> Self {
-        CoreService { core }
+        CoreService {
+            core,
+            param_dir: None,
+        }
+    }
+
+    /// Wrap a core; `SetParams` saves baselines in `param_dir` (`None`: writes off).
+    pub fn with_param_dir(core: Core, param_dir: Option<std::path::PathBuf>) -> Self {
+        CoreService { core, param_dir }
     }
 
     /// Resolve "0 = first vehicle heard".
@@ -402,6 +413,88 @@ impl CoreApi for CoreService {
                     index: u32::from(p.index),
                 })
                 .collect(),
+        }))
+    }
+
+    async fn set_params(
+        &self,
+        req: Request<pb::SetParamsRequest>,
+    ) -> Result<Response<pb::SetParamsReply>, Status> {
+        let Some(dir) = &self.param_dir else {
+            return Err(Status::failed_precondition(
+                "parameter writes are off: start the daemon with --param-dir DIR",
+            ));
+        };
+        let r = req.into_inner();
+        let sysid = self.pick_vehicle(r.sysid)?;
+        let compid = Self::pick_component(r.compid)?;
+        if r.changes.is_empty() {
+            return Err(Status::invalid_argument("no changes"));
+        }
+        let mut edits = std::collections::BTreeMap::new();
+        for c in r.changes {
+            if c.name.is_empty() || c.name.len() > 16 || !c.value.is_finite() {
+                return Err(Status::invalid_argument(format!(
+                    "bad change {:?} = {}",
+                    c.name, c.value
+                )));
+            }
+            edits.insert(c.name, c.value);
+        }
+        let unix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_micros());
+        let path = dir.join(format!("param-baseline-{sysid}-{unix}.param"));
+        let mode = if r.acknowledge_armed_warning {
+            dc_core::ArmedWrite::Acknowledged
+        } else {
+            dc_core::ArmedWrite::DisarmedOnly
+        };
+        let report = match self
+            .core
+            .write_params_with((sysid, compid), edits, &path, mode)
+            .await
+        {
+            Ok(r) => r,
+            Err(dc_core::ParamOperationError::ArmedWarningRequired(w)) => {
+                return Ok(Response::new(pb::SetParamsReply {
+                    armed_warning: w,
+                    ..Default::default()
+                }));
+            }
+            Err(dc_core::ParamOperationError::Busy) => {
+                return Err(Status::aborted("another parameter write is active"));
+            }
+            Err(e @ dc_core::ParamOperationError::Snapshot(_)) => {
+                return Err(Status::invalid_argument(e.to_string()));
+            }
+            Err(e) => return Err(Status::failed_precondition(e.to_string())),
+        };
+        let results = report
+            .results
+            .iter()
+            .map(|w| {
+                let (status, value) = match &w.status {
+                    dc_core::SetStatus::Verified(p) => (pb::ParamWriteStatus::Verified, p.value),
+                    dc_core::SetStatus::Failed(Some(p)) => {
+                        (pb::ParamWriteStatus::Mismatch, p.value)
+                    }
+                    _ => (pb::ParamWriteStatus::Unconfirmed, 0.0),
+                };
+                pb::ParamWriteResult {
+                    name: w.name.clone(),
+                    status: status.into(),
+                    value,
+                }
+            })
+            .collect();
+        Ok(Response::new(pb::SetParamsReply {
+            armed_warning: String::new(),
+            snapshot: report.snapshot.display().to_string(),
+            planned: u32::try_from(report.planned).unwrap_or(u32::MAX),
+            verified: report.verified(),
+            interruption: report.interruption.clone().unwrap_or_default(),
+            results,
         }))
     }
 
@@ -761,7 +854,7 @@ pub async fn serve_with(
     let token = opts.token;
     tonic::transport::Server::builder()
         .add_service(CoreServer::with_interceptor(
-            CoreService::new(core),
+            CoreService::with_param_dir(core, opts.param_dir),
             move |req: Request<()>| check_token(token.as_deref(), &req).map(|()| req),
         ))
         .serve(addr)
@@ -778,7 +871,7 @@ pub async fn serve_on_with(
     let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
     tonic::transport::Server::builder()
         .add_service(CoreServer::with_interceptor(
-            CoreService::new(core),
+            CoreService::with_param_dir(core, opts.param_dir),
             move |req: Request<()>| check_token(token.as_deref(), &req).map(|()| req),
         ))
         .serve_with_incoming(incoming)
