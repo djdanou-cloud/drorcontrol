@@ -28,6 +28,9 @@ fn sitl_log() {
             "battery",
             "ekf",
             "ekf",
+            "compass",
+            "compass",
+            "compass",
             "error"
         ]
     );
@@ -38,7 +41,7 @@ fn sitl_log() {
         f[4].2
     );
     // SITL logs a compass error at boot and resolves it (ECode 0).
-    assert_eq!(f[7].2, "ERR COMPASS code 0 (resolved)");
+    assert_eq!(f[10].2, "ERR COMPASS code 0 (resolved)");
 }
 
 #[test]

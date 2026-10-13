@@ -26,6 +26,12 @@
 //!   4.7.1 and 4.6.3): bit 0 attitude, 1 horizontal velocity, 2 vertical velocity, 4 absolute
 //!   horizontal position, 5 vertical position, 7 constant-position mode, 14 GPS glitching,
 //!   18 dead reckoning. Judged on the primary core (`PI`) while flying.
+//! * `MAG` = TimeUS, I, MagX/Y/Z (corrected field, body frame), OfsX/Y/Z (offsets), … in
+//!   milligauss, I in priority order (`AP_Logger/LogFile.cpp`, 4.7.1 and 4.6.3). Arming fails
+//!   with offsets above `COMPASS_OFFS_MAX` (default 1800) or compasses that disagree by more
+//!   than 90° in 3-D, 60° in the horizontal plane or 200 mG in horizontal length
+//!   (`Compass::consistent`, `AP_COMPASS_MAX_*`); compasses with `COMPASS_USE*` 0 are not
+//!   compared. Plan 05 §2.3 adds cautions at 600 mG offsets and 30° horizontal disagreement.
 
 use std::collections::BTreeMap;
 
@@ -359,6 +365,121 @@ fn ekf_status(log: &Log, out: &mut Vec<Finding>) {
     }
 }
 
+/// Compass offsets: Caution above 600 mG, Warning above `offs_max` (arming refused).
+pub fn offset_level(magnitude: f64, offs_max: f64) -> Level {
+    if offs_max > 0.0 && magnitude > offs_max {
+        Level::Warning
+    } else if magnitude > 600.0 {
+        Level::Caution
+    } else {
+        Level::Ok
+    }
+}
+
+fn compass_offsets(log: &Log, params: &BTreeMap<String, f64>, out: &mut Vec<Finding>) {
+    let offs_max = params.get("COMPASS_OFFS_MAX").copied().unwrap_or(1800.0);
+    for inst in instances(log, "MAG", "I") {
+        let i = Some(("I", inst));
+        let last = |f: &str| {
+            log.column("MAG", f, i)
+                .and_then(|c| c.values.last().copied())
+        };
+        let (Some(x), Some(y), Some(z)) = (last("OfsX"), last("OfsY"), last("OfsZ")) else {
+            continue;
+        };
+        let m = (x * x + y * y + z * z).sqrt();
+        out.push(Finding {
+            check: "compass",
+            level: offset_level(m, offs_max),
+            text: format!(
+                "compass {inst}: offsets {m:.0} mG ({x:.0}, {y:.0}, {z:.0}); caution above 600, COMPASS_OFFS_MAX {offs_max:.0}"
+            ),
+            at_us: None,
+        });
+    }
+}
+
+/// How far compass `b` disagrees with the primary `a` (milligauss, body frame): 3-D angle
+/// and horizontal angle in degrees, horizontal length difference in mG.
+pub fn disagreement(a: [f64; 3], b: [f64; 3]) -> (f64, f64, f64) {
+    let angle = |u: &[f64], v: &[f64]| {
+        let dot: f64 = u.iter().zip(v).map(|(p, q)| p * q).sum();
+        let n = |w: &[f64]| w.iter().map(|x| x * x).sum::<f64>().sqrt();
+        let c = dot / (n(u) * n(v));
+        if c.is_finite() {
+            c.clamp(-1.0, 1.0).acos().to_degrees()
+        } else {
+            180.0
+        }
+    };
+    let len = ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt();
+    (angle(&a, &b), angle(&a[..2], &b[..2]), len)
+}
+
+fn compass_consistency(log: &Log, params: &BTreeMap<String, f64>, out: &mut Vec<Finding>) {
+    let armed = crate::flight::armed_periods(log);
+    let field = |inst: f64| {
+        let i = Some(("I", inst));
+        let (x, y, z) = (
+            log.column("MAG", "MagX", i)?,
+            log.column("MAG", "MagY", i)?,
+            log.column("MAG", "MagZ", i)?,
+        );
+        Some((x.time_us, x.values, y.values, z.values))
+    };
+    let used = |inst: f64| {
+        let name = match inst as u8 {
+            0 => "COMPASS_USE".to_string(),
+            n => format!("COMPASS_USE{}", n + 1),
+        };
+        params.get(&name).is_none_or(|v| *v != 0.0)
+    };
+    let Some(primary) = field(0.0) else { return };
+    for inst in instances(log, "MAG", "I")
+        .into_iter()
+        .filter(|i| *i > 0.0 && used(*i))
+    {
+        let Some(other) = field(inst) else { continue };
+        // Instances are written together each cycle: pair them in order.
+        let mut worst = (0.0, 0.0, 0.0, 0u64);
+        let mut worst_level = Level::Ok;
+        let mut n = 0;
+        for k in 0..primary.0.len().min(other.0.len()) {
+            let t = primary.0[k];
+            if !crate::flight::in_periods(&armed, t) {
+                continue;
+            }
+            n += 1;
+            let a = [primary.1[k], primary.2[k], primary.3[k]];
+            let b = [other.1[k], other.2[k], other.3[k]];
+            let (xyz, xy, len) = disagreement(a, b);
+            let level = if xyz > 90.0 || xy > 60.0 || len > 200.0 {
+                Level::Warning
+            } else if xy > 30.0 {
+                Level::Caution
+            } else {
+                Level::Ok
+            };
+            if level > worst_level || (level == worst_level && xy > worst.1) {
+                worst_level = level;
+                worst = (xyz, xy, len, t);
+            }
+        }
+        if n == 0 {
+            continue;
+        }
+        out.push(Finding {
+            check: "compass",
+            level: worst_level,
+            text: format!(
+                "compass {inst} vs compass 0 while armed: worst {:.0}° 3-D, {:.0}° horizontal, {:.0} mG horizontal length (arming limits 90°, 60°, 200 mG)",
+                worst.0, worst.1, worst.2
+            ),
+            at_us: Some(worst.3),
+        });
+    }
+}
+
 fn gps(log: &Log, params: &BTreeMap<String, f64>, out: &mut Vec<Finding>) {
     let (good, source) = match params.get("GPS_HDOP_GOOD") {
         Some(v) => (*v, "GPS_HDOP_GOOD"),
@@ -472,6 +593,8 @@ pub fn assess(log: &Log) -> Vec<Finding> {
     battery(log, &params, &mut out);
     ekf(log, &params, &mut out);
     ekf_status(log, &mut out);
+    compass_offsets(log, &params, &mut out);
+    compass_consistency(log, &params, &mut out);
     gps(log, &params, &mut out);
     board_voltage(log, &params, &mut out);
     errors(log, &mut out);
@@ -481,6 +604,17 @@ pub fn assess(log: &Log) -> Vec<Finding> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compass_limits() {
+        assert_eq!(offset_level(500.0, 1800.0), Level::Ok);
+        assert_eq!(offset_level(700.0, 1800.0), Level::Caution);
+        assert_eq!(offset_level(1900.0, 1800.0), Level::Warning);
+        let (xyz, xy, len) = disagreement([200.0, 0.0, 400.0], [200.0, 0.0, 400.0]);
+        assert!(xyz < 1e-6 && xy < 1e-6 && len < 1e-9);
+        let (_, xy, len) = disagreement([200.0, 0.0, 400.0], [0.0, 200.0, 400.0]);
+        assert!((xy - 90.0).abs() < 1e-9 && (len - 282.842_712).abs() < 1e-3);
+    }
 
     #[test]
     fn solution_status_problems() {

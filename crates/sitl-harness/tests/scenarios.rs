@@ -1175,7 +1175,16 @@ async fn auto_mission_flight_reports_progress_to_landing() {
         "{gq:?}"
     );
     // GPS stayed good the whole flight: the EKF solution status never lost anything.
-    let status: Vec<_> = logs::health::assess(&log)
+    let findings = logs::health::assess(&log);
+    // The simulated compasses agree and have small offsets.
+    let compass: Vec<_> = findings.iter().filter(|f| f.check == "compass").collect();
+    eprintln!("compass: {compass:?}");
+    assert!(
+        compass.iter().any(|f| f.text.contains("vs compass 0"))
+            && compass.iter().all(|f| f.level == logs::health::Level::Ok),
+        "{compass:?}"
+    );
+    let status: Vec<_> = findings
         .into_iter()
         .filter(|f| f.check == "ekf status")
         .collect();
