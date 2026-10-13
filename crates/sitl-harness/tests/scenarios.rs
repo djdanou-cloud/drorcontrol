@@ -1174,6 +1174,16 @@ async fn auto_mission_flight_reports_progress_to_landing() {
         gq.fix_3d() > 0.99 && gq.min_sats >= 6.0 && gq.glitches.is_empty(),
         "{gq:?}"
     );
+    // One takeoff: a clean liftoff (healthy simulated frame, so small attitude error) and a
+    // positive climb.
+    let up = logs::takeoff::takeoffs(&log);
+    eprintln!("takeoffs: {up:?}");
+    assert_eq!(up.len(), 1, "{up:?}");
+    assert!(
+        up[0].max_climb_ms > 0.5 && up[0].max_roll_err_deg < 10.0 && up[0].max_pitch_err_deg < 10.0,
+        "{up:?}"
+    );
+    assert!(up[0].from_arm_s.is_some_and(|s| s < 30.0), "{up:?}");
     // One landing, slowing to the landing speed (LAND_SPD_MS 0.5 m/s by default) at the end.
     let land = logs::landing::landings(&log);
     eprintln!("landings: {land:?}");

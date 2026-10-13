@@ -553,6 +553,11 @@ enum LogCmd {
         )]
         to: String,
     },
+    /// Takeoffs: time from arming to liftoff, climb, attitude error just after liftoff.
+    Takeoffs {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+    },
     /// Landings: descent speed before touchdown, time to disarm.
     Landings {
         /// Path to the .bin log.
@@ -1352,6 +1357,33 @@ fn print_log_imu(log: &logs::Log) -> Result<(), String> {
             i.unhealthy_armed,
             i.rates_hz.0,
             i.rates_hz.1
+        );
+    }
+    Ok(())
+}
+
+fn print_log_takeoffs(log: &logs::Log) -> Result<(), String> {
+    let k = logs::takeoff::takeoffs(log);
+    if k.is_empty() {
+        return Err("no liftoff reported by the land detector (EV 28)".into());
+    }
+    for x in k {
+        println!(
+            "liftoff at {:.1} s ({}): first {:.0} s climb up to {:.2} m/s, attitude error up to roll {:.1}° pitch {:.1}°{}",
+            x.time_us as f64 / 1e6,
+            x.from_arm_s
+                .map_or("arming not in this log".into(), |s| format!(
+                    "{s:.1} s after arming"
+                )),
+            logs::takeoff::WINDOW_US as f64 / 1e6,
+            x.max_climb_ms,
+            x.max_roll_err_deg,
+            x.max_pitch_err_deg,
+            if x.max_roll_err_deg.max(x.max_pitch_err_deg) > 10.0 {
+                "  CHECK: over 10° (motor order/direction, centre of gravity, props)"
+            } else {
+                ""
+            }
         );
     }
     Ok(())
@@ -2578,6 +2610,7 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                 ("Health checks", Box::new(|| print_log_health(&log))),
                 ("Motors and hover", Box::new(|| print_log_motors(&log))),
                 ("Attitude tracking", Box::new(|| print_log_attitude(&log))),
+                ("Takeoffs", Box::new(|| print_log_takeoffs(&log))),
                 ("Landings", Box::new(|| print_log_landings(&log))),
                 ("Battery", Box::new(|| print_log_battery(&log, &0))),
                 ("Cell balance", Box::new(|| print_log_cells(&log))),
@@ -2658,6 +2691,7 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
         LogCmd::Perf { path } => print_log_perf(&open(path)?)?,
         LogCmd::Cells { path } => print_log_cells(&open(path)?)?,
         LogCmd::Lanes { path } => print_log_lanes(&open(path)?)?,
+        LogCmd::Takeoffs { path } => print_log_takeoffs(&open(path)?)?,
         LogCmd::Landings { path } => print_log_landings(&open(path)?)?,
         LogCmd::Sanitize { path, out, to } => {
             let log = open(path)?;

@@ -32,6 +32,7 @@ pub mod rc;
 pub mod sanitize;
 pub mod sensors;
 pub mod spectrum;
+pub mod takeoff;
 #[cfg(test)]
 mod testlog;
 pub mod track;
