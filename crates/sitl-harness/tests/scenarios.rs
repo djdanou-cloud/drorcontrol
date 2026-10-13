@@ -1174,6 +1174,16 @@ async fn auto_mission_flight_reports_progress_to_landing() {
         gq.fix_3d() > 0.99 && gq.min_sats >= 6.0 && gq.glitches.is_empty(),
         "{gq:?}"
     );
+    // GPS stayed good the whole flight: the EKF solution status never lost anything.
+    let status: Vec<_> = logs::health::assess(&log)
+        .into_iter()
+        .filter(|f| f.check == "ekf status")
+        .collect();
+    eprintln!("ekf status: {status:?}");
+    assert!(
+        !status.is_empty() && status.iter().all(|f| f.level == logs::health::Level::Ok),
+        "{status:?}"
+    );
     // One takeoff: a clean liftoff (healthy simulated frame, so small attitude error) and a
     // positive climb.
     let up = logs::takeoff::takeoffs(&log);

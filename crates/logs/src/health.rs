@@ -22,6 +22,10 @@
 //! * `POWR` = TimeUS, Vcc, … (`AP_Logger/LogStructure.h`). Arming fails when the board
 //!   voltage is outside `BRD_VBUS_MIN` (default 4.3 V, `AP_BoardConfig.cpp`) to 5.8 V
 //!   (`AP_ARMING_BOARD_VOLTAGE_MAX`, `AP_Arming.cpp`).
+//! * `XKF4.SS` is the EKF3 solution status, `nav_filter_status` (`AP_NavEKF/AP_Nav_Common.h`,
+//!   4.7.1 and 4.6.3): bit 0 attitude, 1 horizontal velocity, 2 vertical velocity, 4 absolute
+//!   horizontal position, 5 vertical position, 7 constant-position mode, 14 GPS glitching,
+//!   18 dead reckoning. Judged on the primary core (`PI`) while flying.
 
 use std::collections::BTreeMap;
 
@@ -262,6 +266,99 @@ fn ekf(log: &Log, params: &BTreeMap<String, f64>, out: &mut Vec<Finding>) {
     }
 }
 
+/// Problems in a run of primary-core solution statuses `(time, SS)` taken while flying:
+/// (level, what, first time).
+pub fn status_problems(samples: &[(u64, u32)]) -> Vec<(Level, &'static str, u64)> {
+    const CHECKS: [(u32, bool, Level, &str); 6] = [
+        (0, false, Level::Warning, "attitude estimate invalid"),
+        (1, false, Level::Warning, "horizontal velocity invalid"),
+        (2, false, Level::Warning, "vertical velocity invalid"),
+        (5, false, Level::Warning, "vertical position invalid"),
+        (
+            18,
+            true,
+            Level::Warning,
+            "dead reckoning (no position or velocity aiding)",
+        ),
+        (
+            14,
+            true,
+            Level::Caution,
+            "GPS glitching affected navigation",
+        ),
+    ];
+    let bit = |ss: u32, b: u32| ss & (1 << b) != 0;
+    let mut out = Vec::new();
+    for (b, set_is_bad, level, what) in CHECKS {
+        if let Some((t, _)) = samples.iter().find(|(_, ss)| bit(*ss, b) == set_is_bad) {
+            out.push((level, what, *t));
+        }
+    }
+    // Absolute position matters only once the flight had it.
+    if let Some(had) = samples.iter().position(|(_, ss)| bit(*ss, 4))
+        && let Some((t, _)) = samples[had..].iter().find(|(_, ss)| !bit(*ss, 4))
+    {
+        out.push((Level::Warning, "absolute position lost in flight", *t));
+    }
+    // Constant-position mode is normal for a vehicle without a position source (indoors, no
+    // GPS); it is a loss only after the flight had a relative or absolute position.
+    if let Some(had) = samples
+        .iter()
+        .position(|(_, ss)| bit(*ss, 3) || bit(*ss, 4))
+        && let Some((t, _)) = samples[had..].iter().find(|(_, ss)| bit(*ss, 7))
+    {
+        out.push((
+            Level::Warning,
+            "constant-position mode in flight (no horizontal aiding)",
+            *t,
+        ));
+    }
+    out.sort_by_key(|p| p.2);
+    out
+}
+
+fn ekf_status(log: &Log, out: &mut Vec<Finding>) {
+    let (flying, _) = crate::flight::flying_periods(log);
+    let mut samples = Vec::new();
+    for core in instances(log, "XKF4", "C") {
+        let inst = Some(("C", core));
+        let (Some(ss), Some(pi)) = (
+            log.column("XKF4", "SS", inst),
+            log.column("XKF4", "PI", inst),
+        ) else {
+            continue;
+        };
+        samples.extend(
+            ss.time_us
+                .iter()
+                .zip(ss.values.iter().zip(&pi.values))
+                .filter(|(t, (_, pi))| **pi == core && crate::flight::in_periods(&flying, **t))
+                .map(|(t, (ss, _))| (*t, *ss as u32)),
+        );
+    }
+    if samples.is_empty() {
+        return;
+    }
+    samples.sort_unstable();
+    let problems = status_problems(&samples);
+    if problems.is_empty() {
+        out.push(Finding {
+            check: "ekf status",
+            level: Level::Ok,
+            text: "EKF3 solution status (primary core) healthy throughout the flight".into(),
+            at_us: None,
+        });
+    }
+    for (level, what, t) in problems {
+        out.push(Finding {
+            check: "ekf status",
+            level,
+            text: format!("EKF3 solution status: {what}"),
+            at_us: Some(t),
+        });
+    }
+}
+
 fn gps(log: &Log, params: &BTreeMap<String, f64>, out: &mut Vec<Finding>) {
     let (good, source) = match params.get("GPS_HDOP_GOOD") {
         Some(v) => (*v, "GPS_HDOP_GOOD"),
@@ -374,6 +471,7 @@ pub fn assess(log: &Log) -> Vec<Finding> {
     vibration(log, &mut out);
     battery(log, &params, &mut out);
     ekf(log, &params, &mut out);
+    ekf_status(log, &mut out);
     gps(log, &params, &mut out);
     board_voltage(log, &params, &mut out);
     errors(log, &mut out);
@@ -383,6 +481,38 @@ pub fn assess(log: &Log) -> Vec<Finding> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn solution_status_problems() {
+        let good = 0b1_0010_0000_0011_0111; // att, vels, abs pos, vert pos, using GPS
+        assert!(status_problems(&[(1, good), (2, good)]).is_empty());
+        let p = status_problems(&[(1, good), (2, good & !(1 << 4)), (3, good | 1 << 14)]);
+        assert_eq!(
+            p,
+            [
+                (Level::Warning, "absolute position lost in flight", 2),
+                (Level::Caution, "GPS glitching affected navigation", 3)
+            ]
+        );
+        let no_gps = good & !(1 << 4); // never had absolute position (optical flow)
+        assert!(status_problems(&[(1, no_gps), (2, no_gps)]).is_empty());
+        assert_eq!(
+            status_problems(&[(5, good & !1)])[0].1,
+            "attitude estimate invalid"
+        );
+        let indoor = 0b10_0111 | 1 << 7; // no position source: constant-position mode
+        assert!(status_problems(&[(1, indoor)]).is_empty());
+        assert_eq!(
+            status_problems(&[(1, good), (2, indoor)])
+                .iter()
+                .map(|p| p.1)
+                .collect::<Vec<_>>(),
+            [
+                "absolute position lost in flight",
+                "constant-position mode in flight (no horizontal aiding)"
+            ]
+        );
+    }
 
     #[test]
     fn levels_follow_the_guidance() {
