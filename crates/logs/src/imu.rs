@@ -3,6 +3,13 @@
 //! `IMU` = TimeUS, I, GyrX..AccZ, EG (gyro error count), EA (accel error count), T
 //! (temperature, °C), GH, AH (gyro/accel health, 1 = healthy), GHz, AHz (measurement rates)
 //! (`AP_InertialSensor/LogStructure.h`, 4.7.1). The error counts are cumulative.
+//!
+//! Consistency follows the arming checks (`AP_InertialSensor::accels_consistent` and
+//! `gyros_consistent`, `AP_Arming.cpp`, 4.7.1): each IMU against the first, accelerometers
+//! within `ARMING_ACCTHRESH` (default 0.75 m/s², three times that from the third IMU, Z
+//! difference halved), gyros within 5°/s. Those checks run at rest; in flight the vibration
+//! of separately mounted IMUs differs, so the difference is taken between 1 s means, which
+//! keeps a bias or a scale error and averages vibration out.
 
 use crate::dataflash::Log;
 use crate::flight::{armed_periods, in_periods};
@@ -74,6 +81,99 @@ pub fn imu_health(log: &Log) -> Vec<ImuHealth> {
     out
 }
 
+/// One IMU against the first while armed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ImuConsistency {
+    /// Instance compared with IMU 0.
+    pub instance: u8,
+    /// Largest 1 s mean accelerometer difference, m/s² (Z halved), and the arming limit.
+    pub accel_ms2: f64,
+    /// See `accel_ms2`.
+    pub accel_limit: f64,
+    /// Largest 1 s mean gyro difference, °/s (limit 5).
+    pub gyro_degs: f64,
+    /// When the largest accelerometer difference was seen, µs.
+    pub at_us: u64,
+}
+
+/// 1 s means of the six IMU axes of one instance while armed: (window start, means).
+fn window_means(log: &Log, id: u8, armed: &[crate::flight::ArmedPeriod]) -> Vec<(u64, [f64; 6])> {
+    let sel = Some(("I", f64::from(id)));
+    let cols: Option<Vec<_>> = ["AccX", "AccY", "AccZ", "GyrX", "GyrY", "GyrZ"]
+        .iter()
+        .map(|f| log.column("IMU", f, sel))
+        .collect();
+    let Some(cols) = cols else {
+        return Vec::new();
+    };
+    let mut out: Vec<(u64, [f64; 6], usize)> = Vec::new();
+    for (k, t) in cols[0].time_us.iter().enumerate() {
+        if !in_periods(armed, *t) {
+            continue;
+        }
+        let w = t / 1_000_000 * 1_000_000;
+        if out.last().is_none_or(|l| l.0 != w) {
+            out.push((w, [0.0; 6], 0));
+        }
+        let l = out.last_mut().unwrap();
+        for (a, c) in l.1.iter_mut().zip(&cols) {
+            *a += c.values[k];
+        }
+        l.2 += 1;
+    }
+    out.into_iter()
+        .filter(|w| w.2 > 0)
+        .map(|(t, s, n)| (t, s.map(|v| v / n as f64)))
+        .collect()
+}
+
+/// Every IMU after the first, against the first, while armed.
+pub fn imu_consistency(log: &Log) -> Vec<ImuConsistency> {
+    let armed = armed_periods(log);
+    let Some(inst) = log.column("IMU", "I", None) else {
+        return Vec::new();
+    };
+    let mut ids: Vec<u8> = inst.values.iter().map(|v| *v as u8).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let thresh = log
+        .params()
+        .get("ARMING_ACCTHRESH")
+        .copied()
+        .unwrap_or(0.75);
+    let primary = window_means(log, 0, &armed);
+    let mut out = Vec::new();
+    for id in ids.into_iter().filter(|i| *i > 0) {
+        let other = window_means(log, id, &armed);
+        let mut worst = (0.0f64, 0.0f64, 0u64);
+        for (t, b) in &other {
+            let Some((_, a)) = primary.iter().find(|(pt, _)| pt == t) else {
+                continue;
+            };
+            let d: Vec<f64> = a.iter().zip(b).map(|(x, y)| y - x).collect();
+            let acc = (d[0].powi(2) + d[1].powi(2) + (0.5 * d[2]).powi(2)).sqrt();
+            let gyr = (d[3].powi(2) + d[4].powi(2) + d[5].powi(2))
+                .sqrt()
+                .to_degrees();
+            if acc > worst.0 {
+                worst = (acc, worst.1, *t);
+            }
+            worst.1 = worst.1.max(gyr);
+        }
+        if other.is_empty() || primary.is_empty() {
+            continue;
+        }
+        out.push(ImuConsistency {
+            instance: id,
+            accel_ms2: worst.0,
+            accel_limit: if id >= 2 { thresh * 3.0 } else { thresh },
+            gyro_degs: worst.1,
+            at_us: worst.2,
+        });
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,5 +211,66 @@ mod tests {
         assert_eq!(h[0].temp_c, (40.0, 47.5));
         assert_eq!(h[0].rates_hz, (2000.0, 1000.0));
         assert_eq!((h[1].samples, h[1].gyro_errors), (1, 0));
+    }
+
+    #[test]
+    fn consistency_uses_one_second_means() {
+        let mut b = LogBuilder::default();
+        b.format("ARM", "QBIBB", "TimeUS,ArmState,ArmChecks,Forced,Method")
+            .format("IMU", "QBffffff", "TimeUS,I,AccX,AccY,AccZ,GyrX,GyrY,GyrZ");
+        b.rec("ARM", &[N(0.5e6), N(1.0), N(0.0), N(0.0), N(0.0)]);
+        for k in 0..20 {
+            let t = 1e6 + f64::from(k) * 0.1e6;
+            // IMU 0 vibrates ±3 m/s² on X; IMU 1 has a 0.4 m/s² X bias and 2 m/s² Z bias
+            // (halved: 1), and IMU 2 a 0.1 rad/s gyro bias.
+            let vib = if k % 2 == 0 { 3.0 } else { -3.0 };
+            b.rec(
+                "IMU",
+                &[
+                    N(t),
+                    N(0.0),
+                    N(vib),
+                    N(0.0),
+                    N(-9.8),
+                    N(0.0),
+                    N(0.0),
+                    N(0.0),
+                ],
+            );
+            b.rec(
+                "IMU",
+                &[
+                    N(t),
+                    N(1.0),
+                    N(0.4),
+                    N(0.0),
+                    N(-7.8),
+                    N(0.0),
+                    N(0.0),
+                    N(0.0),
+                ],
+            );
+            b.rec(
+                "IMU",
+                &[
+                    N(t),
+                    N(2.0),
+                    N(0.0),
+                    N(0.0),
+                    N(-9.8),
+                    N(0.1),
+                    N(0.0),
+                    N(0.0),
+                ],
+            );
+        }
+        let c = imu_consistency(&b.open());
+        assert_eq!(c.len(), 2);
+        let expect = (0.4f64.powi(2) + 1.0f64).sqrt();
+        assert!((c[0].accel_ms2 - expect).abs() < 1e-5, "{c:?}");
+        assert_eq!((c[0].accel_limit, c[1].accel_limit), (0.75, 2.25));
+        assert!(c[0].gyro_degs < 1e-9);
+        assert!((c[1].gyro_degs - 0.1f64.to_degrees()).abs() < 1e-5);
+        assert!(c[1].accel_ms2 < 1e-9);
     }
 }

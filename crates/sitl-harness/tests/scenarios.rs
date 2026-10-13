@@ -1184,6 +1184,13 @@ async fn auto_mission_flight_reports_progress_to_landing() {
             && compass.iter().all(|f| f.level == logs::health::Level::Ok),
         "{compass:?}"
     );
+    // The IMUs agree once vibration is averaged out (IMU 1 carries SIM_ACC1_RND noise).
+    let imus: Vec<_> = findings.iter().filter(|f| f.check == "imu").collect();
+    eprintln!("imu consistency: {imus:?}");
+    assert!(
+        !imus.is_empty() && imus.iter().all(|f| f.level == logs::health::Level::Ok),
+        "{imus:?}"
+    );
     let status: Vec<_> = findings
         .into_iter()
         .filter(|f| f.check == "ekf status")

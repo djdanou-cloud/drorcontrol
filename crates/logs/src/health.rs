@@ -499,6 +499,27 @@ pub fn arming_messages(texts: &[(u64, String)]) -> Vec<(String, u64, usize)> {
     out
 }
 
+fn imu_consistency(log: &Log, out: &mut Vec<Finding>) {
+    for c in crate::imu::imu_consistency(log) {
+        let level = if c.accel_ms2 > c.accel_limit || c.gyro_degs > 5.0 {
+            Level::Warning
+        } else if c.accel_ms2 > c.accel_limit / 2.0 || c.gyro_degs > 2.5 {
+            Level::Caution
+        } else {
+            Level::Ok
+        };
+        out.push(Finding {
+            check: "imu",
+            level,
+            text: format!(
+                "IMU {} vs IMU 0 while armed (1 s means): accelerometers {:.2} m/s² (limit {:.2}), gyros {:.2}°/s (limit 5)",
+                c.instance, c.accel_ms2, c.accel_limit, c.gyro_degs
+            ),
+            at_us: Some(c.at_us),
+        });
+    }
+}
+
 fn arming_failures(log: &Log, out: &mut Vec<Finding>) {
     let texts: Vec<(u64, String)> = crate::flight::events(log)
         .into_iter()
@@ -637,6 +658,7 @@ pub fn assess(log: &Log) -> Vec<Finding> {
     compass_offsets(log, &params, &mut out);
     compass_consistency(log, &params, &mut out);
     arming_failures(log, &mut out);
+    imu_consistency(log, &mut out);
     gps(log, &params, &mut out);
     board_voltage(log, &params, &mut out);
     errors(log, &mut out);
