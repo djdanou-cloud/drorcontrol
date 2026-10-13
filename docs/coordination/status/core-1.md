@@ -3,8 +3,8 @@ agent: core-1
 role: workstream-agent
 workstream: WS-CORE
 state: idle
-task: batch5
-updated: 2026-10-12T20:19:20Z
+task: idle: 40-task batch committed locally, awaiting push
+updated: 2026-10-13T05:08:38Z
 ---
 
 ## Current focus
