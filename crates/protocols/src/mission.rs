@@ -1355,10 +1355,26 @@ pub fn lint(items: &[MissionItem]) -> Vec<Finding> {
         add(
             Some(*s),
             LintLevel::Note,
-            "the mission does not end with RTL or LAND: what the vehicle does at the end \
-             depends on its settings"
+            "the mission does not end with RTL or LAND: at the end Copter switches to LOITER \
+             where it is (LAND if it cannot loiter), and stays in the air"
                 .into(),
         );
+    }
+    // Two navigation items in a row to the same place and height: usually a double click.
+    for w in nav.windows(2) {
+        let ((_, a), (s, b)) = (w[0], w[1]);
+        if a.command == 16
+            && b.command == 16
+            && (a.x, a.y, a.frame) == (b.x, b.y, b.frame)
+            && a.z == b.z
+            && (a.x != 0 || a.y != 0)
+        {
+            add(
+                Some(s),
+                LintLevel::Note,
+                "same position and altitude as the waypoint before it".into(),
+            );
+        }
     }
     let mut frames = std::collections::BTreeSet::new();
     for (s, i) in items.iter().enumerate().skip(1) {
@@ -1369,6 +1385,16 @@ pub fn lint(items: &[MissionItem]) -> Vec<Finding> {
                     Some(s),
                     LintLevel::Warning,
                     format!("DO_JUMP to item {target}, which does not exist"),
+                );
+            }
+            // `AP_MISSION_JUMP_REPEAT_FOREVER` (4.7.1 AP_Mission.h).
+            if i.params[1] == -1.0 {
+                add(
+                    Some(s),
+                    LintLevel::Note,
+                    "DO_JUMP repeats forever: the mission only ends when the mode is changed \
+                     (or a failsafe acts)"
+                        .into(),
                 );
             }
         }
@@ -1486,5 +1512,31 @@ mod lint_tests {
                 .any(|f| f.seq.is_none() && f.text.contains("more than one reference"))
         );
         assert_eq!(lint(&m[..1])[0].text, "no mission items after home");
+    }
+
+    #[test]
+    fn endless_jumps_and_double_clicks() {
+        let mut forever = it(177, 2, 0.0);
+        forever.params = [2.0, -1.0, 0.0, 0.0];
+        let m = [
+            it(16, 0, 584.0),
+            it(22, 3, 20.0),
+            it(16, 3, 30.0),
+            it(16, 3, 30.0), // same as the one before
+            forever,
+            it(20, 2, 0.0),
+        ];
+        let f = lint(&m);
+        assert_eq!(
+            f.iter().map(|f| (f.seq, f.level)).collect::<Vec<_>>(),
+            [(Some(3), LintLevel::Note), (Some(4), LintLevel::Note)],
+            "{f:#?}"
+        );
+        assert!(f[1].text.contains("forever"));
+        // A counted repeat is fine.
+        let mut twice = forever;
+        twice.params[1] = 2.0;
+        let m2 = [m[0], m[1], m[2], twice, m[5]];
+        assert_eq!(lint(&m2), []);
     }
 }
