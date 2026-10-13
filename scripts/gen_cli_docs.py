@@ -45,7 +45,9 @@ Never commit field logs with real positions to the repository; sanitize them fir
 
 def help_text(binary, args):
     out = subprocess.run([binary, *args, "--help"], capture_output=True, text=True, check=True)
-    return out.stdout.rstrip() + "\n"
+    # clap names the program after argv[0]: the same page on every OS.
+    text = out.stdout.replace("dc-cli.exe", "dc-cli").replace("\r\n", "\n")
+    return text.rstrip() + "\n"
 
 
 def subcommands(text):
@@ -77,17 +79,18 @@ def render(binary):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--bin", default=str(ROOT / "target/debug/dc-cli"))
+    exe = "dc-cli.exe" if sys.platform == "win32" else "dc-cli"
+    ap.add_argument("--bin", default=str(ROOT / "target/debug" / exe))
     ap.add_argument("--check", action="store_true")
     a = ap.parse_args()
     page = render(a.bin)
     if a.check:
-        if not OUT.exists() or OUT.read_text() != page:
+        if not OUT.exists() or OUT.read_text(encoding="utf-8") != page:
             print(f"{OUT.relative_to(ROOT)} is out of date: run scripts/gen_cli_docs.py", file=sys.stderr)
             return 1
         return 0
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(page)
+    OUT.write_text(page, encoding="utf-8", newline="\n")
     print(f"wrote {OUT.relative_to(ROOT)} ({page.count(chr(10))} lines)")
     return 0
 

@@ -163,6 +163,12 @@ fn repo_check(root: &Path) -> TaskResult {
         root,
         Command::new(&python).args(["scripts/gen_adr_index.py", "--check"]),
     )?;
+    // The dc-cli reference page is generated from the tool's own help.
+    cargo(root, &["build", "-p", "dc-cli", "--locked"])?;
+    run(
+        root,
+        Command::new(&python).args(["scripts/gen_cli_docs.py", "--check"]),
+    )?;
 
     let output = Command::new("git")
         .current_dir(root)
