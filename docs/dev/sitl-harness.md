@@ -26,6 +26,12 @@ parameters 4.7 renamed, e.g. `WP_SPD` to 4.6's `WPNAV_SPEED` in cm/s). Set `DC_S
 failure (CI does). The `sitl` CI job runs every scenario on ArduCopter 4.7.1 and 4.6.3 and
 caches each built binary keyed on `scripts/build_sitl.sh` and the tag.
 
+`DC_SITL_TLOG=PATH` makes the AUTO flight scenario
+(`auto_mission_flight_reports_progress_to_landing`) record its telemetry to PATH, a real
+`.tlog` of a full flight for trying the `dc-cli tlog` tools (`health`, `index`, `export`,
+`sanitize`). SITL recordings may be committed; field logs with real positions may not
+(ADR-0012).
+
 ## Notes
 
 * SITL keeps the `-I` instance in 8 bits: ports wrap above instance 255. The harness uses

@@ -219,6 +219,12 @@ vehicle is involved, and the audit log:
    macOS builds and packaging run nightly (02:17 UTC), on releases and on dispatch. The `sitl`
    job runs all 17 scenarios on ArduCopter 4.7.1 **and 4.6.3** (both green locally);
    `TESTED_FIRMWARE` covers Copter 4.6 and 4.7.
+Items 2–5 change the vehicle. They are approved in ADR-0012 but were **paused on 2026-10-12**:
+the agent's safety check stopped the first attempt (dropping the dangerous-parameter refusal
+and adding a gRPC parameter-write call), so they wait for the owner to confirm, in their own
+words in the session, that these vehicle-changing changes may be implemented (or to add a
+permission rule for them). The prepared change is not in the repository.
+
 2. **Parameter writes for all parameters** (T0-18 follow-up): drop the dangerous-parameter
    refusal; a single confirmation, no typed text. Keep the disarmed-heartbeat freshness and
    read-back verification unless the owner says otherwise. Expose through gRPC and the CLI.
@@ -227,7 +233,8 @@ vehicle is involved, and the audit log:
 5. **Log erase** (`LOG_ERASE`) as a command, audited.
 6. **Camera trigger commands — done 2026-10-12:** `mission survey --camera … --trigger` adds DO_SET_CAM_TRIGG_DIST (206) at the first survey waypoint and 0 m before RTL; SITL upload verified on 4.7.1 and 4.6.3.
 7. **gRPC — done 2026-10-12:** `dc-cli daemon --listen ADDR [--token-file F]` (or `DC_API_TOKEN`); a key is required beyond loopback; every call needs `authorization: Bearer <key>` (constant-time check); `dc-cli remote --token-file`/`DC_API_TOKEN`. A shared secret, not encryption: trusted networks or a tunnel.
-8. Replace the custom FFT with a mature crate; switch the UI font to Inter.
+8. **FFT crate and Inter — done 2026-10-12:** `logs::spectrum` uses `rustfft` 6.4.1; the UI
+   font token is Inter (`ui/tokens/tokens.json`, skill and mirrors synced).
 9. Phase 1 (Qt shell) once the above are in.
 
 ## 8. Where things are (code map)
