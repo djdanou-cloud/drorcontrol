@@ -102,7 +102,7 @@ pub struct RateOscillation {
     pub sample_rate_hz: f64,
     /// Root-mean-square rate error, deg/s.
     pub rms_degs: f64,
-    /// Strongest peak at or above 1 Hz, Hz.
+    /// Strongest bin at or above 1 Hz, Hz.
     pub peak_hz: f64,
     /// Share of the error power above 1 Hz within one bin of that peak, 0..1.
     pub peak_share: f64,
@@ -147,10 +147,16 @@ pub fn rate_oscillation(log: &Log) -> Vec<RateOscillation> {
         };
         let above: Vec<usize> = (0..s.freqs.len()).filter(|&k| s.freqs[k] >= 1.0).collect();
         let total: f64 = above.iter().map(|&k| s.power[k]).sum();
-        let Some(&(peak_hz, _)) = crate::spectrum::peaks(&s, 1.0, 1).first() else {
+        // The strongest bin at or above 1 Hz (an axis without a distinct peak still gets
+        // one, with a small share).
+        let Some(k) = above
+            .iter()
+            .copied()
+            .max_by(|&a, &b| s.power[a].total_cmp(&s.power[b]))
+        else {
             continue;
         };
-        let k = s.freqs.iter().position(|f| *f == peak_hz).unwrap_or(0);
+        let peak_hz = s.freqs[k];
         let near: f64 = (k.saturating_sub(1)..=(k + 1).min(s.power.len() - 1))
             .filter(|j| s.freqs[*j] >= 1.0)
             .map(|j| s.power[j])
