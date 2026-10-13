@@ -795,8 +795,13 @@ pub struct PathPoint {
     pub alt_rel_m: f64,
 }
 
+/// ArduCopter's default RTL altitude, m above home (4.7.1 `RTL_ALT_M` = 15; 4.6.3
+/// `RTL_ALT` = 1500 cm).
+pub const RTL_ALT_DEFAULT_M: f64 = 15.0;
+
 /// The path a mission flies, for drawing: home, takeoff straight up, every navigation item
-/// with a location, landing straight down, and RTL back to home at its altitude then down.
+/// with a location, landing straight down, and RTL back to home at its altitude (raised to
+/// `RTL_ALT_DEFAULT_M` if lower, as the vehicle climbs first) then down.
 /// `DO_JUMP` repeats are not followed.
 pub fn path(items: &[MissionItem]) -> Vec<PathPoint> {
     let Some(home) = items.first() else {
@@ -833,6 +838,18 @@ pub fn path(items: &[MissionItem]) -> Vec<PathPoint> {
                 &mut at,
             ),
             20 => {
+                // ArduCopter climbs to at least the RTL altitude (default 15 m above home) before
+                // turning for home (4.7.1 `ModeRTL::compute_return_target`).
+                if at.alt_rel_m < RTL_ALT_DEFAULT_M {
+                    push(
+                        PathPoint {
+                            seq,
+                            alt_rel_m: RTL_ALT_DEFAULT_M,
+                            ..at
+                        },
+                        &mut at,
+                    );
+                }
                 push(
                     PathPoint {
                         seq,
