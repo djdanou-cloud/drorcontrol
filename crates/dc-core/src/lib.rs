@@ -65,6 +65,7 @@ pub use vehicle::{
 };
 pub use vehicle::{NavHealth, NavThresholds, PositionTrust, TESTED_FIRMWARE};
 
+pub mod annunciator;
 mod parameters;
 mod replay;
 pub use parameters::{
