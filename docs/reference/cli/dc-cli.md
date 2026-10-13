@@ -528,6 +528,7 @@ Arguments:
   <PATH>  Path to the .bin log
 
 Options:
+      --json             Print a machine-readable report instead (schema `dc.report/1`): summary, health, takeoffs, landings and time per mode
       --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
       --compid <COMPID>  Our MAVLink component id [default: 190]
       --tlog <TLOG>      Record everything to this .tlog file

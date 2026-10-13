@@ -550,6 +550,10 @@ enum LogCmd {
     Report {
         /// Path to the .bin log.
         path: std::path::PathBuf,
+        /// Print a machine-readable report instead (schema `dc.report/1`): summary, health,
+        /// takeoffs, landings and time per mode.
+        #[arg(long)]
+        json: bool,
     },
     /// Flight summary: armed time, highest altitude, top speed, distance, battery used.
     Summary {
@@ -1764,6 +1768,62 @@ fn level_name(l: logs::health::Level) -> &'static str {
         logs::health::Level::Caution => "caution",
         logs::health::Level::Warning => "warning",
     }
+}
+
+/// `log report --json` (schema `dc.report/1`): `log`, `firmware`, `summary` (armed_s,
+/// flights, distance_m and the optional maxima, null when not logged), `modes` [{mode,
+/// armed_s}], `health` (as `dc.health/1` without its schema/log keys), `takeoffs`,
+/// `landings`. Times are seconds since boot.
+fn report_json(path: &std::path::Path, log: &logs::Log) -> String {
+    let s = logs::flight::summary(log);
+    let events = logs::flight::events(log);
+    let fw = log_firmware(&events);
+    let findings = logs::health::assess(log);
+    let health: serde_json::Value =
+        serde_json::from_str(&health_json(path, &findings)).expect("health JSON parses");
+    let secs = |us: u64| us as f64 / 1e6;
+    serde_json::to_string_pretty(&serde_json::json!({
+        "schema": "dc.report/1",
+        "log": path.display().to_string(),
+        "firmware": events.iter().find_map(|(_, e)| match e {
+            logs::flight::Event::Text(t) if dc_core::Firmware::from_banner(t).is_some() => Some(t.clone()),
+            _ => None,
+        }),
+        "summary": {
+            "flights": s.armed.len(),
+            "armed_s": s.armed_s,
+            "distance_m": s.distance_m,
+            "max_alt_rel_m": s.max_alt_rel_m,
+            "max_speed_ms": s.max_speed_ms,
+            "max_from_home_m": s.max_from_home_m,
+            "max_climb_ms": s.max_climb_ms,
+            "max_descent_ms": s.max_descent_ms,
+            "used_mah": s.used_mah,
+            "min_voltage": s.min_voltage,
+        },
+        "modes": logs::flight::mode_times(log).into_iter().map(|(m, t)| serde_json::json!({
+            "mode": mode_label(fw, m),
+            "armed_s": t,
+        })).collect::<Vec<_>>(),
+        "health": {
+            "overall": health["overall"],
+            "findings": health["findings"],
+        },
+        "takeoffs": logs::takeoff::takeoffs(log).into_iter().map(|k| serde_json::json!({
+            "at_s": secs(k.time_us),
+            "from_arm_s": k.from_arm_s,
+            "max_climb_ms": k.max_climb_ms,
+            "max_roll_err_deg": k.max_roll_err_deg,
+            "max_pitch_err_deg": k.max_pitch_err_deg,
+        })).collect::<Vec<_>>(),
+        "landings": logs::landing::landings(log).into_iter().map(|l| serde_json::json!({
+            "at_s": secs(l.time_us),
+            "max_descent_ms": l.max_descent_ms,
+            "mean_descent_ms": l.mean_descent_ms,
+            "to_disarm_s": l.to_disarm_s,
+        })).collect::<Vec<_>>(),
+    }))
+    .expect("JSON values serialise")
 }
 
 /// `log health --json`: `{"schema": "dc.health/1", "log", "overall", "findings": [{"check",
@@ -3506,7 +3566,10 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                 println!("{label:<28} {x:>16} {y:>16}");
             }
         }
-        LogCmd::Report { path } => {
+        LogCmd::Report { path, json: true } => {
+            println!("{}", report_json(path, &open(path)?));
+        }
+        LogCmd::Report { path, json: false } => {
             let log = open(path)?;
             type Section<'a> = (&'a str, Box<dyn Fn() -> Result<(), String> + 'a>);
             let sections: Vec<Section> = vec![
