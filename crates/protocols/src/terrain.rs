@@ -287,6 +287,87 @@ pub fn clearance(items: &[MissionItem], t: &Terrain, step_m: f64) -> ClearanceRe
     r
 }
 
+/// Why a mission cannot be made to follow the terrain.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FollowError {
+    /// No elevation at home.
+    NoHomeData,
+    /// No elevation at this item (or at a point added before it).
+    NoData(u16),
+    /// Adding waypoints would move the targets of `DO_JUMP` (177).
+    HasJump,
+}
+
+impl std::fmt::Display for FollowError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FollowError::NoHomeData => f.write_str("no terrain data at home"),
+            FollowError::NoData(s) => write!(f, "no terrain data on the way to item {s}"),
+            FollowError::HasJump => {
+                f.write_str("the mission has DO_JUMP; adding waypoints would move its targets")
+            }
+        }
+    }
+}
+
+/// Terrain following without terrain data on the vehicle: every `NAV_WAYPOINT` above home
+/// (frame 3) is set to `agl_m` above the ground under it (ground − ground at home + agl).
+/// With `step_m` > 0, legs between such waypoints get extra waypoints every `step_m` so the
+/// height follows the ground in between. Other items are kept as they are.
+pub fn follow(
+    items: &[MissionItem],
+    t: &Terrain,
+    agl_m: f32,
+    step_m: f64,
+) -> Result<Vec<MissionItem>, FollowError> {
+    let Some(home) = items.first() else {
+        return Ok(Vec::new());
+    };
+    let deg = |i: &MissionItem| (f64::from(i.x) * 1e-7, f64::from(i.y) * 1e-7);
+    let (hlat, hlon) = deg(home);
+    let home_ground = t.elevation(hlat, hlon).ok_or(FollowError::NoHomeData)?;
+    if step_m > 0.0 && items.iter().any(|i| i.command == 177) {
+        return Err(FollowError::HasJump);
+    }
+    let height = |seq: u16, (lat, lon): (f64, f64)| {
+        t.elevation(lat, lon)
+            .map(|g| (g - home_ground + f64::from(agl_m)) as f32)
+            .ok_or(FollowError::NoData(seq))
+    };
+    let mut out = vec![*home];
+    let mut prev: Option<(f64, f64)> = None;
+    for (seq, i) in items.iter().enumerate().skip(1) {
+        let seq = seq as u16;
+        let located = i.x != 0 || i.y != 0;
+        if i.command == 16 && i.frame == 3 && located {
+            let at = deg(i);
+            if let Some(p) = prev.filter(|_| step_m > 0.0) {
+                let samples: Vec<_> = leg_samples(p, at, step_m).collect();
+                for &(_, q) in samples.iter().skip(1).take(samples.len().saturating_sub(2)) {
+                    out.push(MissionItem {
+                        x: (q.0 * 1e7).round() as i32,
+                        y: (q.1 * 1e7).round() as i32,
+                        z: height(seq, q)?,
+                        params: [0.0; 4],
+                        ..*i
+                    });
+                }
+            }
+            out.push(MissionItem {
+                z: height(seq, at)?,
+                ..*i
+            });
+            prev = Some(at);
+        } else {
+            if located && mission::has_location(i.command) {
+                prev = None;
+            }
+            out.push(*i);
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -394,5 +475,52 @@ pub(crate) mod tests {
         away[0].x = -340_000_000;
         assert_eq!(clearance(&away, &t, 10.0), ClearanceReport::default());
         assert!(sample_points(&m, 10.0).len() > 20);
+    }
+
+    #[test]
+    fn following_sets_heights_from_the_ground() {
+        let mut t = Terrain::default();
+        t.add(ramp("S36E149.hgt", 500));
+        let step = 1.0 / 1200.0;
+        let lat: f64 = -35.5;
+        let wp = |frame: u8, command: u16, lon: f64, z: f32| MissionItem {
+            frame,
+            command,
+            params: [0.0; 4],
+            x: (lat * 1e7).round() as i32,
+            y: if lon == 0.0 {
+                0
+            } else {
+                (lon * 1e7).round() as i32
+            },
+            z,
+            autocontinue: true,
+        };
+        // Home on 530 m ground, waypoints over 545 m and 560 m.
+        let m = vec![
+            wp(0, 16, 149.0 + 120.0 * step, 0.0),
+            wp(3, 22, 0.0, 40.0),
+            wp(3, 16, 149.0 + 180.0 * step, 99.0),
+            wp(3, 16, 149.0 + 240.0 * step, 99.0),
+            wp(2, 20, 0.0, 0.0),
+        ];
+        let f = follow(&m, &t, 40.0, 0.0).unwrap();
+        assert_eq!(f.len(), m.len());
+        assert!(
+            (f[2].z - 55.0).abs() < 0.1 && (f[3].z - 70.0).abs() < 0.1,
+            "{f:?}"
+        );
+        assert_eq!((f[1], f[4]), (m[1], m[4]), "takeoff and RTL kept");
+        // The two waypoints are 60 samples (about 4.5 km) apart: with a point every 500 m
+        // in between, the whole leg stays 40 m up.
+        let d = follow(&m, &t, 40.0, 500.0).unwrap();
+        assert!(d.len() > m.len(), "{}", d.len());
+        let r = clearance(&d, &t, 10.0);
+        let low = r.legs.iter().map(|l| l.min_m).fold(f64::MAX, f64::min);
+        assert!(low > 39.0, "{low}");
+        let mut jump = m.clone();
+        jump.insert(4, wp(2, 177, 0.0, 0.0));
+        assert_eq!(follow(&jump, &t, 40.0, 50.0), Err(FollowError::HasJump));
+        assert!(follow(&jump, &t, 40.0, 0.0).is_ok());
     }
 }

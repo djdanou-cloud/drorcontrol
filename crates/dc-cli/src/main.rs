@@ -597,6 +597,25 @@ enum MissionCmd {
         #[arg(long)]
         out: Option<std::path::PathBuf>,
     },
+    /// Terrain following without terrain data on the vehicle: sets every waypoint above
+    /// home to --agl above the ground under it (SRTM tiles in --dem), optionally adding
+    /// waypoints every --step m between them. Offline; prints the resulting clearance.
+    TerrainFollow {
+        /// The mission file.
+        file: std::path::PathBuf,
+        /// Directory holding the SRTM tiles.
+        #[arg(long)]
+        dem: std::path::PathBuf,
+        /// Height above the ground, m.
+        #[arg(long)]
+        agl: f32,
+        /// Add waypoints this often between waypoints, m (0: none).
+        #[arg(long, default_value_t = 0.0)]
+        step: f64,
+        /// Output file (.waypoints or .plan; default: print).
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
     /// A mission from a path drawn in Google Earth (the KML's first LineString): takeoff, a
     /// waypoint per point in drawing order, RTL. Offline; check and upload it as usual.
     FromKml {
@@ -3933,6 +3952,48 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
                 out.as_deref(),
                 &mission_text(out.as_deref(), &items),
                 &format!("{what}: {} legs", wps.len() - 1),
+            )
+        }
+        MissionCmd::TerrainFollow {
+            file,
+            dem,
+            agl,
+            step,
+            out,
+        } => {
+            if !(agl.is_finite() && *agl > 0.0) {
+                return Err("--agl must be above 0 m".into());
+            }
+            let items = read_mission(file)?;
+            let mut pts = protocols::terrain::sample_points(&items, step.max(10.0));
+            pts.extend(
+                items
+                    .iter()
+                    .filter(|i| i.x != 0 || i.y != 0)
+                    .map(|i| (f64::from(i.x) * 1e-7, f64::from(i.y) * 1e-7)),
+            );
+            let (t, missing) = load_terrain(dem, pts)?;
+            if !missing.is_empty() {
+                eprintln!("missing tiles in {}: {}", dem.display(), missing.join(", "));
+            }
+            let f =
+                protocols::terrain::follow(&items, &t, *agl, *step).map_err(|e| e.to_string())?;
+            print_stats(&f);
+            let r = protocols::terrain::clearance(&f, &t, 10.0);
+            if let Some(m) = r.legs.iter().min_by(|a, b| a.min_m.total_cmp(&b.min_m)) {
+                eprintln!(
+                    "lowest {:.0} m above the ground, on the leg to item {} (--step adds waypoints where the ground rises between them)",
+                    m.min_m, m.seq
+                );
+            }
+            write_or_print(
+                out.as_deref(),
+                &mission_text(out.as_deref(), &f),
+                &format!(
+                    "{} items ({} added), waypoints {agl} m above the ground",
+                    f.len(),
+                    f.len() - items.len()
+                ),
             )
         }
         MissionCmd::FromKml { kml, alt, out } => {
