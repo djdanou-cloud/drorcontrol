@@ -63,7 +63,7 @@ pub use vehicle::{
     MissionProgress, MissionState, RadioStatus, Rangefinder, RcInput, ServoOutputs, StatusText,
     TerrainReport, Traffic, VehicleState, Vibration, VtolState, Wind,
 };
-pub use vehicle::{NavHealth, NavThresholds, PositionTrust};
+pub use vehicle::{NavHealth, NavThresholds, PositionTrust, TESTED_FIRMWARE};
 
 mod parameters;
 mod replay;

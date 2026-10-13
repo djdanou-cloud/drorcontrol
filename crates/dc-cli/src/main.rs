@@ -175,6 +175,9 @@ enum Cmd {
         #[arg(long, default_value = "dc-audit.log")]
         audit: std::path::PathBuf,
     },
+    /// This build and machine, for test reports: version, OS and architecture, serial ports
+    /// seen, and the firmware versions tested in CI.
+    About,
     /// Check an audit log's hash chain (commands and parameter writes): every record links
     /// to the one before, so an edited, removed or reordered line is found. Prints the
     /// records with --print.
@@ -1336,6 +1339,37 @@ fn audit_verify(file: &std::path::Path, print: bool) -> Result<(), String> {
 async fn run(cli: Cli) -> Result<(), String> {
     match &cli.cmd {
         Cmd::AuditVerify { file, print } => audit_verify(file, *print),
+        Cmd::About => {
+            // CI builds carry the commit (GitHub sets GITHUB_SHA while compiling).
+            println!(
+                "dc-cli {} ({})",
+                env!("CARGO_PKG_VERSION"),
+                option_env!("GITHUB_SHA").map_or("local build".to_string(), |c| format!(
+                    "commit {}",
+                    &c[..c.len().min(12)]
+                ))
+            );
+            println!(
+                "os {} / {} ({} build)",
+                std::env::consts::OS,
+                std::env::consts::ARCH,
+                if cfg!(debug_assertions) {
+                    "debug"
+                } else {
+                    "release"
+                }
+            );
+            match link_serial::discovery::list_ports() {
+                Ok(p) => println!("serial ports seen: {}", p.len()),
+                Err(e) => println!("serial ports: cannot list ({e})"),
+            }
+            let tested: Vec<String> = dc_core::TESTED_FIRMWARE
+                .iter()
+                .map(|(f, a, b)| format!("{f:?} {a}.{b}"))
+                .collect();
+            println!("firmware tested in CI (SITL): {}", tested.join(", "));
+            Ok(())
+        }
         Cmd::ParamGet {
             connect,
             target,
