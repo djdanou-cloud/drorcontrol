@@ -16,4 +16,5 @@ pub mod pattern;
 pub mod plan;
 pub mod survey;
 pub mod terrain;
+pub mod units;
 pub mod wpl;

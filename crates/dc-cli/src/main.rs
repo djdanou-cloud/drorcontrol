@@ -255,6 +255,13 @@ enum Cmd {
         #[command(subcommand)]
         what: MissionCmd,
     },
+    /// A position in every display format: decimal degrees, DMS, degrees and decimal
+    /// minutes, UTM and MGRS (WGS-84).
+    Coord {
+        /// "lat,lon" in decimal degrees.
+        #[arg(allow_hyphen_values = true)]
+        point: String,
+    },
     /// Ground elevation from SRTM .hgt tiles on disk (offline).
     Terrain {
         #[command(subcommand)]
@@ -1763,6 +1770,26 @@ async fn run(cli: Cli) -> Result<(), String> {
         Cmd::Mission { what } => mission_cmd(&cli, what).await,
         Cmd::Tlog { what } => tlog_cmd(what),
         Cmd::Terrain { what } => terrain_cmd(what),
+        Cmd::Coord { point } => {
+            let [(lat, lon)] = parse_polygon(point)?[..] else {
+                return Err("give one lat,lon".into());
+            };
+            if !(-90.0..=90.0).contains(&lat) || !(-180.0..=180.0).contains(&lon) {
+                return Err(format!("{lat},{lon} is not a position"));
+            }
+            use protocols::units::{CoordFormat as F, position};
+            for (name, f) in [
+                ("decimal", F::Decimal),
+                ("DMS", F::Dms),
+                ("DDM", F::Ddm),
+                ("UTM", F::Utm),
+                ("MGRS", F::Mgrs),
+            ] {
+                let v = position(lat, lon, f).unwrap_or_else(|| "(polar region: UPS)".into());
+                println!("{name:<8} {v}");
+            }
+            Ok(())
+        }
         Cmd::ParamsDiff { a, b } => params_diff(a, b),
         Cmd::ParamsReview {
             file,
