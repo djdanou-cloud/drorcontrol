@@ -32,6 +32,9 @@
 //!   than 90° in 3-D, 60° in the horizontal plane or 200 mG in horizontal length
 //!   (`Compass::consistent`, `AP_COMPASS_MAX_*`); compasses with `COMPASS_USE*` 0 are not
 //!   compared. Plan 05 §2.3 adds cautions at 600 mG offsets and 30° horizontal disagreement.
+//! * Arming checks report failures as text `PreArm: …` (periodic checks) or `Arm: …` (at the
+//!   arming attempt) (`AP_Arming::check_failed`, 4.7.1), logged as `MSG`. Disarmed messages
+//!   reach the log only with `LOG_DISARMED` set, so their absence proves nothing.
 
 use std::collections::BTreeMap;
 
@@ -480,6 +483,44 @@ fn compass_consistency(log: &Log, params: &BTreeMap<String, f64>, out: &mut Vec<
     }
 }
 
+/// Distinct arming-check failures among `(time, text)` messages: (text, first time, count),
+/// in order of first appearance.
+pub fn arming_messages(texts: &[(u64, String)]) -> Vec<(String, u64, usize)> {
+    let mut out: Vec<(String, u64, usize)> = Vec::new();
+    for (t, text) in texts {
+        if !(text.starts_with("PreArm: ") || text.starts_with("Arm: ")) {
+            continue;
+        }
+        match out.iter_mut().find(|(m, _, _)| m == text) {
+            Some(e) => e.2 += 1,
+            None => out.push((text.clone(), *t, 1)),
+        }
+    }
+    out
+}
+
+fn arming_failures(log: &Log, out: &mut Vec<Finding>) {
+    let texts: Vec<(u64, String)> = crate::flight::events(log)
+        .into_iter()
+        .filter_map(|(t, e)| match e {
+            crate::flight::Event::Text(s) => Some((t, s)),
+            _ => None,
+        })
+        .collect();
+    for (text, t, n) in arming_messages(&texts) {
+        out.push(Finding {
+            check: "arming",
+            level: Level::Caution,
+            text: if n > 1 {
+                format!("{text} ({n} times)")
+            } else {
+                text
+            },
+            at_us: Some(t),
+        });
+    }
+}
+
 fn gps(log: &Log, params: &BTreeMap<String, f64>, out: &mut Vec<Finding>) {
     let (good, source) = match params.get("GPS_HDOP_GOOD") {
         Some(v) => (*v, "GPS_HDOP_GOOD"),
@@ -595,6 +636,7 @@ pub fn assess(log: &Log) -> Vec<Finding> {
     ekf_status(log, &mut out);
     compass_offsets(log, &params, &mut out);
     compass_consistency(log, &params, &mut out);
+    arming_failures(log, &mut out);
     gps(log, &params, &mut out);
     board_voltage(log, &params, &mut out);
     errors(log, &mut out);
@@ -604,6 +646,24 @@ pub fn assess(log: &Log) -> Vec<Finding> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arming_failures_are_grouped() {
+        let m = |t: u64, s: &str| (t, s.to_string());
+        let a = arming_messages(&[
+            m(1, "PreArm: Gyros inconsistent"),
+            m(2, "EKF3 IMU0 is using GPS"),
+            m(3, "PreArm: Gyros inconsistent"),
+            m(4, "Arm: Throttle too high"),
+        ]);
+        assert_eq!(
+            a,
+            [
+                ("PreArm: Gyros inconsistent".into(), 1, 2),
+                ("Arm: Throttle too high".into(), 4, 1)
+            ]
+        );
+    }
 
     #[test]
     fn compass_limits() {
