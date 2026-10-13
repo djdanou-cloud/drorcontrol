@@ -105,6 +105,35 @@ enum Cmd {
         #[arg(long, default_value_t = 15)]
         wait: u64,
     },
+    /// Restore parameters from a baseline saved by `param-set` (the vehicle in the baseline):
+    /// the named ones, or with --changed every one that now differs (except values the
+    /// autopilot maintains itself). Same confirmation,
+    /// in-flight warning, new recovery baseline, read-back and audit as `param-set`.
+    ParamRollback {
+        /// Link, e.g. tcp:127.0.0.1:5760.
+        #[arg(long)]
+        connect: LinkSpec,
+        /// Baseline file written by `param-set` (or the daemon's --param-dir).
+        #[arg(long)]
+        baseline: std::path::PathBuf,
+        /// Parameters to restore.
+        names: Vec<String>,
+        /// Restore every parameter whose value now differs from the baseline.
+        #[arg(long, conflicts_with = "names")]
+        changed: bool,
+        /// Confirm without asking (scripts).
+        #[arg(long)]
+        yes: bool,
+        /// Acknowledge the in-flight warning without asking (scripts).
+        #[arg(long)]
+        armed_ok: bool,
+        /// Hash-chained audit log to append to.
+        #[arg(long, default_value = "dc-audit.log")]
+        audit: std::path::PathBuf,
+        /// Seconds to wait for a vehicle heartbeat.
+        #[arg(long, default_value_t = 15)]
+        wait: u64,
+    },
     /// Run the core with the gRPC API (proto/dc/v1/core.proto) until interrupted.
     Daemon {
         /// Links to open at start (repeatable).
@@ -1007,8 +1036,163 @@ async fn param_set(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn param_rollback(
+    cli: &Cli,
+    connect: &LinkSpec,
+    baseline: &std::path::Path,
+    names: &[String],
+    changed: bool,
+    yes: bool,
+    armed_ok: bool,
+    audit: &std::path::Path,
+    wait: u64,
+) -> Result<(), String> {
+    let text =
+        std::fs::read_to_string(baseline).map_err(|e| format!("{}: {e}", baseline.display()))?;
+    let snap = protocols::params::snapshot::ParamSnapshot::from_text(&text)
+        .map_err(|e| format!("{}: {e}", baseline.display()))?;
+    let target = snap.target();
+    if !changed && names.is_empty() {
+        return Err("name the parameters to restore, or pass --changed".into());
+    }
+    let cfg = CoreConfig {
+        sysid: cli.sysid,
+        compid: cli.compid,
+        tlog: cli.tlog.clone(),
+        audit_log: Some(audit.to_path_buf()),
+        ..Default::default()
+    };
+    let core = Core::start(cfg)
+        .await
+        .map_err(|e| format!("cannot start core: {e}"))?;
+    core.connect(connect)
+        .await
+        .map_err(|e| format!("cannot open {connect}: {e}"))?;
+    let deadline = Instant::now() + Duration::from_secs(wait);
+    while core.facts(target.0).armed.is_none() {
+        if Instant::now() > deadline {
+            return Err(format!(
+                "vehicle {} not heard on {connect} within {wait} s",
+                target.0
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let mut restore: Vec<String> = names.iter().map(|n| n.to_ascii_uppercase()).collect();
+    if changed {
+        eprintln!("vehicle {}: downloading parameters to compare…", target.0);
+        let now = core
+            .download_params(target, |_, _| {})
+            .await
+            .map_err(|e| e.to_string())?;
+        restore = snap
+            .params()
+            .iter()
+            .filter(|(k, p)| now.get(*k).is_some_and(|n| n.value != p.value))
+            .map(|(k, _)| k.clone())
+            .collect();
+        // Values the autopilot maintains itself (ground pressure, sensor IDs, statistics,
+        // learned hover throttle) drift on their own and must not be restored.
+        let skipped: Vec<String> = restore
+            .iter()
+            .filter(|n| protocols::params::set_by_autopilot(n))
+            .cloned()
+            .collect();
+        restore.retain(|n| !protocols::params::set_by_autopilot(n));
+        if !skipped.is_empty() {
+            eprintln!(
+                "left alone (the autopilot maintains these): {}",
+                skipped.join(", ")
+            );
+        }
+        if restore.is_empty() {
+            println!("nothing differs from the baseline");
+            return Ok(());
+        }
+    }
+    for n in &restore {
+        let p = snap
+            .params()
+            .get(n)
+            .ok_or_else(|| format!("{n} is not in the baseline"))?;
+        eprintln!("  {n} back to {}", p.value);
+    }
+    if !yes {
+        match ask("Restore these parameters on the vehicle?") {
+            Some(true) => {}
+            Some(false) => return Err("not confirmed: nothing written".into()),
+            None => return Err("no terminal to confirm on: pass --yes".into()),
+        }
+    }
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let recovery = std::path::PathBuf::from(format!("param-recovery-{}-{t}.param", target.0));
+    let mut mode = if armed_ok {
+        dc_core::ArmedWrite::Acknowledged
+    } else {
+        dc_core::ArmedWrite::DisarmedOnly
+    };
+    let report = loop {
+        match core
+            .rollback_params_with(baseline, &restore, &recovery, mode)
+            .await
+        {
+            Ok(r) => break r,
+            Err(dc_core::ParamOperationError::ArmedWarningRequired(w)) => {
+                eprintln!("WARNING: {w}");
+                match ask("The vehicle is ARMED. Restore anyway, in flight?") {
+                    Some(true) => mode = dc_core::ArmedWrite::Acknowledged,
+                    Some(false) => {
+                        return Err("in-flight warning not acknowledged: nothing written".into());
+                    }
+                    None => {
+                        return Err(
+                            "vehicle armed: pass --armed-ok to acknowledge the in-flight warning"
+                                .into(),
+                        );
+                    }
+                }
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    };
+    eprintln!("recovery baseline saved to {}", report.snapshot.display());
+    for r in &report.results {
+        println!("{} {:?}", r.name, r.status);
+    }
+    if report.verified() {
+        println!("all {} parameter(s) restored and verified", report.planned);
+        Ok(())
+    } else {
+        Err(format!(
+            "restore incomplete{}",
+            report
+                .interruption
+                .as_ref()
+                .map_or(String::new(), |w| format!(": {w}"))
+        ))
+    }
+}
+
 async fn run(cli: Cli) -> Result<(), String> {
     match &cli.cmd {
+        Cmd::ParamRollback {
+            connect,
+            baseline,
+            names,
+            changed,
+            yes,
+            armed_ok,
+            audit,
+            wait,
+        } => {
+            param_rollback(
+                &cli, connect, baseline, names, *changed, *yes, *armed_ok, audit, *wait,
+            )
+            .await
+        }
         Cmd::ParamSet {
             connect,
             target,

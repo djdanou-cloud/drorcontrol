@@ -32,20 +32,21 @@ DrorControl command-line tool
 Usage: dc-cli [OPTIONS] <COMMAND>
 
 Commands:
-  params         Download all parameters and print them (or write a .param file)
-  param-set      Change parameters on the vehicle (ADR-0012): every change is listed and confirmed once; if the vehicle is armed, its in-flight warning must be acknowledged too. A baseline of all parameters is saved first, each value is read back, and every step is audited
-  daemon         Run the core with the gRPC API (proto/dc/v1/core.proto) until interrupted
-  remote         Talk to a running daemon over gRPC
-  ports          List serial ports with board hints; optionally watch hotplug or probe for MAVLink
-  soak           Serial integrity soak: stream MAVLink frames out of `tx` and verify them on `rx` (same port with a TX-RX loopback jumper, or two adapters cross-wired)
-  params-review  Which safety nets a parameter set has switched off (advisory; .param or .bin)
-  params-diff    Compare two parameter sets, each a .param file or the parameters recorded in a .bin log
-  log            Dataflash (.bin) log tools: index statistics and downsampled plots, with timings
-  mission        Mission files (QGC WPL 110, Mission Planner's .waypoints): download, check, compare. Read-only: uploads stay behind the core's interlocks and are not offered here yet
-  tlog           Telemetry logs (.tlog, as recorded with --tlog or by Mission Planner)
-  cot            Cursor-on-Target position events for every vehicle (ATAK/WinTAK/TAK), printed or sent over UDP (e.g. the ATAK multicast 239.2.3.1:6969)
-  telemetry      Print a telemetry summary once per second
-  help           Print this message or the help of the given subcommand(s)
+  params          Download all parameters and print them (or write a .param file)
+  param-set       Change parameters on the vehicle (ADR-0012): every change is listed and confirmed once; if the vehicle is armed, its in-flight warning must be acknowledged too. A baseline of all parameters is saved first, each value is read back, and every step is audited
+  param-rollback  Restore parameters from a baseline saved by `param-set` (the vehicle in the baseline): the named ones, or with --changed every one that now differs (except values the autopilot maintains itself). Same confirmation, in-flight warning, new recovery baseline, read-back and audit as `param-set`
+  daemon          Run the core with the gRPC API (proto/dc/v1/core.proto) until interrupted
+  remote          Talk to a running daemon over gRPC
+  ports           List serial ports with board hints; optionally watch hotplug or probe for MAVLink
+  soak            Serial integrity soak: stream MAVLink frames out of `tx` and verify them on `rx` (same port with a TX-RX loopback jumper, or two adapters cross-wired)
+  params-review   Which safety nets a parameter set has switched off (advisory; .param or .bin)
+  params-diff     Compare two parameter sets, each a .param file or the parameters recorded in a .bin log
+  log             Dataflash (.bin) log tools: index statistics and downsampled plots, with timings
+  mission         Mission files (QGC WPL 110, Mission Planner's .waypoints): download, check, compare. Read-only: uploads stay behind the core's interlocks and are not offered here yet
+  tlog            Telemetry logs (.tlog, as recorded with --tlog or by Mission Planner)
+  cot             Cursor-on-Target position events for every vehicle (ATAK/WinTAK/TAK), printed or sent over UDP (e.g. the ATAK multicast 239.2.3.1:6969)
+  telemetry       Print a telemetry summary once per second
+  help            Print this message or the help of the given subcommand(s)
 
 Options:
       --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
@@ -94,6 +95,30 @@ Options:
       --yes                  Confirm the changes without asking (scripts)
       --armed-ok             Acknowledge the in-flight warning without asking (scripts): write even if armed
       --snapshot <SNAPSHOT>  Baseline file to create (default: param-baseline-SYSID-UNIXTIME.param)
+      --audit <AUDIT>        Hash-chained audit log to append to [default: dc-audit.log]
+      --wait <WAIT>          Seconds to wait for a vehicle heartbeat [default: 15]
+  -h, --help                 Print help
+```
+
+### `dc-cli param-rollback`
+
+```text
+Restore parameters from a baseline saved by `param-set` (the vehicle in the baseline): the named ones, or with --changed every one that now differs (except values the autopilot maintains itself). Same confirmation, in-flight warning, new recovery baseline, read-back and audit as `param-set`
+
+Usage: dc-cli param-rollback [OPTIONS] --connect <CONNECT> --baseline <BASELINE> [NAMES]...
+
+Arguments:
+  [NAMES]...  Parameters to restore
+
+Options:
+      --connect <CONNECT>    Link, e.g. tcp:127.0.0.1:5760
+      --sysid <SYSID>        Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --baseline <BASELINE>  Baseline file written by `param-set` (or the daemon's --param-dir)
+      --compid <COMPID>      Our MAVLink component id [default: 190]
+      --changed              Restore every parameter whose value now differs from the baseline
+      --tlog <TLOG>          Record everything to this .tlog file
+      --yes                  Confirm without asking (scripts)
+      --armed-ok             Acknowledge the in-flight warning without asking (scripts)
       --audit <AUDIT>        Hash-chained audit log to append to [default: dc-audit.log]
       --wait <WAIT>          Seconds to wait for a vehicle heartbeat [default: 15]
   -h, --help                 Print help

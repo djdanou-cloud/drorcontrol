@@ -23,6 +23,14 @@ asks once, and if the vehicle is armed shows the warning and asks again; `--yes`
 `--armed-ok` answer those for scripts, and without a terminal nothing is written unless they
 are given.
 
+**Rollback from the CLI:** `dc-cli param-rollback --connect LINK --baseline FILE
+(NAME… | --changed)` restores from a baseline written by `param-set` (or the daemon), with
+the same confirmation, in-flight warning, new recovery baseline, read-back and audit.
+`--changed` restores every value that now differs, except those the autopilot maintains
+itself (`set_by_autopilot`: ground pressure, sensor IDs, statistics, learned hover
+throttle), which drift on their own and cannot be written back (SITL showed
+`BARO2_GND_PRESS` refusing the old value).
+
 **gRPC:** `SetParams` (proto `dc.v1`) takes the changes and `acknowledge_armed_warning`;
 an armed vehicle without the acknowledgement gets `armed_warning` back and nothing is sent.
 The daemon serves it only when started with `--param-dir DIR` (where baselines are saved;
