@@ -80,6 +80,7 @@ nav:
       - plan/adr/0000-template.md
   - Reference:
       - MAVLink: reference/mavlink/index.md
+      - Command line (dc-cli): reference/cli/dc-cli.md
   - Safety:
       - Hazard log: safety/hazards.md
   - Quality:
