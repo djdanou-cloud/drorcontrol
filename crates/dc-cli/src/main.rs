@@ -87,8 +87,13 @@ enum Cmd {
         #[arg(long)]
         target: Option<u8>,
         /// Changes as NAME=VALUE.
-        #[arg(required = true, value_name = "NAME=VALUE")]
+        #[arg(required_unless_present = "file", value_name = "NAME=VALUE")]
         changes: Vec<String>,
+        /// Apply a .param file (or a .bin log's parameters): only values that differ from the
+        /// vehicle are written; names it lacks and values the autopilot maintains are left
+        /// out and listed.
+        #[arg(long, conflicts_with = "changes")]
+        file: Option<std::path::PathBuf>,
         /// Confirm the changes without asking (scripts).
         #[arg(long)]
         yes: bool,
@@ -915,6 +920,7 @@ async fn param_set(
     connect: &LinkSpec,
     target: Option<u8>,
     changes: &[String],
+    file: Option<&std::path::Path>,
     yes: bool,
     armed_ok: bool,
     snapshot: Option<&std::path::Path>,
@@ -952,6 +958,47 @@ async fn param_set(
             .await
             .ok_or_else(|| format!("no vehicle heartbeat on {connect} within {wait} s"))?,
     };
+    if let Some(f) = file {
+        let wanted = load_params(f)?;
+        eprintln!(
+            "vehicle {sysid}: downloading parameters to compare with {}…",
+            f.display()
+        );
+        let now = core
+            .download_params((sysid, 1), |_, _| {})
+            .await
+            .map_err(|e| e.to_string())?;
+        let (mut unknown, mut auto) = (Vec::new(), Vec::new());
+        for (name, value) in wanted {
+            match now.get(&name) {
+                None => unknown.push(name),
+                Some(_) if protocols::params::set_by_autopilot(&name) => auto.push(name),
+                Some(p) if p.value != value as f32 => {
+                    eprintln!("  {name}: {} -> {value}", p.value);
+                    edits.insert(name, value);
+                }
+                Some(_) => {}
+            }
+        }
+        if !unknown.is_empty() {
+            eprintln!(
+                "not on this vehicle, left out ({}): {}",
+                unknown.len(),
+                unknown.join(", ")
+            );
+        }
+        if !auto.is_empty() {
+            eprintln!(
+                "maintained by the autopilot, left out ({}): {}",
+                auto.len(),
+                auto.join(", ")
+            );
+        }
+        if edits.is_empty() {
+            println!("the vehicle already matches {}", f.display());
+            return Ok(());
+        }
+    }
     let armed = core.facts(sysid).armed == Some(true);
     eprintln!(
         "vehicle {sysid}{}: {} change(s)",
@@ -1197,6 +1244,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             connect,
             target,
             changes,
+            file,
             yes,
             armed_ok,
             snapshot,
@@ -1208,6 +1256,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 connect,
                 *target,
                 changes,
+                file.as_deref(),
                 *yes,
                 *armed_ok,
                 snapshot.as_deref(),

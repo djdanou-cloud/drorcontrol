@@ -23,6 +23,12 @@ asks once, and if the vehicle is armed shows the warning and asks again; `--yes`
 `--armed-ok` answer those for scripts, and without a terminal nothing is written unless they
 are given.
 
+**Applying a file:** `dc-cli param-set --connect LINK --file F.param` (or a `.bin` log's
+parameters) downloads the vehicle's parameters, lists only real differences as old → new,
+leaves out names the vehicle lacks and values the autopilot maintains (both listed), then
+asks once and writes as above. SITL: 2 of 5 file entries written (one unknown, one
+autopilot-maintained, one equal), and a second run reports the vehicle already matches.
+
 **Rollback from the CLI:** `dc-cli param-rollback --connect LINK --baseline FILE
 (NAME… | --changed)` restores from a baseline written by `param-set` (or the daemon), with
 the same confirmation, in-flight warning, new recovery baseline, read-back and audit.

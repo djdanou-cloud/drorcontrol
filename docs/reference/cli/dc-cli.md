@@ -81,16 +81,17 @@ Options:
 ```text
 Change parameters on the vehicle (ADR-0012): every change is listed and confirmed once; if the vehicle is armed, its in-flight warning must be acknowledged too. A baseline of all parameters is saved first, each value is read back, and every step is audited
 
-Usage: dc-cli param-set [OPTIONS] --connect <CONNECT> <NAME=VALUE>...
+Usage: dc-cli param-set [OPTIONS] --connect <CONNECT> [NAME=VALUE]...
 
 Arguments:
-  <NAME=VALUE>...  Changes as NAME=VALUE
+  [NAME=VALUE]...  Changes as NAME=VALUE
 
 Options:
       --connect <CONNECT>    Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200
       --sysid <SYSID>        Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
       --compid <COMPID>      Our MAVLink component id [default: 190]
       --target <TARGET>      Target system id (default: first vehicle heard)
+      --file <FILE>          Apply a .param file (or a .bin log's parameters): only values that differ from the vehicle are written; names it lacks and values the autopilot maintains are left out and listed
       --tlog <TLOG>          Record everything to this .tlog file
       --yes                  Confirm the changes without asking (scripts)
       --armed-ok             Acknowledge the in-flight warning without asking (scripts): write even if armed
