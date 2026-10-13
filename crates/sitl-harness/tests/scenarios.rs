@@ -1252,6 +1252,13 @@ async fn auto_mission_flight_reports_progress_to_landing() {
         !imus.is_empty() && imus.iter().all(|f| f.level == logs::health::Level::Ok),
         "{imus:?}"
     );
+    // SITL's two barometers agree closely and stay healthy.
+    let baro: Vec<_> = findings.iter().filter(|f| f.check == "baro").collect();
+    eprintln!("baro: {baro:?}");
+    assert!(
+        !baro.is_empty() && baro.iter().all(|f| f.level == logs::health::Level::Ok),
+        "{baro:?}"
+    );
     // Clean simulated GPS and compass: no EKF reset in flight.
     let resets: Vec<_> = findings
         .iter()

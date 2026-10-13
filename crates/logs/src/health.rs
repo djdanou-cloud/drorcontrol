@@ -38,6 +38,12 @@
 //!   flying, on the primary core. A yaw reset within 2 s of EKF3's own planned alignment
 //!   message ("in-flight yaw alignment complete", "yaw aligned…", `AP_NavEKF3_MagFusion.cpp`)
 //!   is the normal alignment after takeoff; "ground mag anomaly, yaw re-aligned" is not.
+//! * Several barometers: `BARO` = TimeUS, I, Alt, …, health `H` (4.7.1) / `Health` (4.6.3).
+//!   There is no arming limit between barometers, so their altitude gap is reported as
+//!   information; samples reported unhealthy while armed are a Warning.
+//! * Several GPS receivers: arming fails when receivers 0 and 1 are 50 m or more apart in
+//!   3-D (`AP_GPS::all_consistent`, 4.7.1 and 4.6.3); compared here while armed with both
+//!   on a 3D fix.
 //! * `POWR` Flags/AccFlags are `AP_HAL::AnalogIn::PowerStatusFlag` (4.7.1 and 4.6.3): 1 brick
 //!   valid, 2 servo rail valid, 4 USB connected, 8 peripheral over-current, 16 high-power
 //!   peripheral over-current, 32 power status changed since boot; AccFlags holds every flag
@@ -493,6 +499,146 @@ fn compass_consistency(log: &Log, params: &BTreeMap<String, f64>, out: &mut Vec<
     }
 }
 
+/// Latest sample of `b` at or before each time of `a`: pairs `(t, a, b)`.
+fn pair(a: &crate::dataflash::Column, b: &crate::dataflash::Column) -> Vec<(u64, f64, f64)> {
+    let mut out = Vec::new();
+    let mut k = 0;
+    for (t, va) in a.time_us.iter().zip(&a.values) {
+        while k + 1 < b.time_us.len() && b.time_us[k + 1] <= *t {
+            k += 1;
+        }
+        if b.time_us.get(k).is_some_and(|tb| tb <= t) {
+            out.push((*t, *va, b.values[k]));
+        }
+    }
+    out
+}
+
+fn baro_agreement(log: &Log, out: &mut Vec<Finding>) {
+    let armed = crate::flight::armed_periods(log);
+    let ids = instances(log, "BARO", "I");
+    if ids.len() < 2 || armed.is_empty() {
+        return;
+    }
+    let health_field = if log
+        .format_by_name("BARO")
+        .is_some_and(|f| f.field("H").is_some())
+    {
+        "H"
+    } else {
+        "Health"
+    };
+    for id in &ids {
+        let Some(h) = log.column("BARO", health_field, Some(("I", *id))) else {
+            continue;
+        };
+        if let Some(t) = h
+            .time_us
+            .iter()
+            .zip(&h.values)
+            .find(|(t, v)| **v == 0.0 && crate::flight::in_periods(&armed, **t))
+            .map(|(t, _)| *t)
+        {
+            out.push(Finding {
+                check: "baro",
+                level: Level::Warning,
+                text: format!("barometer {id} reported unhealthy while armed"),
+                at_us: Some(t),
+            });
+        }
+    }
+    let Some(a) = log.column("BARO", "Alt", Some(("I", 0.0))) else {
+        return;
+    };
+    for id in ids.iter().filter(|i| **i > 0.0) {
+        let Some(b) = log.column("BARO", "Alt", Some(("I", *id))) else {
+            continue;
+        };
+        let gaps: Vec<(u64, f64)> = pair(&a, &b)
+            .into_iter()
+            .filter(|(t, x, y)| {
+                crate::flight::in_periods(&armed, *t) && x.is_finite() && y.is_finite()
+            })
+            .map(|(t, x, y)| (t, y - x))
+            .collect();
+        let Some(&(t, worst)) = gaps.iter().max_by(|p, q| p.1.abs().total_cmp(&q.1.abs())) else {
+            continue;
+        };
+        out.push(Finding {
+            check: "baro",
+            level: Level::Ok,
+            text: format!(
+                "barometer {id} vs barometer 0 while armed: largest altitude gap {:.2} m ({} samples; no arming limit, for comparison)",
+                worst.abs(),
+                gaps.len()
+            ),
+            at_us: Some(t),
+        });
+    }
+}
+
+/// 3-D distance between two fixes (lat, lon degrees; alt m), metres (local flat earth).
+pub fn fix_distance_m(a: (f64, f64, f64), b: (f64, f64, f64)) -> f64 {
+    const R: f64 = 6_371_008.8;
+    let n = (b.0 - a.0).to_radians() * R;
+    let e = (b.1 - a.1).to_radians() * R * a.0.to_radians().cos();
+    (n * n + e * e + (b.2 - a.2).powi(2)).sqrt()
+}
+
+fn gps_agreement(log: &Log, out: &mut Vec<Finding>) {
+    let armed = crate::flight::armed_periods(log);
+    let col = |f: &str, i: f64| log.column("GPS", f, Some(("I", i)));
+    let (Some(s0), Some(la0), Some(lo0), Some(al0)) = (
+        col("Status", 0.0),
+        col("Lat", 0.0),
+        col("Lng", 0.0),
+        col("Alt", 0.0),
+    ) else {
+        return;
+    };
+    let (Some(s1), Some(la1), Some(lo1), Some(al1)) = (
+        col("Status", 1.0),
+        col("Lat", 1.0),
+        col("Lng", 1.0),
+        col("Alt", 1.0),
+    ) else {
+        return;
+    };
+    let mut worst: Option<(f64, u64)> = None;
+    let mut n = 0;
+    let mut k = 0;
+    for i in 0..s0.values.len() {
+        let t = s0.time_us[i];
+        while k + 1 < s1.time_us.len() && s1.time_us[k + 1] <= t {
+            k += 1;
+        }
+        if s1.time_us.get(k).is_none_or(|t1| *t1 > t)
+            || !crate::flight::in_periods(&armed, t)
+            || s0.values[i] < 3.0
+            || s1.values[k] < 3.0
+        {
+            continue;
+        }
+        n += 1;
+        let d = fix_distance_m(
+            (la0.values[i], lo0.values[i], al0.values[i]),
+            (la1.values[k], lo1.values[k], al1.values[k]),
+        );
+        if worst.is_none_or(|w| d > w.0) {
+            worst = Some((d, t));
+        }
+    }
+    let Some((d, t)) = worst else { return };
+    out.push(Finding {
+        check: "gps",
+        level: if d >= 50.0 { Level::Warning } else { Level::Ok },
+        text: format!(
+            "GPS 1 vs GPS 0 while armed: up to {d:.1} m apart ({n} samples; arming refuses 50 m)"
+        ),
+        at_us: Some(t),
+    });
+}
+
 /// Yaw resets `(time)` split into (expected, unexpected) using the EKF's own messages
 /// `(time, text)`: a planned alignment within 2 s explains a reset.
 pub fn classify_yaw_resets(resets: &[u64], texts: &[(u64, String)]) -> (Vec<u64>, Vec<u64>) {
@@ -877,6 +1023,8 @@ pub fn assess(log: &Log) -> Vec<Finding> {
     board_voltage(log, &params, &mut out);
     power_flags(log, &mut out);
     ekf_resets(log, &mut out);
+    baro_agreement(log, &mut out);
+    gps_agreement(log, &mut out);
     errors(log, &mut out);
     out
 }
@@ -884,6 +1032,13 @@ pub fn assess(log: &Log) -> Vec<Finding> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn two_gps_fixes_compared_in_3d() {
+        let d = fix_distance_m((-35.0, 149.0, 600.0), (-35.0003, 149.0, 640.0));
+        assert!((d - (33.36f64.powi(2) + 1600.0).sqrt()).abs() < 0.5, "{d}");
+        assert_eq!(fix_distance_m((10.0, 20.0, 5.0), (10.0, 20.0, 5.0)), 0.0);
+    }
 
     #[test]
     fn planned_yaw_alignments_explain_yaw_resets() {
