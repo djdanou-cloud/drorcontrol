@@ -1174,6 +1174,13 @@ async fn auto_mission_flight_reports_progress_to_landing() {
         gq.fix_3d() > 0.99 && gq.min_sats >= 6.0 && gq.glitches.is_empty(),
         "{gq:?}"
     );
+    // AUTO holds its height target closely (the wind is horizontal).
+    let hold = logs::altitude::hold_error(&log).expect("altitude-controlled flight");
+    eprintln!("altitude hold: {hold:?}");
+    assert!(
+        hold.samples > 100 && hold.mean_m.abs() < 0.5 && hold.max_abs_m < 3.0,
+        "{hold:?}"
+    );
     // GPS stayed good the whole flight: the EKF solution status never lost anything.
     let findings = logs::health::assess(&log);
     // The simulated compasses agree and have small offsets.

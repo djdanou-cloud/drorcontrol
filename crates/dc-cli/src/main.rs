@@ -1528,6 +1528,16 @@ fn print_log_altitude(log: &logs::Log) -> Result<(), String> {
     };
     show("barometer - EKF height", logs::altitude::baro_vs_ekf(log));
     show("GPS - EKF altitude", logs::altitude::gps_vs_ekf(log));
+    match logs::altitude::hold_error(log) {
+        Some(h) => println!(
+            "altitude hold (EKF height - target, altitude-controlled modes): mean {:+.2} m, largest {:.2} m at {:.1} s ({} samples)",
+            h.mean_m,
+            h.max_abs_m,
+            h.max_at_us as f64 / 1e6,
+            h.samples
+        ),
+        None => println!("altitude hold: no altitude-controlled flight logged"),
+    }
     Ok(())
 }
 

@@ -5,6 +5,10 @@
 //! Sources (ArduCopter 4.7.1): `CTUN.Alt` = EKF height estimate (`get_pos_estimate_U_m`),
 //! `CTUN.BAlt` = barometer altitude (`Copter::Log_Write_Control_Tuning`); `GPS.Alt` and
 //! `POS.Alt` are both metres above MSL (`AP_GPS/LogStructure.h`, `AP_AHRS/LogStructure.h`).
+//!
+//! Altitude hold: `CTUN.DAlt` is the position controller's height target in the same frame as
+//! `CTUN.Alt`, and is logged as exactly 0 in manual-throttle modes (4.7.1 and 4.6.3), which
+//! are therefore left out.
 
 use crate::dataflash::{Column, Log};
 use crate::flight::{flying_periods, in_periods};
@@ -40,6 +44,10 @@ fn gap(a: &Column, b: &Column, flying: &[crate::flight::ArmedPeriod]) -> Option<
             _ => {}
         }
     }
+    summarise(&gaps)
+}
+
+fn summarise(gaps: &[(u64, f64)]) -> Option<AltGap> {
     let (first, last) = (gaps.first()?.1, gaps.last()?.1);
     let (max_at_us, max) = gaps
         .iter()
@@ -52,6 +60,24 @@ fn gap(a: &Column, b: &Column, flying: &[crate::flight::ArmedPeriod]) -> Option<
         max_at_us,
         drift_m: last - first,
     })
+}
+
+/// How far the EKF height was from the controller's target (`CTUN.Alt - CTUN.DAlt`) while
+/// flying in altitude-controlled modes: positive is above the target.
+pub fn hold_error(log: &Log) -> Option<AltGap> {
+    let (flying, _) = flying_periods(log);
+    let des = log.column("CTUN", "DAlt", None)?;
+    let alt = log.column("CTUN", "Alt", None)?;
+    let gaps: Vec<(u64, f64)> = des
+        .time_us
+        .iter()
+        .zip(des.values.iter().zip(&alt.values))
+        .filter(|(t, (d, a))| {
+            **d != 0.0 && d.is_finite() && a.is_finite() && in_periods(&flying, **t)
+        })
+        .map(|(t, (d, a))| (*t, a - d))
+        .collect();
+    summarise(&gaps)
 }
 
 /// Barometer minus EKF height (`CTUN.BAlt - CTUN.Alt`) while flying.
@@ -78,6 +104,30 @@ pub fn gps_vs_ekf(log: &Log) -> Option<AltGap> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hold_error_skips_manual_throttle() {
+        use crate::testlog::{LogBuilder, V::N};
+        let mut b = LogBuilder::default();
+        b.format("ARM", "QBIBB", "TimeUS,ArmState,ArmChecks,Forced,Method")
+            .format("CTUN", "Qff", "TimeUS,DAlt,Alt");
+        b.rec("ARM", &[N(1e6), N(1.0), N(0.0), N(0.0), N(0.0)]);
+        for (t, d, a) in [
+            (2.0, 0.0, 7.0),
+            (3.0, 10.0, 10.5),
+            (4.0, 10.0, 9.0),
+            (5.0, 10.0, 10.1),
+        ] {
+            b.rec("CTUN", &[N(t * 1e6), N(d), N(a)]);
+        }
+        let h = hold_error(&b.open()).unwrap();
+        assert_eq!(
+            h.samples, 3,
+            "the manual-throttle sample (DAlt 0) is skipped"
+        );
+        assert_eq!((h.max_abs_m, h.max_at_us), (1.0, 4_000_000));
+        assert!((h.mean_m + 0.4 / 3.0).abs() < 1e-6, "{h:?}");
+    }
     use crate::testlog::{LogBuilder, V::N};
 
     #[test]
