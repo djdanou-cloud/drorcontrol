@@ -988,6 +988,26 @@ async fn auto_mission_flight_reports_progress_to_landing() {
             .map_or(0.0, |p| p.value.alt_rel_m)
     };
     until(Duration::from_secs(60), "climb to 8 m", || alt() > 8.0).await;
+    // A parameter change while flying (ADR-0012, owner 2026-10-13): refused with the warning
+    // until the operator acknowledges it, then written and read back like any other.
+    let baseline = sitl.dir().join("in-flight-baseline.param");
+    let change = std::collections::BTreeMap::from([("DISARM_DELAY".to_string(), 12.0)]);
+    assert!(matches!(
+        core.write_params((1, 1), change.clone(), &baseline).await,
+        Err(dc_core::ParamOperationError::ArmedWarningRequired(w))
+            if w == dc_core::ARMED_WRITE_WARNING
+    ));
+    let t_write = Instant::now();
+    let report = core
+        .write_params_with((1, 1), change, &baseline, dc_core::ArmedWrite::Acknowledged)
+        .await
+        .unwrap();
+    eprintln!(
+        "in-flight parameter write in {:.1} s (baseline download included): {report:?}",
+        t_write.elapsed().as_secs_f32()
+    );
+    assert!(report.verified(), "{report:?}");
+    assert_eq!(core.facts(1).armed, Some(true), "still flying");
     let s = command(
         &core,
         Command::SetMode {
@@ -1259,11 +1279,18 @@ async fn auto_mission_flight_reports_progress_to_landing() {
         "{bat:?} vs {:?}",
         s.used_mah
     );
-    // Only values the autopilot updates itself changed (STAT_* counters, the learned
-    // MOT_THST_HOVER at disarm). STAT_DISTFLWN counts 3-D distance, so it reads a little
-    // more than the horizontal distance computed from POS.
+    // Apart from our in-flight write (logged by the vehicle itself), only values the
+    // autopilot updates itself changed (STAT_* counters, the learned MOT_THST_HOVER at
+    // disarm). STAT_DISTFLWN counts 3-D distance, so it reads a little more than the
+    // horizontal distance computed from POS.
     let changes = logs::flight::param_changes(&log);
-    assert!(changes.iter().all(|c| c.automatic), "{changes:?}");
+    let manual: Vec<_> = changes.iter().filter(|c| !c.automatic).collect();
+    assert!(
+        manual.len() == 1
+            && manual[0].name == "DISARM_DELAY"
+            && (manual[0].old, manual[0].new) == (10.0, 12.0),
+        "{changes:?}"
+    );
     let flown = changes
         .iter()
         .rev()

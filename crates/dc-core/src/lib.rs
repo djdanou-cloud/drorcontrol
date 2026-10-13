@@ -68,8 +68,8 @@ pub use vehicle::{NavHealth, NavThresholds, PositionTrust};
 mod parameters;
 mod replay;
 pub use parameters::{
-    PARAM_HEARTBEAT_MAX_AGE, ParamOperationError, ParamReport, ParamRisk, ParamWriteResult,
-    parameter_risk,
+    ARMED_WRITE_WARNING, ArmedWrite, PARAM_HEARTBEAT_MAX_AGE, ParamOperationError, ParamReport,
+    ParamRisk, ParamWriteResult, parameter_risk,
 };
 
 /// How to reach a vehicle. Parsed from strings such as `tcp:127.0.0.1:5760`.

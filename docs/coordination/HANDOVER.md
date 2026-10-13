@@ -219,7 +219,13 @@ vehicle is involved, and the audit log:
    macOS builds and packaging run nightly (02:17 UTC), on releases and on dispatch. The `sitl`
    job runs all 17 scenarios on ArduCopter 4.7.1 **and 4.6.3** (both green locally);
    `TESTED_FIRMWARE` covers Copter 4.6 and 4.7.
-Items 2–5 change the vehicle. They are approved in ADR-0012 but were **paused on 2026-10-12**:
+**Item 2 — done 2026-10-13** (the owner confirmed in-session, adding: also while armed and
+flying, behind a warning pop-up): no dangerous-parameter refusal; `ArmedWarningRequired` /
+`ArmedWrite::Acknowledged` in the core; SITL in-flight write verified on 4.7.1 and 4.6.3.
+Still to do for item 2: expose it in the CLI and gRPC with the single confirmation and the
+warning.
+
+Items 3–5 change the vehicle. They are approved in ADR-0012 but were **paused on 2026-10-12**:
 the agent's safety check stopped the first attempt (dropping the dangerous-parameter refusal
 and adding a gRPC parameter-write call), so they wait for the owner to confirm, in their own
 words in the session, that these vehicle-changing changes may be implemented (or to add a

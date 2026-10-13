@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use dc_core::{
-    Core, CoreConfig, LinkSpec, PARAM_HEARTBEAT_MAX_AGE, ParamOperationError, ParamRisk,
-    parameter_risk,
+    ARMED_WRITE_WARNING, ArmedWrite, Core, CoreConfig, LinkSpec, PARAM_HEARTBEAT_MAX_AGE,
+    ParamOperationError, ParamRisk, parameter_risk,
 };
 use mavlink_codec::enums::{MavModeFlag, MavParamType};
 use mavlink_codec::messages::{Heartbeat, ParamValue};
@@ -289,9 +289,10 @@ async fn unknown_armed_stale_and_non_autopilot_targets_send_no_sets() {
     })
     .await
     .unwrap();
+    // Armed: nothing is sent; the core hands back the warning for the operator.
     assert!(matches!(
         core.write_params((1, 1), edits(), &path).await,
-        Err(ParamOperationError::Refused(_))
+        Err(ParamOperationError::ArmedWarningRequired(w)) if w == ARMED_WRITE_WARNING
     ));
     state.lock().unwrap().armed = false;
     tokio::time::timeout(Duration::from_secs(3), async {
@@ -409,7 +410,7 @@ async fn rollback_refuses_changed_parameter_types_without_any_restoration_sets()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn dangerous_parameters_are_labeled_and_refused_before_any_write() {
+async fn dangerous_parameters_are_labeled_and_written_with_read_back() {
     for name in [
         "FS_EKF_THRESH",
         "FS_THR_ENABLE",
@@ -423,20 +424,24 @@ async fn dangerous_parameters_are_labeled_and_refused_before_any_write() {
         assert_eq!(parameter_risk(name), ParamRisk::Dangerous, "{name}");
     }
     assert_eq!(parameter_risk("WPNAV_SPEED"), ParamRisk::Ordinary);
+    // ADR-0012 item 1: written like any other parameter (the label is for the confirmation),
+    // with the same baseline, disarmed and read-back rules.
     let (core, state, task) = setup().await;
     let path = state.lock().unwrap().snapshot.clone();
-    assert!(matches!(
-        core.write_params(
+    let report = core
+        .write_params(
             (1, 1),
             BTreeMap::from([("FS_EKF_THRESH".into(), 0.0)]),
-            &path
+            &path,
         )
-        .await,
-        Err(ParamOperationError::Refused(_))
-    ));
-    assert!(state.lock().unwrap().sets.is_empty());
-    assert!(!path.exists());
+        .await
+        .unwrap();
+    assert!(report.verified(), "{report:?}");
+    assert_eq!(state.lock().unwrap().sets, ["FS_EKF_THRESH"]);
+    assert_eq!(state.lock().unwrap().params["FS_EKF_THRESH"].value, 0.0);
+    assert!(path.exists(), "baseline kept for rollback");
     task.abort();
+    std::fs::remove_file(path).unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -480,4 +485,81 @@ async fn armed_transition_during_baseline_download_refuses_before_any_set() {
     assert!(state.lock().unwrap().sets.is_empty());
     assert!(!path.exists());
     task.abort();
+}
+
+async fn wait_armed(core: &Core, armed: bool) {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while core.facts(1).armed != Some(armed) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn armed_write_needs_the_acknowledged_warning_then_is_verified() {
+    // ADR-0012 (owner, 2026-10-13): parameter changes while armed and flying, after a
+    // warning the operator acknowledges.
+    let (core, state, task) = setup().await;
+    state.lock().unwrap().armed = true;
+    wait_armed(&core, true).await;
+    let path = state.lock().unwrap().snapshot.clone();
+    assert!(matches!(
+        core.write_params_with((1, 1), edits(), &path, ArmedWrite::DisarmedOnly)
+            .await,
+        Err(ParamOperationError::ArmedWarningRequired(_))
+    ));
+    assert!(state.lock().unwrap().sets.is_empty() && !path.exists());
+    let report = core
+        .write_params_with((1, 1), edits(), &path, ArmedWrite::Acknowledged)
+        .await
+        .unwrap();
+    assert!(report.verified(), "{report:?}");
+    assert_eq!(state.lock().unwrap().sets, ["A", "B"]);
+    assert!(
+        state.lock().unwrap().reads >= 2,
+        "each write read back explicitly"
+    );
+    assert_eq!(state.lock().unwrap().params["B"].value, 12.0);
+    assert!(path.exists(), "baseline kept, as for any write");
+    task.abort();
+    std::fs::remove_file(path).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn acknowledged_write_continues_when_the_vehicle_arms_mid_batch() {
+    let (core, state, task) = setup().await;
+    state.lock().unwrap().arm_after_set = true;
+    let path = state.lock().unwrap().snapshot.clone();
+    let report = core
+        .write_params_with((1, 1), edits(), &path, ArmedWrite::Acknowledged)
+        .await
+        .unwrap();
+    assert!(report.verified(), "{report:?}");
+    assert_eq!(state.lock().unwrap().sets, ["A", "B"]);
+    task.abort();
+    std::fs::remove_file(path).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn acknowledged_write_still_stops_on_a_heartbeat_gap() {
+    let (core, state, task) = setup().await;
+    state.lock().unwrap().armed = true;
+    wait_armed(&core, true).await;
+    {
+        let mut state = state.lock().unwrap();
+        state.omit_echo = true;
+        state.silence_after_set = true;
+    }
+    let path = state.lock().unwrap().snapshot.clone();
+    let report = core
+        .write_params_with((1, 1), edits(), &path, ArmedWrite::Acknowledged)
+        .await
+        .unwrap();
+    assert!(!report.verified());
+    assert!(report.interruption.is_some(), "{report:?}");
+    assert!(state.lock().unwrap().sets.iter().all(|name| name == "A"));
+    task.abort();
+    std::fs::remove_file(path).unwrap();
 }

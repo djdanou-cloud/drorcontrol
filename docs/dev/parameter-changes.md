@@ -3,8 +3,19 @@
 ## Core transactions
 
 The owner approved requiring a recent, explicitly disarmed autopilot heartbeat before
-parameter writes. `Core::write_params(target, edits, snapshot_path)` implements this for
-ordinary parameters. Its fixed freshness limit is **1.5 seconds**, independent of the
+parameter writes. `Core::write_params(target, edits, snapshot_path)` implements this.
+
+**Writes while armed (owner, 2026-10-13; ADR-0012 item 1).** A write to an armed vehicle is
+answered with `ParamOperationError::ArmedWarningRequired(ARMED_WRITE_WARNING)` before
+anything is sent. The client shows that warning as a pop-up; when the operator acknowledges
+it, the client repeats the request with `Core::write_params_with(…, ArmedWrite::Acknowledged)`
+(rollback: `rollback_params_with`). An acknowledged write goes ahead armed or not and is
+not interrupted by arming, but still needs a heartbeat from the target younger than 1.5 s
+before every step and stops on a heartbeat gap, because the outcome would be unknown. The
+baseline snapshot and explicit read-back are unchanged; no rollback starts automatically.
+SITL (4.7.1 and 4.6.3): `DISARM_DELAY` written while hovering in GUIDED, refused with the
+warning first, then verified in 0.7 s, baseline included; the vehicle's own log records the
+change. Its fixed freshness limit is **1.5 seconds**, independent of the
 displayed link state or `CoreConfig::link_stale`. The target must be a specific system
 and its autopilot component (component 1).
 
@@ -41,9 +52,11 @@ are refused as busy rather than queued. Flight-command delivery remains independ
 
 `parameter_risk` marks `FS_*`, names containing `_FS_` (including battery and RC
 failsafes), `FENCE_*`, `ARMING_*` and `BRD_SAFETY*` as dangerous. This conservative list
-is not a complete metadata catalog. The initial core API refuses dangerous edits entirely
-until a dedicated typed-confirmation path is implemented; being disarmed does not grant
-permission to disable a failsafe or fence.
+is not a complete metadata catalog. Since the owner's decision of 2026-10-12 (ADR-0012
+item 1) the label no longer refuses anything: every parameter, failsafe, arming, fence and
+board-safety ones included, is written through the same baseline, disarmed-state and
+read-back checks after **one** confirmation in the client (no typed text). The label lets the
+confirmation say that a safety-relevant setting is changing.
 
 The last finite, nonnegative `FS_EKF_THRESH` value reported by each autopilot component
 sets that vehicle's `NavThresholds.ekf_fail`. Zero retains ArduPilot's disabled-variance-

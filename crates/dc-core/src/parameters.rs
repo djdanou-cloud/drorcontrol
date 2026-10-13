@@ -1,4 +1,10 @@
-//! Disarmed-only parameter transactions (T0-18 / H5); flight commands keep ADR-0009.
+//! Parameter transactions (T0-18 / H5); flight commands keep ADR-0009.
+//!
+//! Every write snapshots a complete baseline first and is verified by an explicit read-back.
+//! By default the autopilot must be known disarmed. Since the owner's decision of 2026-10-13
+//! (ADR-0012) a write may also go to an armed or flying vehicle when the operator has
+//! acknowledged [`ARMED_WRITE_WARNING`] ([`ArmedWrite::Acknowledged`]); without that the
+//! core answers [`ParamOperationError::ArmedWarningRequired`] so the client can show it.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
@@ -16,18 +22,37 @@ use tokio::sync::broadcast;
 
 use crate::{Core, NavThresholds, ParamError};
 
-/// A parameter write requires an autopilot disarmed heartbeat younger than 1.5 seconds.
-/// This fixed vehicle-state requirement does not depend on the displayed link state.
+/// A parameter write requires an autopilot heartbeat younger than 1.5 seconds (disarmed,
+/// unless the in-flight warning was acknowledged). This fixed vehicle-state requirement does
+/// not depend on the displayed link state.
 pub const PARAM_HEARTBEAT_MAX_AGE: Duration = Duration::from_millis(1500);
 const WRITE_LIFETIME: Duration = Duration::from_secs(10);
 const RETRY: Duration = Duration::from_secs(1);
 
+/// What the client shows before a write to an armed vehicle (ADR-0012, 2026-10-13); the
+/// operator must acknowledge it.
+pub const ARMED_WRITE_WARNING: &str = "The vehicle is ARMED. Parameter changes take effect immediately, in flight: a wrong value can change how it flies, disable a failsafe or cause loss of control. No automatic rollback is attempted while armed.";
+
+/// Whether a write may go to an armed vehicle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ArmedWrite {
+    /// Only to a known-disarmed vehicle; an armed one answers
+    /// [`ParamOperationError::ArmedWarningRequired`].
+    #[default]
+    DisarmedOnly,
+    /// The operator acknowledged [`ARMED_WRITE_WARNING`]: write whether armed or not.
+    Acknowledged,
+}
+
 /// Minimum conservative risk labels for H5. This is not a full parameter metadata catalog.
+/// The label is for display (the single confirmation names what is being changed); it does
+/// not refuse a write (owner decision, ADR-0012 item 1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParamRisk {
     /// Not identified as an arming/failsafe/fence/safety setting by the minimum labels.
     Ordinary,
-    /// Requires a dedicated dangerous-parameter approval path, not yet exposed.
+    /// An arming, failsafe, fence or board-safety setting: written like any other, but the
+    /// confirmation should say so.
     Dangerous,
 }
 
@@ -50,8 +75,12 @@ pub fn parameter_risk(name: &str) -> ParamRisk {
 /// Failure before any parameter set is sent.
 #[derive(Debug)]
 pub enum ParamOperationError {
-    /// The target, armed-state check or dangerous-parameter policy refused the operation.
+    /// The target or vehicle-state check refused the operation.
     Refused(String),
+    /// The vehicle is armed and the write did not carry the operator's acknowledgement of
+    /// this warning ([`ARMED_WRITE_WARNING`]); nothing was sent. Show it, then repeat with
+    /// [`ArmedWrite::Acknowledged`].
+    ArmedWarningRequired(String),
     /// Another write/rollback is active; intents are never silently queued.
     Busy,
     /// A complete baseline could not be downloaded.
@@ -65,7 +94,9 @@ pub enum ParamOperationError {
 impl fmt::Display for ParamOperationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Refused(reason) | Self::Storage(reason) => f.write_str(reason),
+            Self::Refused(reason) | Self::Storage(reason) | Self::ArmedWarningRequired(reason) => {
+                f.write_str(reason)
+            }
             Self::Busy => f.write_str("a parameter write or rollback is already active"),
             Self::Download(error) => error.fmt(f),
             Self::Snapshot(error) => error.fmt(f),
@@ -111,12 +142,16 @@ impl ParamReport {
     }
 }
 
+/// Counts of armed reports and heartbeat gaps; a write compares them before every step.
+type Epoch = (u64, u64);
+
 #[derive(Default)]
 pub(super) struct ParameterState {
     /// Serialize writes across Core clones, without delaying unrelated flight commands.
     gate: tokio::sync::Mutex<()>,
-    /// Latch armed reports and heartbeat gaps even if a later heartbeat is disarmed again.
-    epochs: Mutex<HashMap<u8, u64>>,
+    /// Latch armed reports and heartbeat gaps even if a later heartbeat is disarmed again:
+    /// (armed reports, heartbeat gaps) per vehicle.
+    epochs: Mutex<HashMap<u8, Epoch>>,
     nav: Mutex<HashMap<u8, f32>>,
 }
 
@@ -140,13 +175,16 @@ impl Core {
                 .get(sysid)
                 .and_then(|v| v.heartbeat.as_ref())
                 .is_some_and(|hb| hb.age(now) >= PARAM_HEARTBEAT_MAX_AGE);
-            if h.base_mode & MavModeFlag::SAFETY_ARMED.0 != 0 || gap {
+            let armed = h.base_mode & MavModeFlag::SAFETY_ARMED.0 != 0;
+            if armed || gap {
                 let mut epochs = self
                     .parameters
                     .epochs
                     .lock()
                     .unwrap_or_else(|e| e.into_inner());
-                *epochs.entry(sysid).or_default() += 1;
+                let e = epochs.entry(sysid).or_default();
+                e.0 += u64::from(armed);
+                e.1 += u64::from(gap);
             }
         }
         if let Message::ParamValue(p) = msg
@@ -179,20 +217,21 @@ impl Core {
         thresholds
     }
 
-    fn parameter_epoch(&self, sysid: u8) -> u64 {
+    fn parameter_epoch(&self, sysid: u8) -> Epoch {
         *self
             .parameters
             .epochs
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .get(&sysid)
-            .unwrap_or(&0)
+            .unwrap_or(&(0, 0))
     }
 
     fn check_parameter_state(
         &self,
         target: (u8, u8),
-        epoch: u64,
+        epoch: Epoch,
+        mode: ArmedWrite,
     ) -> Result<(), ParamOperationError> {
         if target.0 == 0 || target.1 != vehicle::AUTOPILOT_COMPID {
             return Err(ParamOperationError::Refused(
@@ -201,20 +240,44 @@ impl Core {
         }
         let fleet = self.fleet();
         let hb = fleet.get(target.0).and_then(|v| v.heartbeat.as_ref());
+        let now = self.parameter_epoch(target.0);
+        if mode == ArmedWrite::Acknowledged {
+            // Armed or not, the vehicle state must stay continuously known: a heartbeat gap
+            // makes the outcome of a write unknown.
+            if hb.is_none_or(|hb| {
+                hb.value.compid != target.1 || hb.age(Instant::now()) >= PARAM_HEARTBEAT_MAX_AGE
+            }) || now.1 != epoch.1
+            {
+                return Err(ParamOperationError::Refused(
+                    "parameter writes require a recent, continuous autopilot heartbeat".into(),
+                ));
+            }
+            return Ok(());
+        }
         if hb.is_none_or(|hb| {
             hb.value.compid != target.1
                 || hb.value.armed()
                 || hb.age(Instant::now()) >= PARAM_HEARTBEAT_MAX_AGE
-        }) || self.parameter_epoch(target.0) != epoch
+        }) || now != epoch
         {
             return Err(ParamOperationError::Refused("parameter writes require a recent, continuously known-disarmed autopilot heartbeat".into()));
         }
         Ok(())
     }
 
-    /// Snapshot a complete download, persist it to a **new** file, then apply ordinary edits.
-    /// Fresh disarmed state is required before every set/retry/read. Dangerous parameters
-    /// are refused until a dedicated typed-confirmation path exists. Each write has a 10 s
+    /// The vehicle's latest heartbeat says armed.
+    fn reported_armed(&self, sysid: u8) -> bool {
+        self.fleet()
+            .get(sysid)
+            .and_then(|v| v.heartbeat.as_ref())
+            .is_some_and(|hb| hb.value.armed())
+    }
+
+    /// Snapshot a complete download, persist it to a **new** file, then apply the edits.
+    /// Fresh disarmed state is required before every set/retry/read (see
+    /// [`Core::write_params_with`] for writes to an armed vehicle). Every parameter may be
+    /// written, failsafe, arming, fence and board-safety ones included (ADR-0012 item 1; the
+    /// caller asks for one confirmation, see [`parameter_risk`]). Each write has a 10 s
     /// lifetime and success requires an explicit `PARAM_REQUEST_READ` response of equal
     /// name, value and type. Stop on the first mismatch, timeout or safety interruption.
     pub async fn write_params(
@@ -223,7 +286,23 @@ impl Core {
         edits: BTreeMap<String, f64>,
         snapshot_path: impl AsRef<Path>,
     ) -> Result<ParamReport, ParamOperationError> {
-        self.write_params_checked(target, edits, snapshot_path.as_ref(), None)
+        self.write_params_with(target, edits, snapshot_path, ArmedWrite::DisarmedOnly)
+            .await
+    }
+
+    /// [`Core::write_params`], also to an armed or flying vehicle when `mode` is
+    /// [`ArmedWrite::Acknowledged`] (the operator saw [`ARMED_WRITE_WARNING`]). Without the
+    /// acknowledgement an armed vehicle answers [`ParamOperationError::ArmedWarningRequired`]
+    /// before anything is sent. The baseline, read-back and stop-on-first-failure rules are
+    /// the same; a heartbeat gap still stops the batch.
+    pub async fn write_params_with(
+        &self,
+        target: (u8, u8),
+        edits: BTreeMap<String, f64>,
+        snapshot_path: impl AsRef<Path>,
+        mode: ArmedWrite,
+    ) -> Result<ParamReport, ParamOperationError> {
+        self.write_params_checked(target, edits, snapshot_path.as_ref(), None, mode)
             .await
     }
 
@@ -233,21 +312,20 @@ impl Core {
         edits: BTreeMap<String, f64>,
         snapshot_path: &Path,
         expected_types: Option<BTreeMap<String, u8>>,
+        mode: ArmedWrite,
     ) -> Result<ParamReport, ParamOperationError> {
         let _guard = self
             .parameters
             .gate
             .try_lock()
             .map_err(|_| ParamOperationError::Busy)?;
-        let epoch = self.parameter_epoch(target.0);
-        self.check_parameter_state(target, epoch)?;
-        for name in edits.keys() {
-            if parameter_risk(name) == ParamRisk::Dangerous {
-                return Err(ParamOperationError::Refused(format!(
-                    "{name} is dangerous: dedicated confirmation is not yet available"
-                )));
-            }
+        if mode == ArmedWrite::DisarmedOnly && self.reported_armed(target.0) {
+            return Err(ParamOperationError::ArmedWarningRequired(
+                ARMED_WRITE_WARNING.into(),
+            ));
         }
+        let epoch = self.parameter_epoch(target.0);
+        self.check_parameter_state(target, epoch, mode)?;
         let mut count = 0;
         let params = self
             .download_params(target, |_, total| count = total)
@@ -272,12 +350,12 @@ impl Core {
         // Downloading a baseline is read-only. Past gaps during that preparation must
         // not reject a currently fresh disarmed state before any writes have begun.
         let epoch = self.parameter_epoch(target.0);
-        self.check_parameter_state(target, epoch)?;
+        self.check_parameter_state(target, epoch, mode)?;
         let path = snapshot_path.to_path_buf();
         persist_snapshot(path.clone(), baseline.to_text()).await?;
         let epoch = self.parameter_epoch(target.0);
         Ok(self
-            .apply_parameter_changes(target, plan.changes(), path, epoch)
+            .apply_parameter_changes(target, plan.changes(), path, epoch, mode)
             .await)
     }
 
@@ -290,6 +368,24 @@ impl Core {
         original_snapshot: impl AsRef<Path>,
         names: &[String],
         recovery_snapshot: impl AsRef<Path>,
+    ) -> Result<ParamReport, ParamOperationError> {
+        self.rollback_params_with(
+            original_snapshot,
+            names,
+            recovery_snapshot,
+            ArmedWrite::DisarmedOnly,
+        )
+        .await
+    }
+
+    /// [`Core::rollback_params`] with the same armed-write rule as
+    /// [`Core::write_params_with`] (a rollback the operator starts in flight).
+    pub async fn rollback_params_with(
+        &self,
+        original_snapshot: impl AsRef<Path>,
+        names: &[String],
+        recovery_snapshot: impl AsRef<Path>,
+        mode: ArmedWrite,
     ) -> Result<ParamReport, ParamOperationError> {
         let text = std::fs::read_to_string(original_snapshot)
             .map_err(|e| ParamOperationError::Storage(e.to_string()))?;
@@ -308,6 +404,7 @@ impl Core {
             edits,
             recovery_snapshot.as_ref(),
             Some(types),
+            mode,
         )
         .await
     }
@@ -317,7 +414,8 @@ impl Core {
         target: (u8, u8),
         changes: &[ParamChange],
         path: PathBuf,
-        epoch: u64,
+        epoch: Epoch,
+        mode: ArmedWrite,
     ) -> ParamReport {
         let mut report = ParamReport {
             target,
@@ -327,11 +425,11 @@ impl Core {
             interruption: None,
         };
         for change in changes {
-            if let Err(error) = self.check_parameter_state(target, epoch) {
+            if let Err(error) = self.check_parameter_state(target, epoch, mode) {
                 report.interruption = Some(error.to_string());
                 break;
             }
-            let (status, interruption) = self.write_parameter(target, change, epoch).await;
+            let (status, interruption) = self.write_parameter(target, change, epoch, mode).await;
             report.results.push(ParamWriteResult {
                 name: change.name.clone(),
                 status,
@@ -348,7 +446,8 @@ impl Core {
         &self,
         target: (u8, u8),
         change: &ParamChange,
-        epoch: u64,
+        epoch: Epoch,
+        mode: ArmedWrite,
     ) -> (SetStatus, Option<String>) {
         let set = Message::ParamSet(ParamSet {
             target_system: target.0,
@@ -369,7 +468,7 @@ impl Core {
         let mut reading = false;
         let mut tick = tokio::time::interval(Duration::from_millis(25));
         loop {
-            if let Err(error) = self.check_parameter_state(target, epoch) {
+            if let Err(error) = self.check_parameter_state(target, epoch, mode) {
                 return (SetStatus::Failed(None), Some(error.to_string()));
             }
             if Instant::now() >= deadline {
@@ -396,7 +495,7 @@ impl Core {
                                 return (SetStatus::Failed(Some(actual)), None);
                             }
                             if reading {
-                                if let Err(error) = self.check_parameter_state(target, epoch) {
+                                if let Err(error) = self.check_parameter_state(target, epoch, mode) {
                                     return (SetStatus::Verified(actual), Some(error.to_string()));
                                 }
                                 return (SetStatus::Verified(actual), None);

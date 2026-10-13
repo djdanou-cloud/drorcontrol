@@ -136,6 +136,7 @@ Columns:
 |------|----------|-------|--------|
 | 2026-10-11 | Flight Operations & Systems Safety Lead | Operational profile (§1); risk targets (§2); command decisions D1–D6 (§3) | Directive issued; baselined in this log and ADR-0011 |
 | 2026-10-12 | Owner (DrorAero) | Interpretations I1–I3; H14 residual risk; hazard-log review; field-operations posture (ADR-0012) | I1–I3 signed off, I3 amended: mission upload while armed needs a single-click confirmation, not two-stage. H14 residual risk accepted. Review approved. Accepted with ADR-0012: parameter writes for all parameters (failsafe, arming, fence, board safety included) with a single confirmation and no typed text; in-flight mission, fence and rally upload with one confirmation and read-back verification; log erase without prior download. Residual risks accepted: a wrong safety-relevant value or an in-flight plan change takes effect after one click; erased logs cannot be recovered. |
+| 2026-10-13 | Owner (DrorAero) | Parameter writes while armed (ADR-0012 item 1, amended) | Allowed while armed and flying after a warning pop-up the operator acknowledges (core: `ArmedWarningRequired` until `ArmedWrite::Acknowledged`). Residual risk accepted: a wrong value written in flight takes effect at once; no automatic rollback while armed. |
 
 ## 7. Open items
 

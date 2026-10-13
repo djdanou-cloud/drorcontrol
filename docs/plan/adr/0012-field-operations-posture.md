@@ -21,7 +21,7 @@ confirmations or certification paperwork; the software must be lean, permissive 
 ### Vehicle-changing actions
 | # | Item | Decision |
 |---|------|----------|
-| 1 | Parameter writes | Enabled for **all** parameters, including failsafe, arming, fence and board safety. **No typed confirmation**: a single-click modal or toggle is enough. |
+| 1 | Parameter writes | Enabled for **all** parameters, including failsafe, arming, fence and board safety. **No typed confirmation**: a single-click modal or toggle is enough. **Also while armed and flying** (owner, 2026-10-13): the client must first show a warning pop-up that the vehicle is armed and the change takes effect in flight; the write goes ahead once the operator acknowledges it. |
 | 2 | Mission upload in flight (T0-19) | Allowed, with one single-click confirmation ("Update mission on active vehicle?"). |
 | 3 | Mission upload from the CLI | Enabled with no state lock (not limited to disarmed). |
 | 4 | Geofence and rally upload | Enabled on the ground and in flight, **with read-back verification**. |
@@ -60,7 +60,10 @@ Not part of these decisions, so ADR-0011 and the core keep them:
 
 ## Consequences
 * The core's command policy changes: parameter writes lose the "dangerous parameter" refusal
-  (T0-18) and need only a single confirmation token; in-flight mission upload becomes a
+  (T0-18) and need only a single confirmation token; a write to an armed vehicle is answered
+  with the in-flight warning (`ParamOperationError::ArmedWarningRequired`) until the request
+  carries the operator's acknowledgement (`ArmedWrite::Acknowledged`), with the same
+  baseline, read-back and stop-on-heartbeat-gap rules; in-flight mission upload becomes a
   single-confirmation class; fence/rally upload and log erase are new commands. Each lands with
   tests and SITL scenarios, and every change stays in the audit log.
 * Residual risks the owner accepts with this posture: a wrong failsafe, arming or fence value
