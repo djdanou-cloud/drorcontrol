@@ -44,7 +44,11 @@ Never commit field logs with real positions to the repository; sanitize them fir
 
 
 def help_text(binary, args):
-    out = subprocess.run([binary, *args, "--help"], capture_output=True, text=True, check=True)
+    # The tool writes UTF-8 (help text has characters such as ″ and →); decode it as such on
+    # every OS, not with Windows' local code page.
+    out = subprocess.run(
+        [binary, *args, "--help"], capture_output=True, encoding="utf-8", check=True
+    )
     # clap names the program after argv[0]: the same page on every OS.
     text = out.stdout.replace("dc-cli.exe", "dc-cli").replace("\r\n", "\n")
     return text.rstrip() + "\n"
