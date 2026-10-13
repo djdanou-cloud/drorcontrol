@@ -24,6 +24,7 @@
 //! through the safety interlocks (`CommandPolicy`, plan 08 §4) once they exist.
 
 mod tlog;
+mod tlog_health;
 mod tlog_sanitize;
 mod track;
 
@@ -205,6 +206,18 @@ enum ListKind {
 
 #[derive(Subcommand)]
 enum TlogCmd {
+    /// Health checks from the telemetry (vibration, battery, EKF, GPS, errors), for when there
+    /// is no dataflash log: the same thresholds as `log health`.
+    Health {
+        /// The .tlog file.
+        file: std::path::PathBuf,
+        /// Print the findings as JSON (schema `dc.health/1`).
+        #[arg(long)]
+        json: bool,
+        /// Exit with an error when any finding is at this level or worse.
+        #[arg(long, value_enum)]
+        fail_on: Option<FailOn>,
+    },
     /// Write a copy with every position moved to a stand-in location (shapes and distances
     /// kept), so the recording can be shared without revealing where it was flown.
     Sanitize {
@@ -1272,11 +1285,20 @@ fn log_health(
     json: bool,
     fail_on: Option<FailOn>,
 ) -> Result<(), String> {
-    let findings = logs::health::assess(log);
+    report_health(path, &logs::health::assess(log), json, fail_on)
+}
+
+/// Print findings as text or JSON; error if any reaches `fail_on`.
+fn report_health(
+    path: &std::path::Path,
+    findings: &[logs::health::Finding],
+    json: bool,
+    fail_on: Option<FailOn>,
+) -> Result<(), String> {
     if json {
-        println!("{}", health_json(path, &findings));
+        println!("{}", health_json(path, findings));
     } else {
-        print_log_health(log)?;
+        print_findings(findings);
     }
     let limit = match fail_on {
         None => return Ok(()),
@@ -1294,11 +1316,15 @@ fn log_health(
 }
 
 fn print_log_health(log: &logs::Log) -> Result<(), String> {
-    let findings = logs::health::assess(log);
+    print_findings(&logs::health::assess(log));
+    Ok(())
+}
+
+fn print_findings(findings: &[logs::health::Finding]) {
     if findings.is_empty() {
-        println!("no checks apply: the log has no VIBE, BAT, XKF4 or ERR records");
+        println!("no checks apply: none of the messages the checks read were found");
     }
-    for f in &findings {
+    for f in findings {
         let at = f
             .at_us
             .map_or_else(String::new, |t| format!(" at {:.1} s", t as f64 / 1e6));
@@ -1314,7 +1340,6 @@ fn print_log_health(log: &logs::Log) -> Result<(), String> {
         "overall: {}",
         worst.map_or("n/a".into(), |l| format!("{l:?}").to_uppercase())
     );
-    Ok(())
 }
 
 fn print_log_battery(log: &logs::Log, instance: &u8) -> Result<(), String> {
@@ -1810,6 +1835,16 @@ fn load_params(path: &std::path::Path) -> Result<std::collections::BTreeMap<Stri
 fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
     let file = match what {
         TlogCmd::Info { file } => file,
+        TlogCmd::Health {
+            file,
+            json,
+            fail_on,
+        } => {
+            let f = std::fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()))?;
+            let findings = tlog_health::assess(std::io::BufReader::new(f))
+                .map_err(|e| format!("{}: {e}", file.display()))?;
+            return report_health(file, &findings, *json, *fail_on);
+        }
         TlogCmd::Sanitize { file, out, to } => {
             let to = parse_polygon(to)?
                 .first()

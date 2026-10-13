@@ -868,7 +868,15 @@ async fn auto_mission_flight_reports_progress_to_landing() {
         cfg.param("RNGFND1_MAX", 50.0),
     ];
     let sitl = Sitl::start(&cfg).unwrap();
-    let core = core_on(sitl.addr()).await;
+    // DC_SITL_TLOG=PATH records this flight's telemetry there (for checking the .tlog tools
+    // by hand).
+    let core = Core::start(CoreConfig {
+        tlog: std::env::var_os("DC_SITL_TLOG").map(std::path::PathBuf::from),
+        ..CoreConfig::default()
+    })
+    .await
+    .unwrap();
+    core.connect(&LinkSpec::Tcp(sitl.addr())).await.unwrap();
     assert_eq!(
         core.wait_for_vehicle(Duration::from_secs(60)).await,
         Some(1)
