@@ -551,9 +551,10 @@ enum MissionCmd {
         #[arg(long)]
         with_home: bool,
     },
-    /// The mission's flight path as GPX and/or KML (Google Earth), offline.
+    /// The mission's flight path as GPX and/or KML (Google Earth), or its items as CSV
+    /// (spreadsheets), offline.
     Export {
-        /// The .waypoints file.
+        /// The mission file (.waypoints or .plan).
         file: std::path::PathBuf,
         /// Write a GPX 1.1 track.
         #[arg(long)]
@@ -561,6 +562,10 @@ enum MissionCmd {
         /// Write a KML 2.2 line.
         #[arg(long)]
         kml: Option<std::path::PathBuf>,
+        /// Write the items as CSV: seq, command, frame, params, lat, lon, alt, leg and total
+        /// distance (m).
+        #[arg(long)]
+        csv: Option<std::path::PathBuf>,
     },
     /// Does the vehicle hold exactly this file's mission? Downloads and compares (home, item
     /// 0, is not compared); exits with failure on any difference.
@@ -3137,6 +3142,68 @@ fn bin_kml_parts(log: &logs::Log) -> (Vec<(u32, track::Point)>, Vec<track::Waypo
     (points, wps.into_values().collect())
 }
 
+/// Mission items as CSV. Distances are along the located items (global frames, not 0,0),
+/// on a local flat earth (exact enough for mission legs).
+fn mission_csv(items: &[dc_core::MissionItem]) -> String {
+    const GLOBAL: [u8; 6] = [0, 3, 5, 6, 10, 11];
+    let mut s = String::from("seq,command,frame,p1,p2,p3,p4,lat,lon,alt,leg_m,total_m\n");
+    let mut last: Option<(f64, f64)> = None;
+    let mut total = 0.0;
+    for (i, it) in items.iter().enumerate() {
+        let name = mavlink_codec::enums::MavCmd(it.command)
+            .name()
+            .map_or(it.command.to_string(), |n| {
+                n.trim_start_matches("MAV_CMD_").to_string()
+            });
+        let located = GLOBAL.contains(&it.frame) && (it.x != 0 || it.y != 0);
+        let (lat, lon) = (f64::from(it.x) * 1e-7, f64::from(it.y) * 1e-7);
+        let leg = if located {
+            let d = last.map_or(0.0, |(a, b)| {
+                let n = (lat - a).to_radians() * 6_371_008.8;
+                let e = (lon - b).to_radians() * 6_371_008.8 * a.to_radians().cos();
+                n.hypot(e)
+            });
+            last = Some((lat, lon));
+            total += d;
+            format!("{d:.1}")
+        } else {
+            String::new()
+        };
+        let p = |v: f32| {
+            if v.is_finite() {
+                format!("{v}")
+            } else {
+                String::new()
+            }
+        };
+        s.push_str(&format!(
+            "{i},{name},{},{},{},{},{},{},{},{},{leg},{}\n",
+            it.frame,
+            p(it.params[0]),
+            p(it.params[1]),
+            p(it.params[2]),
+            p(it.params[3]),
+            if located {
+                format!("{lat:.7}")
+            } else {
+                String::new()
+            },
+            if located {
+                format!("{lon:.7}")
+            } else {
+                String::new()
+            },
+            it.z,
+            if located {
+                format!("{total:.1}")
+            } else {
+                String::new()
+            },
+        ));
+    }
+    s
+}
+
 fn is_plan(path: &std::path::Path) -> bool {
     path.extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("plan"))
@@ -3431,13 +3498,23 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
             let text = mission_text(out.as_deref(), &items);
             write_or_print(out.as_deref(), &text, &format!("{} items", items.len()))
         }
-        MissionCmd::Export { file, gpx, kml } => {
-            if gpx.is_none() && kml.is_none() {
-                return Err("nothing to write: give --gpx and/or --kml".into());
+        MissionCmd::Export {
+            file,
+            gpx,
+            kml,
+            csv,
+        } => {
+            if gpx.is_none() && kml.is_none() && csv.is_none() {
+                return Err("nothing to write: give --gpx, --kml and/or --csv".into());
             }
             let items = read_mission(file)?;
             if items.is_empty() {
                 return Err(format!("{}: no mission items", file.display()));
+            }
+            if let Some(out) = csv {
+                std::fs::write(out, mission_csv(&items))
+                    .map_err(|e| format!("{}: {e}", out.display()))?;
+                eprintln!("wrote {} ({} items)", out.display(), items.len());
             }
             let path = protocols::mission::path(&items);
             // With home's MSL altitude in the file the path is absolute; otherwise heights

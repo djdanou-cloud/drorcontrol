@@ -1171,7 +1171,7 @@ Commands:
   reverse   Fly the route backwards (offline): home, TAKEOFF and the final RTL/LAND stay in place
   shift     Move every located item by metres north/east (offline); home stays unless --home
   diff      Compare two mission files (offline); exits with failure on any difference
-  export    The mission's flight path as GPX and/or KML (Google Earth), offline
+  export    The mission's flight path as GPX and/or KML (Google Earth), or its items as CSV (spreadsheets), offline
   compare   Does the vehicle hold exactly this file's mission? Downloads and compares (home, item 0, is not compared); exits with failure on any difference
   help      Print this message or the help of the given subcommand(s)
 
@@ -1326,18 +1326,19 @@ Options:
 #### `dc-cli mission export`
 
 ```text
-The mission's flight path as GPX and/or KML (Google Earth), offline
+The mission's flight path as GPX and/or KML (Google Earth), or its items as CSV (spreadsheets), offline
 
 Usage: dc-cli mission export [OPTIONS] <FILE>
 
 Arguments:
-  <FILE>  The .waypoints file
+  <FILE>  The mission file (.waypoints or .plan)
 
 Options:
       --gpx <GPX>        Write a GPX 1.1 track
       --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
       --compid <COMPID>  Our MAVLink component id [default: 190]
       --kml <KML>        Write a KML 2.2 line
+      --csv <CSV>        Write the items as CSV: seq, command, frame, params, lat, lon, alt, leg and total distance (m)
       --tlog <TLOG>      Record everything to this .tlog file
   -h, --help             Print help
 ```
