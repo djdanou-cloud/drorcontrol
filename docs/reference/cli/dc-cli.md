@@ -1171,6 +1171,7 @@ Commands:
   corridor        Corridor scan along a path (a road, river, power line): parallel lines covering --width centred on the path, flown back and forth. Offline; check and upload as usual
   search          Search and rescue pattern from a datum (last known position). Offline; check and upload as usual
   terrain-follow  Terrain following without terrain data on the vehicle: sets every waypoint above home to --agl above the ground under it (SRTM tiles in --dem), optionally adding waypoints every --step m between them. Offline; prints the resulting clearance
+  profile         The mission's altitude against the ground along the path, as CSV (dist_m, seq, lat, lon, ground_m, alt_msl_m, agl_m; SRTM tiles in --dem), for a profile chart
   from-kml        A mission from a path drawn in Google Earth (the KML's first LineString): takeoff, a waypoint per point in drawing order, RTL. Offline; check and upload it as usual
   fence-from-kml  A geofence from polygons drawn in Google Earth: every KML polygon becomes an inclusion zone, or an exclusion zone when its name contains "exclusion", "no-fly", "no fly" or "nofly" (any case). Offline; check a mission against it with `mission check --fence`
   rally-from-kml  Rally points from points (placemarks) drawn in Google Earth, at one altitude above home. Offline
@@ -1350,6 +1351,26 @@ Options:
       --step <STEP>      Add waypoints this often between waypoints, m (0: none) [default: 0]
       --tlog <TLOG>      Record everything to this .tlog file
       --out <OUT>        Output file (.waypoints or .plan; default: print)
+  -h, --help             Print help
+```
+
+#### `dc-cli mission profile`
+
+```text
+The mission's altitude against the ground along the path, as CSV (dist_m, seq, lat, lon, ground_m, alt_msl_m, agl_m; SRTM tiles in --dem), for a profile chart
+
+Usage: dc-cli mission profile [OPTIONS] --dem <DEM> <FILE>
+
+Arguments:
+  <FILE>  The mission file
+
+Options:
+      --dem <DEM>        Directory holding the SRTM tiles
+      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>  Our MAVLink component id [default: 190]
+      --step <STEP>      Sample spacing along the legs, m [default: 25]
+      --out <OUT>        Output CSV (default: print)
+      --tlog <TLOG>      Record everything to this .tlog file
   -h, --help             Print help
 ```
 

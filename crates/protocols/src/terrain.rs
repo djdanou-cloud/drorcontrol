@@ -287,6 +287,95 @@ pub fn clearance(items: &[MissionItem], t: &Terrain, step_m: f64) -> ClearanceRe
     r
 }
 
+/// One sample of a mission's terrain profile.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ProfilePoint {
+    /// Item the leg flies to (0: home).
+    pub seq: u16,
+    /// Horizontal distance flown so far, m.
+    pub dist_m: f64,
+    /// Position.
+    pub lat: f64,
+    /// See `lat`.
+    pub lon: f64,
+    /// Ground elevation, m (`None`: no data).
+    pub ground_m: Option<f64>,
+    /// The vehicle's height above home, m.
+    pub alt_rel_m: f64,
+}
+
+/// The mission's altitude against the ground, sampled every `step_m` along each horizontal
+/// leg (plus every path corner), for a profile view: heights as `clearance` reckons them
+/// (terrain-frame legs blended above the ground). Without terrain at home the heights are
+/// still given, the ground is not.
+pub fn profile(items: &[MissionItem], t: &Terrain, step_m: f64) -> Vec<ProfilePoint> {
+    let path = mission::path(items);
+    let Some(h) = path.first() else {
+        return Vec::new();
+    };
+    let home_ground = t.elevation(h.lat, h.lon);
+    let frame = |seq: u16| items.get(usize::from(seq)).map_or(0, |i| i.frame);
+    let mut out = vec![ProfilePoint {
+        seq: 0,
+        dist_m: 0.0,
+        lat: h.lat,
+        lon: h.lon,
+        ground_m: home_ground,
+        alt_rel_m: 0.0,
+    }];
+    let mut dist = 0.0;
+    for w in path.windows(2) {
+        let (a, b) = (&w[0], &w[1]);
+        let follows = is_terrain_frame(frame(b.seq));
+        let ga = t.elevation(a.lat, a.lon);
+        let gb = t.elevation(b.lat, b.lon);
+        // Above home at each end; a terrain-frame end is converted with the ground there.
+        let rel = |p: &mission::PathPoint, g: Option<f64>| match (home_ground, g) {
+            (Some(hg), Some(g)) if p.seq != 0 && is_terrain_frame(frame(p.seq)) => {
+                g + p.alt_rel_m - hg
+            }
+            _ => p.alt_rel_m,
+        };
+        let (ra, rb) = (rel(a, ga), rel(b, gb));
+        let samples: Vec<_> = leg_samples((a.lat, a.lon), (b.lat, b.lon), step_m).collect();
+        if samples.is_empty() {
+            // Straight up or down: one point at the new height.
+            out.push(ProfilePoint {
+                seq: b.seq,
+                dist_m: dist,
+                lat: b.lat,
+                lon: b.lon,
+                ground_m: gb,
+                alt_rel_m: rb,
+            });
+            continue;
+        }
+        let plane = Plane::new((a.lat, a.lon));
+        let (x, y) = plane.to_xy((b.lat, b.lon));
+        let len = x.hypot(y);
+        for &(f, (lat, lon)) in samples.iter().skip(1) {
+            let g = t.elevation(lat, lon);
+            let alt = match (follows, home_ground, g, ga) {
+                (true, Some(hg), Some(g), Some(ga)) => {
+                    let (aa, ab) = (ra + hg - ga, b.alt_rel_m);
+                    g + aa + (ab - aa) * f - hg
+                }
+                _ => ra + (rb - ra) * f,
+            };
+            out.push(ProfilePoint {
+                seq: b.seq,
+                dist_m: dist + len * f,
+                lat,
+                lon,
+                ground_m: g,
+                alt_rel_m: alt,
+            });
+        }
+        dist += len;
+    }
+    out
+}
+
 /// Why a mission cannot be made to follow the terrain.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FollowError {
@@ -522,5 +611,50 @@ pub(crate) mod tests {
         jump.insert(4, wp(2, 177, 0.0, 0.0));
         assert_eq!(follow(&jump, &t, 40.0, 50.0), Err(FollowError::HasJump));
         assert!(follow(&jump, &t, 40.0, 0.0).is_ok());
+    }
+
+    #[test]
+    fn profile_runs_along_the_path() {
+        let mut t = Terrain::default();
+        t.add(ramp("S36E149.hgt", 500));
+        let step = 1.0 / 1200.0;
+        let lat: f64 = -35.5;
+        let wp = |frame: u8, command: u16, lon: f64, z: f32| MissionItem {
+            frame,
+            command,
+            params: [0.0; 4],
+            x: (lat * 1e7).round() as i32,
+            y: if lon == 0.0 {
+                0
+            } else {
+                (lon * 1e7).round() as i32
+            },
+            z,
+            autocontinue: true,
+        };
+        let m = vec![
+            wp(0, 16, 149.0 + 120.0 * step, 0.0),
+            wp(3, 22, 0.0, 40.0),
+            wp(10, 16, 149.0 + 240.0 * step, 40.0),
+            wp(2, 20, 0.0, 0.0),
+        ];
+        let p = profile(&m, &t, 100.0);
+        // Home, takeoff (vertical), the leg out, RTL back, landing.
+        assert_eq!(p[0].alt_rel_m, 0.0);
+        assert_eq!((p[1].seq, p[1].alt_rel_m), (1, 40.0));
+        let out: Vec<_> = p.iter().filter(|q| q.seq == 2).collect();
+        assert!(out.len() > 3);
+        for q in &out {
+            // Terrain frame: 40 m over the ground all the way (ground − home ground + 40).
+            let above = q.alt_rel_m + 530.0 - q.ground_m.unwrap();
+            assert!((above - 40.0).abs() < 0.3, "{q:?}");
+        }
+        let last = out.last().unwrap();
+        assert!(
+            (last.dist_m - 9071.0).abs() < 100.0,
+            "about 0.1° of longitude: {last:?}"
+        );
+        assert!(p.windows(2).all(|w| w[1].dist_m >= w[0].dist_m));
+        assert_eq!(p.last().unwrap().alt_rel_m, 0.0, "landed");
     }
 }

@@ -616,6 +616,21 @@ enum MissionCmd {
         #[arg(long)]
         out: Option<std::path::PathBuf>,
     },
+    /// The mission's altitude against the ground along the path, as CSV (dist_m, seq, lat,
+    /// lon, ground_m, alt_msl_m, agl_m; SRTM tiles in --dem), for a profile chart.
+    Profile {
+        /// The mission file.
+        file: std::path::PathBuf,
+        /// Directory holding the SRTM tiles.
+        #[arg(long)]
+        dem: std::path::PathBuf,
+        /// Sample spacing along the legs, m.
+        #[arg(long, default_value_t = 25.0)]
+        step: f64,
+        /// Output CSV (default: print).
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
     /// A mission from a path drawn in Google Earth (the KML's first LineString): takeoff, a
     /// waypoint per point in drawing order, RTL. Offline; check and upload it as usual.
     FromKml {
@@ -3993,6 +4008,53 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
                     "{} items ({} added), waypoints {agl} m above the ground",
                     f.len(),
                     f.len() - items.len()
+                ),
+            )
+        }
+        MissionCmd::Profile {
+            file,
+            dem,
+            step,
+            out,
+        } => {
+            if !(step.is_finite() && *step >= 1.0) {
+                return Err("--step must be at least 1 m".into());
+            }
+            let items = read_mission(file)?;
+            let (t, missing) = load_terrain(dem, protocols::terrain::sample_points(&items, *step))?;
+            if !missing.is_empty() {
+                eprintln!("missing tiles in {}: {}", dem.display(), missing.join(", "));
+            }
+            let p = protocols::terrain::profile(&items, &t, *step);
+            let home = p.first().and_then(|h| h.ground_m);
+            let mut csv = String::from("dist_m,seq,lat,lon,ground_m,alt_msl_m,agl_m\n");
+            let opt = |v: Option<f64>| v.map_or(String::new(), |v| format!("{v:.1}"));
+            for q in &p {
+                let msl = home.map(|h| h + q.alt_rel_m);
+                let agl = msl.zip(q.ground_m).map(|(m, g)| m - g);
+                csv.push_str(&format!(
+                    "{:.1},{},{:.7},{:.7},{},{},{}\n",
+                    q.dist_m,
+                    q.seq,
+                    q.lat,
+                    q.lon,
+                    opt(q.ground_m),
+                    opt(msl),
+                    opt(agl)
+                ));
+            }
+            write_or_print(
+                out.as_deref(),
+                &csv,
+                &format!(
+                    "{} samples over {:.0} m{}",
+                    p.len(),
+                    p.last().map_or(0.0, |q| q.dist_m),
+                    if home.is_none() {
+                        " (no terrain at home: heights only)"
+                    } else {
+                        ""
+                    }
                 ),
             )
         }
