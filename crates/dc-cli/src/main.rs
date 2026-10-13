@@ -20,8 +20,9 @@
 //! dc-cli log params flight.bin [--out flight.param]
 //! ```
 //!
-//! Read-only by design for now: parameter writes and vehicle commands will be exposed only
-//! through the safety interlocks (`CommandPolicy`, plan 08 §4) once they exist.
+//! Read-only apart from `param-set` (ADR-0012 item 1: one confirmation; a vehicle that is
+//! armed needs its in-flight warning acknowledged as well). Vehicle commands go only through
+//! the safety interlocks (`CommandPolicy`, plan 08 §4).
 
 mod tlog;
 mod tlog_health;
@@ -71,6 +72,35 @@ enum Cmd {
         /// with failure on any difference (read-only).
         #[arg(long, conflicts_with = "out")]
         compare: Option<std::path::PathBuf>,
+        /// Seconds to wait for a vehicle heartbeat.
+        #[arg(long, default_value_t = 15)]
+        wait: u64,
+    },
+    /// Change parameters on the vehicle (ADR-0012): every change is listed and confirmed once;
+    /// if the vehicle is armed, its in-flight warning must be acknowledged too. A baseline of
+    /// all parameters is saved first, each value is read back, and every step is audited.
+    ParamSet {
+        /// Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200.
+        #[arg(long)]
+        connect: LinkSpec,
+        /// Target system id (default: first vehicle heard).
+        #[arg(long)]
+        target: Option<u8>,
+        /// Changes as NAME=VALUE.
+        #[arg(required = true, value_name = "NAME=VALUE")]
+        changes: Vec<String>,
+        /// Confirm the changes without asking (scripts).
+        #[arg(long)]
+        yes: bool,
+        /// Acknowledge the in-flight warning without asking (scripts): write even if armed.
+        #[arg(long)]
+        armed_ok: bool,
+        /// Baseline file to create (default: param-baseline-SYSID-UNIXTIME.param).
+        #[arg(long)]
+        snapshot: Option<std::path::PathBuf>,
+        /// Hash-chained audit log to append to.
+        #[arg(long, default_value = "dc-audit.log")]
+        audit: std::path::PathBuf,
         /// Seconds to wait for a vehicle heartbeat.
         #[arg(long, default_value_t = 15)]
         wait: u64,
@@ -817,8 +847,171 @@ async fn start(cli: &Cli, link: &LinkSpec) -> Result<Core, String> {
     Ok(core)
 }
 
+/// Ask a yes/no question on the terminal; `None` when there is no terminal to ask on.
+fn ask(question: &str) -> Option<bool> {
+    use std::io::{BufRead, IsTerminal, Write};
+    if !std::io::stdin().is_terminal() {
+        return None;
+    }
+    eprint!("{question} [y/N] ");
+    let _ = std::io::stderr().flush();
+    let mut line = String::new();
+    std::io::stdin().lock().read_line(&mut line).ok()?;
+    Some(matches!(line.trim(), "y" | "Y" | "yes" | "YES"))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn param_set(
+    cli: &Cli,
+    connect: &LinkSpec,
+    target: Option<u8>,
+    changes: &[String],
+    yes: bool,
+    armed_ok: bool,
+    snapshot: Option<&std::path::Path>,
+    audit: &std::path::Path,
+    wait: u64,
+) -> Result<(), String> {
+    let mut edits = std::collections::BTreeMap::new();
+    for c in changes {
+        let (name, value) = c
+            .split_once('=')
+            .ok_or_else(|| format!("{c:?}: expected NAME=VALUE"))?;
+        let value: f64 = value
+            .trim()
+            .parse()
+            .map_err(|_| format!("{c:?}: value is not a number"))?;
+        edits.insert(name.trim().to_ascii_uppercase(), value);
+    }
+    let cfg = CoreConfig {
+        sysid: cli.sysid,
+        compid: cli.compid,
+        tlog: cli.tlog.clone(),
+        audit_log: Some(audit.to_path_buf()),
+        ..Default::default()
+    };
+    let core = Core::start(cfg)
+        .await
+        .map_err(|e| format!("cannot start core: {e}"))?;
+    core.connect(connect)
+        .await
+        .map_err(|e| format!("cannot open {connect}: {e}"))?;
+    let sysid = match target {
+        Some(t) => t,
+        None => core
+            .wait_for_vehicle(Duration::from_secs(wait))
+            .await
+            .ok_or_else(|| format!("no vehicle heartbeat on {connect} within {wait} s"))?,
+    };
+    let armed = core.facts(sysid).armed == Some(true);
+    eprintln!(
+        "vehicle {sysid}{}: {} change(s)",
+        if armed { " (ARMED)" } else { "" },
+        edits.len()
+    );
+    for (name, value) in &edits {
+        let label = match dc_core::parameter_risk(name) {
+            dc_core::ParamRisk::Dangerous => "  (failsafe/arming/fence/safety setting)",
+            dc_core::ParamRisk::Ordinary => "",
+        };
+        eprintln!("  {name} = {value}{label}");
+    }
+    if !yes {
+        match ask("Write these parameters to the vehicle?") {
+            Some(true) => {}
+            Some(false) => return Err("not confirmed: nothing written".into()),
+            None => return Err("no terminal to confirm on: pass --yes".into()),
+        }
+    }
+    let path = snapshot.map_or_else(
+        || {
+            let t = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs());
+            std::path::PathBuf::from(format!("param-baseline-{sysid}-{t}.param"))
+        },
+        std::path::Path::to_path_buf,
+    );
+    let mut mode = if armed_ok {
+        if armed {
+            eprintln!("WARNING: {}", dc_core::ARMED_WRITE_WARNING);
+        }
+        dc_core::ArmedWrite::Acknowledged
+    } else {
+        dc_core::ArmedWrite::DisarmedOnly
+    };
+    let report = loop {
+        match core
+            .write_params_with((sysid, 1), edits.clone(), &path, mode)
+            .await
+        {
+            Ok(r) => break r,
+            Err(dc_core::ParamOperationError::ArmedWarningRequired(w)) => {
+                eprintln!("WARNING: {w}");
+                match ask("The vehicle is ARMED. Write anyway, in flight?") {
+                    Some(true) => mode = dc_core::ArmedWrite::Acknowledged,
+                    Some(false) => {
+                        return Err("in-flight warning not acknowledged: nothing written".into());
+                    }
+                    None => {
+                        return Err(
+                            "vehicle armed: pass --armed-ok to acknowledge the in-flight warning"
+                                .into(),
+                        );
+                    }
+                }
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    };
+    eprintln!("baseline saved to {}", report.snapshot.display());
+    for r in &report.results {
+        println!("{} {:?}", r.name, r.status);
+    }
+    if let Some(why) = &report.interruption {
+        eprintln!("stopped: {why}");
+    }
+    if report.verified() {
+        println!("all {} change(s) verified by read-back", report.planned);
+        Ok(())
+    } else {
+        Err(format!(
+            "{} of {} change(s) verified; the baseline holds the previous values",
+            report
+                .results
+                .iter()
+                .filter(|r| matches!(r.status, protocols::params::SetStatus::Verified(_)))
+                .count(),
+            report.planned
+        ))
+    }
+}
+
 async fn run(cli: Cli) -> Result<(), String> {
     match &cli.cmd {
+        Cmd::ParamSet {
+            connect,
+            target,
+            changes,
+            yes,
+            armed_ok,
+            snapshot,
+            audit,
+            wait,
+        } => {
+            param_set(
+                &cli,
+                connect,
+                *target,
+                changes,
+                *yes,
+                *armed_ok,
+                snapshot.as_deref(),
+                audit,
+                *wait,
+            )
+            .await
+        }
         Cmd::Params {
             connect,
             target,

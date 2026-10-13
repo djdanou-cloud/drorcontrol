@@ -320,6 +320,13 @@ impl Core {
             .try_lock()
             .map_err(|_| ParamOperationError::Busy)?;
         if mode == ArmedWrite::DisarmedOnly && self.reported_armed(target.0) {
+            self.audit_note(
+                target.0,
+                format!(
+                    "parameter write of {} refused: vehicle armed, in-flight warning not acknowledged",
+                    edits.keys().cloned().collect::<Vec<_>>().join(", ")
+                ),
+            );
             return Err(ParamOperationError::ArmedWarningRequired(
                 ARMED_WRITE_WARNING.into(),
             ));
@@ -354,9 +361,42 @@ impl Core {
         let path = snapshot_path.to_path_buf();
         persist_snapshot(path.clone(), baseline.to_text()).await?;
         let epoch = self.parameter_epoch(target.0);
-        Ok(self
+        self.audit_note(
+            target.0,
+            format!(
+                "parameter write: {} change(s){}; baseline {}",
+                plan.changes().len(),
+                if self.reported_armed(target.0) {
+                    " while ARMED, in-flight warning acknowledged"
+                } else {
+                    ""
+                },
+                path.display()
+            ),
+        );
+        let report = self
             .apply_parameter_changes(target, plan.changes(), path, epoch, mode)
-            .await)
+            .await;
+        for (r, c) in report.results.iter().zip(plan.changes()) {
+            let outcome = match &r.status {
+                SetStatus::Verified(_) => "verified by read-back".to_string(),
+                SetStatus::Failed(Some(p)) => format!("FAILED: vehicle reports {}", p.value),
+                SetStatus::Failed(None) | SetStatus::Pending => {
+                    "UNCONFIRMED (no read-back)".to_string()
+                }
+            };
+            self.audit_note(
+                target.0,
+                format!(
+                    "parameter {} {} -> {}: {outcome}",
+                    r.name, c.before.value, c.after.value
+                ),
+            );
+        }
+        if let Some(why) = &report.interruption {
+            self.audit_note(target.0, format!("parameter write stopped: {why}"));
+        }
+        Ok(report)
     }
 
     /// Load an original baseline and restore only the supplied names, after a new complete

@@ -33,6 +33,7 @@ Usage: dc-cli [OPTIONS] <COMMAND>
 
 Commands:
   params         Download all parameters and print them (or write a .param file)
+  param-set      Change parameters on the vehicle (ADR-0012): every change is listed and confirmed once; if the vehicle is armed, its in-flight warning must be acknowledged too. A baseline of all parameters is saved first, each value is read back, and every step is audited
   daemon         Run the core with the gRPC API (proto/dc/v1/core.proto) until interrupted
   remote         Talk to a running daemon over gRPC
   ports          List serial ports with board hints; optionally watch hotplug or probe for MAVLink
@@ -72,6 +73,30 @@ Options:
       --compare <COMPARE>      Compare the vehicle with this .param file or .bin log instead of printing; exits with failure on any difference (read-only)
       --wait <WAIT>            Seconds to wait for a vehicle heartbeat [default: 15]
   -h, --help                   Print help
+```
+
+### `dc-cli param-set`
+
+```text
+Change parameters on the vehicle (ADR-0012): every change is listed and confirmed once; if the vehicle is armed, its in-flight warning must be acknowledged too. A baseline of all parameters is saved first, each value is read back, and every step is audited
+
+Usage: dc-cli param-set [OPTIONS] --connect <CONNECT> <NAME=VALUE>...
+
+Arguments:
+  <NAME=VALUE>...  Changes as NAME=VALUE
+
+Options:
+      --connect <CONNECT>    Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200
+      --sysid <SYSID>        Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>      Our MAVLink component id [default: 190]
+      --target <TARGET>      Target system id (default: first vehicle heard)
+      --tlog <TLOG>          Record everything to this .tlog file
+      --yes                  Confirm the changes without asking (scripts)
+      --armed-ok             Acknowledge the in-flight warning without asking (scripts): write even if armed
+      --snapshot <SNAPSHOT>  Baseline file to create (default: param-baseline-SYSID-UNIXTIME.param)
+      --audit <AUDIT>        Hash-chained audit log to append to [default: dc-audit.log]
+      --wait <WAIT>          Seconds to wait for a vehicle heartbeat [default: 15]
+  -h, --help                 Print help
 ```
 
 ### `dc-cli daemon`

@@ -1096,6 +1096,21 @@ impl Core {
         self.policy().status(id, Instant::now())
     }
 
+    /// Write one record to the audit log (if configured), e.g. a parameter change.
+    pub(crate) fn audit_note(&self, sysid: u8, text: String) {
+        if let Some(tx) = &self.audit {
+            let _ = tx.send((
+                SystemTime::now(),
+                AuditEvent {
+                    at: Instant::now(),
+                    sysid,
+                    id: None,
+                    text,
+                },
+            ));
+        }
+    }
+
     /// Transmit, publish status changes and write audit records.
     async fn deliver(&self, out: Vec<protocols::command::Outgoing>, changed: Vec<CommandStatus>) {
         for o in out {

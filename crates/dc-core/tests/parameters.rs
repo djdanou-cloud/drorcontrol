@@ -142,6 +142,10 @@ fn path(name: &str) -> PathBuf {
 }
 
 async fn setup() -> (Core, Arc<Mutex<Vehicle>>, tokio::task::JoinHandle<()>) {
+    setup_with(CoreConfig::default()).await
+}
+
+async fn setup_with(cfg: CoreConfig) -> (Core, Arc<Mutex<Vehicle>>, tokio::task::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let state = Arc::new(Mutex::new(Vehicle {
@@ -194,7 +198,7 @@ async fn setup() -> (Core, Arc<Mutex<Vehicle>>, tokio::task::JoinHandle<()>) {
         reads: 0,
     }));
     let task = tokio::spawn(vehicle(listener, state.clone()));
-    let core = Core::start(CoreConfig::default()).await.unwrap();
+    let core = Core::start(cfg).await.unwrap();
     core.connect(&LinkSpec::Tcp(addr)).await.unwrap();
     assert_eq!(core.wait_for_vehicle(Duration::from_secs(5)).await, Some(1));
     (core, state, task)
@@ -562,4 +566,40 @@ async fn acknowledged_write_still_stops_on_a_heartbeat_gap() {
     assert!(state.lock().unwrap().sets.iter().all(|name| name == "A"));
     task.abort();
     std::fs::remove_file(path).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn parameter_writes_and_armed_refusals_are_audited() {
+    let log = path("audit");
+    let (core, state, task) = setup_with(CoreConfig {
+        audit_log: Some(log.clone()),
+        ..CoreConfig::default()
+    })
+    .await;
+    state.lock().unwrap().armed = true;
+    wait_armed(&core, true).await;
+    let snapshot = state.lock().unwrap().snapshot.clone();
+    assert!(core.write_params((1, 1), edits(), &snapshot).await.is_err());
+    let report = core
+        .write_params_with((1, 1), edits(), &snapshot, ArmedWrite::Acknowledged)
+        .await
+        .unwrap();
+    assert!(report.verified());
+    tokio::time::sleep(Duration::from_millis(300)).await; // the writer thread flushes
+    let text = std::fs::read_to_string(&log).unwrap();
+    for want in [
+        "parameter write of A, B refused: vehicle armed, in-flight warning not acknowledged",
+        "parameter write: 2 change(s) while ARMED, in-flight warning acknowledged",
+        "parameter A 7 -> 9: verified by read-back",
+        "parameter B 8 -> 12: verified by read-back",
+    ] {
+        assert!(text.contains(want), "missing {want:?} in:\n{text}");
+    }
+    let (records, _) =
+        protocols::audit::verify(std::io::BufReader::new(std::fs::File::open(&log).unwrap()))
+            .unwrap();
+    assert_eq!(records, 4, "hash chain intact");
+    task.abort();
+    std::fs::remove_file(snapshot).unwrap();
+    std::fs::remove_file(log).unwrap();
 }

@@ -13,6 +13,16 @@ it, the client repeats the request with `Core::write_params_with(…, ArmedWrite
 not interrupted by arming, but still needs a heartbeat from the target younger than 1.5 s
 before every step and stops on a heartbeat gap, because the outcome would be unknown. The
 baseline snapshot and explicit read-back are unchanged; no rollback starts automatically.
+Every write is recorded in the hash-chained audit log when one is configured: the refusal
+of an unacknowledged armed write, the start (number of changes, armed and acknowledged,
+baseline path), each parameter's old and new value with its outcome, and any interruption.
+
+**CLI:** `dc-cli param-set --connect LINK NAME=VALUE… [--yes] [--armed-ok] [--snapshot F]
+[--audit dc-audit.log]` lists the changes (failsafe/arming/fence/safety settings labelled),
+asks once, and if the vehicle is armed shows the warning and asks again; `--yes` and
+`--armed-ok` answer those for scripts, and without a terminal nothing is written unless they
+are given.
+
 SITL (4.7.1 and 4.6.3): `DISARM_DELAY` written while hovering in GUIDED, refused with the
 warning first, then verified in 0.7 s, baseline included; the vehicle's own log records the
 change. Its fixed freshness limit is **1.5 seconds**, independent of the
