@@ -32,6 +32,10 @@
 //!   than 90° in 3-D, 60° in the horizontal plane or 200 mG in horizontal length
 //!   (`Compass::consistent`, `AP_COMPASS_MAX_*`); compasses with `COMPASS_USE*` 0 are not
 //!   compared. Plan 05 §2.3 adds cautions at 600 mG offsets and 30° horizontal disagreement.
+//! * `POWR` Flags/AccFlags are `AP_HAL::AnalogIn::PowerStatusFlag` (4.7.1 and 4.6.3): 1 brick
+//!   valid, 2 servo rail valid, 4 USB connected, 8 peripheral over-current, 16 high-power
+//!   peripheral over-current, 32 power status changed since boot; AccFlags holds every flag
+//!   ever set. VServo is the servo-rail voltage (0 when the board does not measure it).
 //! * Arming checks report failures as text `PreArm: …` (periodic checks) or `Arm: …` (at the
 //!   arming attempt) (`AP_Arming::check_failed`, 4.7.1), logged as `MSG`. Disarmed messages
 //!   reach the log only with `LOG_DISARMED` set, so their absence proves nothing.
@@ -483,6 +487,96 @@ fn compass_consistency(log: &Log, params: &BTreeMap<String, f64>, out: &mut Vec<
     }
 }
 
+/// Power-status problems from `(time, Flags, armed)` samples and the final AccFlags:
+/// (level, text, time).
+pub fn power_problems(samples: &[(u64, u16, bool)], acc: u16) -> Vec<(Level, String, Option<u64>)> {
+    let mut out = Vec::new();
+    if acc & (8 | 16) != 0 {
+        out.push((
+            Level::Warning,
+            format!(
+                "peripheral supply over-current reported{} (POWR AccFlags {acc})",
+                if acc & 16 != 0 {
+                    " (high-power rail)"
+                } else {
+                    ""
+                }
+            ),
+            None,
+        ));
+    }
+    if let Some((t, _, _)) = samples.iter().find(|(_, f, armed)| *armed && f & 4 != 0) {
+        out.push((
+            Level::Caution,
+            "USB power connected while armed".into(),
+            Some(*t),
+        ));
+    }
+    // The CHANGED bit only says something changed since boot; compare the rest while armed.
+    let armed: Vec<&(u64, u16, bool)> = samples.iter().filter(|s| s.2).collect();
+    if let Some(w) = armed.windows(2).find(|w| (w[0].1 ^ w[1].1) & !32 != 0) {
+        out.push((
+            Level::Caution,
+            format!(
+                "power status changed while armed (flags {} -> {})",
+                w[0].1 & !32,
+                w[1].1 & !32
+            ),
+            Some(w[1].0),
+        ));
+    }
+    out
+}
+
+fn power_flags(log: &Log, out: &mut Vec<Finding>) {
+    let (Some(flags), Some(acc)) = (
+        log.column("POWR", "Flags", None),
+        log.column("POWR", "AccFlags", None),
+    ) else {
+        return;
+    };
+    let armed = crate::flight::armed_periods(log);
+    let samples: Vec<(u64, u16, bool)> = flags
+        .time_us
+        .iter()
+        .zip(&flags.values)
+        .map(|(t, f)| (*t, *f as u16, crate::flight::in_periods(&armed, *t)))
+        .collect();
+    let acc = acc.values.last().map_or(0, |v| *v as u16);
+    let problems = power_problems(&samples, acc);
+    if problems.is_empty() {
+        let servo = log
+            .column("POWR", "VServo", None)
+            .and_then(|c| {
+                let v: Vec<f64> = c
+                    .time_us
+                    .iter()
+                    .zip(&c.values)
+                    .filter(|(t, v)| crate::flight::in_periods(&armed, **t) && **v > 0.0)
+                    .map(|(_, v)| *v)
+                    .collect();
+                let lo = v.iter().copied().fold(f64::MAX, f64::min);
+                let hi = v.iter().copied().fold(f64::MIN, f64::max);
+                (!v.is_empty()).then(|| format!("; servo rail {lo:.2}-{hi:.2} V while armed"))
+            })
+            .unwrap_or_default();
+        out.push(Finding {
+            check: "power",
+            level: Level::Ok,
+            text: format!("no over-current, no power change while armed{servo}"),
+            at_us: None,
+        });
+    }
+    for (level, text, at_us) in problems {
+        out.push(Finding {
+            check: "power",
+            level,
+            text,
+            at_us,
+        });
+    }
+}
+
 /// Distinct arming-check failures among `(time, text)` messages: (text, first time, count),
 /// in order of first appearance.
 pub fn arming_messages(texts: &[(u64, String)]) -> Vec<(String, u64, usize)> {
@@ -661,6 +755,7 @@ pub fn assess(log: &Log) -> Vec<Finding> {
     imu_consistency(log, &mut out);
     gps(log, &params, &mut out);
     board_voltage(log, &params, &mut out);
+    power_flags(log, &mut out);
     errors(log, &mut out);
     out
 }
@@ -668,6 +763,25 @@ pub fn assess(log: &Log) -> Vec<Finding> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn power_flags_are_read_as_the_hal_defines_them() {
+        let ok = 1 | 2 | 32;
+        assert!(power_problems(&[(1, ok, true), (2, ok, true)], ok).is_empty());
+        let p = power_problems(
+            &[(1, ok, true), (2, 2 | 32, true), (3, 2 | 4, true)],
+            ok | 8,
+        );
+        let texts: Vec<&str> = p.iter().map(|x| x.1.as_str()).collect();
+        assert_eq!(p[0].0, Level::Warning, "{texts:?}");
+        assert!(texts[0].starts_with("peripheral supply over-current"));
+        assert_eq!(texts[1], "USB power connected while armed");
+        assert_eq!(texts[2], "power status changed while armed (flags 3 -> 2)");
+        assert!(
+            power_problems(&[(1, 1 | 4, false)], 1 | 4).is_empty(),
+            "USB on the bench is fine"
+        );
+    }
 
     #[test]
     fn arming_failures_are_grouped() {
