@@ -606,7 +606,7 @@ fn imu_consistency(log: &Log, out: &mut Vec<Finding>) {
             check: "imu",
             level,
             text: format!(
-                "IMU {} vs IMU 0 while armed (1 s means): accelerometers {:.2} m/s² (limit {:.2}), gyros {:.2}°/s (limit 5)",
+                "IMU {} vs IMU 0 while armed (5 s means): accelerometers {:.2} m/s² (limit {:.2}), gyros {:.2}°/s (limit 5)",
                 c.instance, c.accel_ms2, c.accel_limit, c.gyro_degs
             ),
             at_us: Some(c.at_us),

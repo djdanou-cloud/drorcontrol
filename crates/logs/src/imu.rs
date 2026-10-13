@@ -8,8 +8,11 @@
 //! `gyros_consistent`, `AP_Arming.cpp`, 4.7.1): each IMU against the first, accelerometers
 //! within `ARMING_ACCTHRESH` (default 0.75 m/s², three times that from the third IMU, Z
 //! difference halved), gyros within 5°/s. Those checks run at rest; in flight the vibration
-//! of separately mounted IMUs differs, so the difference is taken between 1 s means, which
-//! keeps a bias or a scale error and averages vibration out.
+//! of separately mounted IMUs differs, so the difference is taken between 5 s means
+//! ([`CONSISTENCY_WINDOW_US`]; 1 s windows let heavy noise at the usual 25 Hz IMU logging
+//! rate cross the caution level now and then in SITL), which
+//! keeps a bias or a scale error and averages vibration out. Partial windows (fewer than half
+//! the typical samples, at arming and disarming) are left out.
 
 use crate::dataflash::Log;
 use crate::flight::{armed_periods, in_periods};
@@ -86,17 +89,20 @@ pub fn imu_health(log: &Log) -> Vec<ImuHealth> {
 pub struct ImuConsistency {
     /// Instance compared with IMU 0.
     pub instance: u8,
-    /// Largest 1 s mean accelerometer difference, m/s² (Z halved), and the arming limit.
+    /// Largest 5 s mean accelerometer difference, m/s² (Z halved), and the arming limit.
     pub accel_ms2: f64,
     /// See `accel_ms2`.
     pub accel_limit: f64,
-    /// Largest 1 s mean gyro difference, °/s (limit 5).
+    /// Largest 5 s mean gyro difference, °/s (limit 5).
     pub gyro_degs: f64,
     /// When the largest accelerometer difference was seen, µs.
     pub at_us: u64,
 }
 
-/// 1 s means of the six IMU axes of one instance while armed: (window start, means).
+/// Length of the windows averaged before comparing IMUs, µs.
+pub const CONSISTENCY_WINDOW_US: u64 = 5_000_000;
+
+/// 5 s means of the six IMU axes of one instance while armed: (window start, means).
 fn window_means(log: &Log, id: u8, armed: &[crate::flight::ArmedPeriod]) -> Vec<(u64, [f64; 6])> {
     let sel = Some(("I", f64::from(id)));
     let cols: Option<Vec<_>> = ["AccX", "AccY", "AccZ", "GyrX", "GyrY", "GyrZ"]
@@ -111,7 +117,7 @@ fn window_means(log: &Log, id: u8, armed: &[crate::flight::ArmedPeriod]) -> Vec<
         if !in_periods(armed, *t) {
             continue;
         }
-        let w = t / 1_000_000 * 1_000_000;
+        let w = t / CONSISTENCY_WINDOW_US * CONSISTENCY_WINDOW_US;
         if out.last().is_none_or(|l| l.0 != w) {
             out.push((w, [0.0; 6], 0));
         }
@@ -121,8 +127,13 @@ fn window_means(log: &Log, id: u8, armed: &[crate::flight::ArmedPeriod]) -> Vec<
         }
         l.2 += 1;
     }
+    // Partial windows (at arming and disarming) hold a few samples, whose mean is mostly
+    // noise: keep windows with at least half the typical count.
+    let mut counts: Vec<usize> = out.iter().map(|w| w.2).collect();
+    counts.sort_unstable();
+    let typical = counts.get(counts.len() / 2).copied().unwrap_or(0);
     out.into_iter()
-        .filter(|w| w.2 > 0)
+        .filter(|w| w.2 > 0 && w.2 * 2 >= typical)
         .map(|(t, s, n)| (t, s.map(|v| v / n as f64)))
         .collect()
 }
@@ -214,7 +225,7 @@ mod tests {
     }
 
     #[test]
-    fn consistency_uses_one_second_means() {
+    fn consistency_uses_window_means() {
         let mut b = LogBuilder::default();
         b.format("ARM", "QBIBB", "TimeUS,ArmState,ArmChecks,Forced,Method")
             .format("IMU", "QBffffff", "TimeUS,I,AccX,AccY,AccZ,GyrX,GyrY,GyrZ");
@@ -272,5 +283,54 @@ mod tests {
         assert!(c[0].gyro_degs < 1e-9);
         assert!((c[1].gyro_degs - 0.1f64.to_degrees()).abs() < 1e-5);
         assert!(c[1].accel_ms2 < 1e-9);
+    }
+
+    #[test]
+    fn a_partial_window_at_disarm_is_left_out() {
+        let mut b = LogBuilder::default();
+        b.format("ARM", "QBIBB", "TimeUS,ArmState,ArmChecks,Forced,Method")
+            .format("IMU", "QBffffff", "TimeUS,I,AccX,AccY,AccZ,GyrX,GyrY,GyrZ");
+        b.rec("ARM", &[N(0.0), N(1.0), N(0.0), N(0.0), N(0.0)]);
+        // Two full 5 s windows that agree, then two noisy samples just before disarming.
+        for k in 0..100 {
+            let t = f64::from(k) * 0.1e6;
+            for i in [0.0, 1.0] {
+                b.rec(
+                    "IMU",
+                    &[N(t), N(i), N(0.0), N(0.0), N(-9.8), N(0.0), N(0.0), N(0.0)],
+                );
+            }
+        }
+        for t in [10.0e6, 10.1e6] {
+            b.rec(
+                "IMU",
+                &[
+                    N(t),
+                    N(0.0),
+                    N(0.0),
+                    N(0.0),
+                    N(-9.8),
+                    N(0.0),
+                    N(0.0),
+                    N(0.0),
+                ],
+            );
+            b.rec(
+                "IMU",
+                &[
+                    N(t),
+                    N(1.0),
+                    N(3.0),
+                    N(0.0),
+                    N(-9.8),
+                    N(0.0),
+                    N(0.0),
+                    N(0.0),
+                ],
+            );
+        }
+        b.rec("ARM", &[N(10.2e6), N(0.0), N(0.0), N(0.0), N(0.0)]);
+        let c = imu_consistency(&b.open());
+        assert!(c[0].accel_ms2 < 1e-9, "{c:?}");
     }
 }
