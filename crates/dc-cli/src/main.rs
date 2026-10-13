@@ -304,6 +304,13 @@ struct VehicleArgs {
     wait: u64,
 }
 
+/// `--pattern` of `mission search`.
+#[derive(Clone, Copy, PartialEq, clap::ValueEnum)]
+enum SearchPattern {
+    /// Expanding square (IAMSAR): legs of 1, 1, 2, 2, 3, 3 … × --spacing, turning right.
+    Square,
+}
+
 /// `--type` of `mission download`.
 #[derive(Clone, Copy, PartialEq, clap::ValueEnum)]
 enum ListKind {
@@ -526,6 +533,31 @@ enum MissionCmd {
         /// Extend each line this many metres past both ends of the path.
         #[arg(long, default_value_t = 0.0)]
         overshoot: f64,
+        /// Altitude above home, m.
+        #[arg(long)]
+        alt: f32,
+        /// Output file (.waypoints or .plan; default: print).
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
+    /// Search and rescue pattern from a datum (last known position). Offline; check and
+    /// upload as usual.
+    Search {
+        /// The pattern.
+        #[arg(long, value_enum)]
+        pattern: SearchPattern,
+        /// Datum as "lat,lon".
+        #[arg(long, allow_hyphen_values = true)]
+        datum: String,
+        /// Track spacing, m (square).
+        #[arg(long)]
+        spacing: f64,
+        /// Side of the square searched, m (square).
+        #[arg(long)]
+        extent: f64,
+        /// First leg's direction, degrees clockwise from north.
+        #[arg(long, default_value_t = 0.0)]
+        track: f64,
         /// Altitude above home, m.
         #[arg(long)]
         alt: f32,
@@ -3721,6 +3753,37 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
                 out.as_deref(),
                 &mission_text(out.as_deref(), &items),
                 &format!("{lines} lines {spacing} m apart over {width} m"),
+            )
+        }
+        MissionCmd::Search {
+            pattern,
+            datum,
+            spacing,
+            extent,
+            track,
+            alt,
+            out,
+        } => {
+            if !(alt.is_finite() && *alt > 0.0) {
+                return Err("--alt must be above 0 m".into());
+            }
+            let d = match parse_polygon(datum)?[..] {
+                [d] => d,
+                _ => return Err("--datum: one lat,lon".into()),
+            };
+            let (wps, what) = match pattern {
+                SearchPattern::Square => (
+                    protocols::pattern::expanding_square(d, *spacing, *extent, *track)
+                        .map_err(|e| e.to_string())?,
+                    "expanding square",
+                ),
+            };
+            let items = protocols::mission::route(&wps, *alt);
+            print_stats(&items);
+            write_or_print(
+                out.as_deref(),
+                &mission_text(out.as_deref(), &items),
+                &format!("{what}: {} legs", wps.len() - 1),
             )
         }
         MissionCmd::FromKml { kml, alt, out } => {

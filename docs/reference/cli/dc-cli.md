@@ -1168,6 +1168,7 @@ Commands:
   survey          Generate a survey grid ("lawnmower") over a polygon as a .waypoints mission: takeoff, parallel lines flown alternately, RTL. Offline; upload it like any other mission
   check           Read a .waypoints file and list its items (offline)
   corridor        Corridor scan along a path (a road, river, power line): parallel lines covering --width centred on the path, flown back and forth. Offline; check and upload as usual
+  search          Search and rescue pattern from a datum (last known position). Offline; check and upload as usual
   from-kml        A mission from a path drawn in Google Earth (the KML's first LineString): takeoff, a waypoint per point in drawing order, RTL. Offline; check and upload it as usual
   fence-from-kml  A geofence from polygons drawn in Google Earth: every KML polygon becomes an inclusion zone, or an exclusion zone when its name contains "exclusion", "no-fly", "no fly" or "nofly" (any case). Offline; check a mission against it with `mission check --fence`
   rally-from-kml  Rally points from points (placemarks) drawn in Google Earth, at one altitude above home. Offline
@@ -1270,6 +1271,57 @@ Options:
       --alt <ALT>              Altitude above home, m
       --out <OUT>              Output file (.waypoints or .plan; default: print)
   -h, --help                   Print help
+```
+
+#### `dc-cli mission search`
+
+```text
+Search and rescue pattern from a datum (last known position). Offline; check and upload as usual
+
+Usage: dc-cli mission search [OPTIONS] --pattern <PATTERN> --datum <DATUM> --spacing <SPACING> --extent <EXTENT> --alt <ALT>
+
+Options:
+      --pattern <PATTERN>
+          The pattern
+
+          Possible values:
+          - square: Expanding square (IAMSAR): legs of 1, 1, 2, 2, 3, 3 … × --spacing, turning right
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --datum <DATUM>
+          Datum as "lat,lon"
+
+      --spacing <SPACING>
+          Track spacing, m (square)
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --extent <EXTENT>
+          Side of the square searched, m (square)
+
+      --track <TRACK>
+          First leg's direction, degrees clockwise from north
+          
+          [default: 0]
+
+      --alt <ALT>
+          Altitude above home, m
+
+      --out <OUT>
+          Output file (.waypoints or .plan; default: print)
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli mission from-kml`

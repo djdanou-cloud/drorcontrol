@@ -103,6 +103,38 @@ pub fn corridor(
     Ok(out)
 }
 
+/// A point `dist_m` from `o` (plane x east, y north) on `bearing_deg` (clockwise from north).
+fn step(o: (f64, f64), bearing_deg: f64, dist_m: f64) -> (f64, f64) {
+    let (s, c) = bearing_deg.to_radians().sin_cos();
+    (o.0 + s * dist_m, o.1 + c * dist_m)
+}
+
+/// IAMSAR expanding square search from `datum`: legs of 1, 1, 2, 2, 3, 3 … × `spacing_m`,
+/// the first on `track_deg` (clockwise from north), each turn 90° to the right, until the
+/// next leg would be longer than `extent_m` (the side of the square searched). Starts at
+/// the datum.
+pub fn expanding_square(
+    datum: (f64, f64),
+    spacing_m: f64,
+    extent_m: f64,
+    track_deg: f64,
+) -> Result<Vec<(f64, f64)>, PatternError> {
+    positive(spacing_m, "track spacing")?;
+    positive(extent_m, "search extent")?;
+    let plane = Plane::new(datum);
+    let mut at = (0.0, 0.0);
+    let mut out = vec![datum];
+    for leg in 0.. {
+        let len = f64::from(leg / 2 + 1) * spacing_m;
+        if len > extent_m + 1e-9 || leg > 10_000 {
+            break;
+        }
+        at = step(at, track_deg + 90.0 * f64::from(leg), len);
+        out.push(plane.to_latlon(at));
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,5 +173,38 @@ mod tests {
             corridor(&path, 10.0, 0.0, 0.0),
             Err(PatternError::BadSize("line spacing"))
         );
+    }
+
+    #[test]
+    fn expanding_square_legs_grow_every_second_turn() {
+        let d = (-35.36, 149.16);
+        let p = Plane::new(d);
+        let pts = expanding_square(d, 10.0, 30.0, 0.0).unwrap();
+        let xy: Vec<_> = pts.iter().map(|&q| p.to_xy(q)).collect();
+        // N 10, E 10, S 20, W 20, N 30, E 30; the next leg (40 m) is past the extent.
+        let want = [
+            (0.0, 0.0),
+            (0.0, 10.0),
+            (10.0, 10.0),
+            (10.0, -10.0),
+            (-10.0, -10.0),
+            (-10.0, 20.0),
+            (20.0, 20.0),
+        ];
+        assert_eq!(xy.len(), want.len());
+        for (a, b) in xy.iter().zip(want) {
+            assert!(
+                (a.0 - b.0).abs() < 0.01 && (a.1 - b.1).abs() < 0.01,
+                "{a:?} {b:?}"
+            );
+        }
+        // A track of 90° starts east and turns south.
+        let e = expanding_square(d, 10.0, 10.0, 90.0).unwrap();
+        let exy: Vec<_> = e.iter().map(|&q| p.to_xy(q)).collect();
+        assert!(
+            (exy[1].0 - 10.0).abs() < 0.01 && (exy[2].1 + 10.0).abs() < 0.01,
+            "{exy:?}"
+        );
+        assert!(expanding_square(d, 0.0, 10.0, 0.0).is_err());
     }
 }
