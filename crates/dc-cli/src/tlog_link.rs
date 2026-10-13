@@ -97,6 +97,13 @@ pub fn timeline(
             last_hb = Some(t);
         }
     }
+    // A last window holding only other senders' frames says nothing about the link.
+    while out
+        .last()
+        .is_some_and(|w| w.received == 0 && w.lost == 0 && w.rssi.is_none())
+    {
+        out.pop();
+    }
     Ok((vehicle, out))
 }
 
