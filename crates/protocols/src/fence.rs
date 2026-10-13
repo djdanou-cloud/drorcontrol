@@ -12,7 +12,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::mission::{MissionItem, PathPoint};
+use crate::mission::{Finding, LintLevel, MissionItem, PathPoint};
 
 const EARTH_RADIUS_M: f64 = 6_371_008.8;
 
@@ -257,6 +257,163 @@ pub fn check_path(
     out
 }
 
+/// Do segments p1-p2 and q1-q2 cross (touching ends do not count)?
+fn segments_cross(p1: (f64, f64), p2: (f64, f64), q1: (f64, f64), q2: (f64, f64)) -> bool {
+    let side = |a: (f64, f64), b: (f64, f64), c: (f64, f64)| {
+        (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0)
+    };
+    let (d1, d2) = (side(q1, q2, p1), side(q1, q2, p2));
+    let (d3, d4) = (side(p1, p2, q1), side(p1, p2, q2));
+    d1 * d2 < 0.0 && d3 * d4 < 0.0
+}
+
+/// Does the polygon's outline cross itself (a bow-tie)? Inside and outside are then not
+/// what the drawing suggests.
+pub fn self_intersects(poly: &[(f64, f64)]) -> bool {
+    let Some(&o) = poly.first() else {
+        return false;
+    };
+    let v: Vec<(f64, f64)> = poly.iter().map(|&p| xy(o, p)).collect();
+    let n = v.len();
+    (0..n).any(|i| {
+        (i + 2..n)
+            .filter(|&j| !(i == 0 && j == n - 1))
+            .any(|j| segments_cross(v[i], v[(i + 1) % n], v[j], v[(j + 1) % n]))
+    })
+}
+
+/// Check fence items before upload: what ArduPilot refuses (4.7.1
+/// `AC_PolyFence_loader::validate_fence`: polygon vertex counts, circle radius, more than
+/// one return point, positions) and what it does not check: polygons crossing themselves,
+/// the return point outside the fence (its own TODO), home outside (arming then fails with
+/// "Vehicle breaching …" while fences are enabled) and rally points outside. `home` is
+/// (lat, lon); `rally` are rally items (5100, z above home). Item numbers are fence items.
+pub fn lint(
+    items: &[MissionItem],
+    home: Option<(f64, f64)>,
+    rally: &[MissionItem],
+    params: &FenceParams,
+) -> Vec<Finding> {
+    let mut out = Vec::new();
+    let mut add = |seq: Option<usize>, level, text: String| {
+        out.push(Finding {
+            seq: seq.map(|s| s as u16),
+            level,
+            text,
+        });
+    };
+    let deg = |i: &MissionItem| (f64::from(i.x) * 1e-7, f64::from(i.y) * 1e-7);
+    let mut returns = 0;
+    for (k, i) in items.iter().enumerate() {
+        let (lat, lon) = deg(i);
+        if matches!(i.command, 5000..=5004)
+            && (!(-90.0..=90.0).contains(&lat) || !(-180.0..=180.0).contains(&lon))
+        {
+            add(
+                Some(k),
+                LintLevel::Warning,
+                format!("position {lat}, {lon} is invalid"),
+            );
+        }
+        match i.command {
+            5003 | 5004 if i.params[0].is_nan() || i.params[0] <= 0.0 => add(
+                Some(k),
+                LintLevel::Warning,
+                format!(
+                    "circle radius {} m: ArduPilot refuses the fence",
+                    i.params[0]
+                ),
+            ),
+            5000 => {
+                returns += 1;
+                if returns == 2 {
+                    add(
+                        Some(k),
+                        LintLevel::Warning,
+                        "more than one return point: ArduPilot refuses the fence".into(),
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+    let fence = match Fence::from_items(items) {
+        Ok(f) => f,
+        Err(e) => {
+            add(
+                None,
+                LintLevel::Warning,
+                format!("{e}: ArduPilot refuses the fence"),
+            );
+            return out;
+        }
+    };
+    let mut first = 0usize;
+    let mut polys = Vec::new();
+    while first < items.len() {
+        let i = &items[first];
+        if matches!(i.command, 5001 | 5002) {
+            let n = (i.params[0] as usize).max(1);
+            polys.push((first, &items[first..(first + n).min(items.len())]));
+            first += n;
+        } else {
+            first += 1;
+        }
+    }
+    for (k, vs) in polys {
+        let poly: Vec<(f64, f64)> = vs.iter().map(deg).collect();
+        if self_intersects(&poly) {
+            add(
+                Some(k),
+                LintLevel::Warning,
+                "the polygon's outline crosses itself: inside and outside are not what the drawing suggests"
+                    .into(),
+            );
+        }
+    }
+    let check = |p: (f64, f64), alt: f64| breach_at(p, &fence, params, p, alt);
+    // The circle fence is around home; without home only the zones are checked.
+    let zones_only = FenceParams {
+        circle_radius_m: None,
+        ..*params
+    };
+    if let Some((k, r)) = items.iter().enumerate().find(|(_, i)| i.command == 5000)
+        && let Some(what) = breach_at(deg(r), &fence, &zones_only, deg(r), 0.0)
+    {
+        add(
+            Some(k),
+            LintLevel::Warning,
+            format!("the return point is {what}"),
+        );
+    }
+    if let Some(h) = home
+        && let Some(what) = check(h, 0.0)
+    {
+        add(
+            None,
+            LintLevel::Warning,
+            format!(
+                "home is {what}: arming fails (\"Vehicle breaching\") while the fence is enabled"
+            ),
+        );
+    }
+    for (k, r) in rally.iter().enumerate() {
+        let p = deg(r);
+        let what = match home {
+            Some(h) => breach_at(h, &fence, params, p, f64::from(r.z)),
+            None => breach_at(p, &fence, &zones_only, p, f64::from(r.z)),
+        };
+        if let Some(what) = what {
+            add(
+                None,
+                LintLevel::Warning,
+                format!("rally point {} is {what}", k + 1),
+            );
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -390,5 +547,61 @@ mod tests {
         assert!((back.inclusion_polygons[0][1].0 - 47.001).abs() < 1e-7);
         let ((lat, lon), r) = back.exclusion_circles[0];
         assert!((lat - 47.0005).abs() < 1e-7 && (lon - 8.0005).abs() < 1e-7 && r == 20.0);
+    }
+
+    #[test]
+    fn lint_finds_what_arducopter_refuses_and_what_it_misses() {
+        let sq = vec![(47.0, 8.0), (47.002, 8.0), (47.002, 8.003), (47.0, 8.003)];
+        let f = Fence {
+            inclusion_polygons: vec![sq.clone()],
+            exclusion_polygons: vec![vec![
+                (47.0005, 8.0005),
+                (47.0010, 8.0005),
+                (47.0010, 8.0010),
+                (47.0005, 8.0010),
+            ]],
+            ..Default::default()
+        };
+        let items = f.to_items();
+        let p = FenceParams::default();
+        let inside = (47.001, 8.002);
+        assert_eq!(lint(&items, Some(inside), &[], &p), []);
+        // Home in the no-fly square; a rally point outside the field.
+        let rally = |lat: f64, lon: f64| MissionItem {
+            frame: 3,
+            command: 5100,
+            params: [0.0; 4],
+            x: (lat * 1e7) as i32,
+            y: (lon * 1e7) as i32,
+            z: 20.0,
+            autocontinue: true,
+        };
+        let l = lint(&items, Some((47.0007, 8.0007)), &[rally(47.01, 8.0)], &p);
+        assert_eq!(l.len(), 2, "{l:#?}");
+        assert!(l[0].text.starts_with("home is inside exclusion polygon 1"));
+        assert!(
+            l[1].text
+                .starts_with("rally point 1 is outside inclusion polygon 1")
+        );
+        // A bow-tie, a zero radius and two return points.
+        let bow = Fence {
+            inclusion_polygons: vec![vec![sq[0], sq[2], sq[1], sq[3]]],
+            exclusion_circles: vec![((47.001, 8.001), 0.0)],
+            ..Default::default()
+        };
+        let mut items = bow.to_items();
+        let ret = MissionItem {
+            command: 5000,
+            ..items[0]
+        };
+        items.extend([ret, ret]);
+        let l = lint(&items, None, &[], &p);
+        let seqs: Vec<_> = l.iter().map(|f| f.seq).collect();
+        assert_eq!(seqs, [Some(4), Some(6), Some(0)], "{l:#?}");
+        assert!(l[2].text.contains("crosses itself"));
+        assert!(self_intersects(&[sq[0], sq[2], sq[1], sq[3]]) && !self_intersects(&sq));
+        // A broken polygon is reported once, as ArduPilot would refuse it.
+        let l = lint(&f.to_items()[1..], None, &[], &p);
+        assert!(l.iter().any(|f| f.text.contains("refuses")), "{l:#?}");
     }
 }

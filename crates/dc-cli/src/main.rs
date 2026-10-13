@@ -3857,12 +3857,33 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
             };
             print_time_estimate(&items, &speeds, params.is_some());
             if let Some(fence_file) = fence {
-                let zones = protocols::fence::Fence::from_items(&read_fence(fence_file)?)
-                    .map_err(|e| format!("{}: {e}", fence_file.display()))?;
+                let fence_items = read_fence(fence_file)?;
                 let fp = match params {
                     Some(p) => protocols::fence::FenceParams::from_params(&load_params(p)?),
                     None => protocols::fence::FenceParams::default(),
                 };
+                // A .plan's rally points are checked against its fence too.
+                let rally = if is_plan(fence_file) {
+                    let text = std::fs::read_to_string(fence_file)
+                        .map_err(|e| format!("{}: {e}", fence_file.display()))?;
+                    protocols::plan::parse(&text)
+                        .map_err(|e| format!("{}: {e}", fence_file.display()))?
+                        .rally
+                } else {
+                    Vec::new()
+                };
+                let home = items
+                    .first()
+                    .filter(|h| h.x != 0 || h.y != 0)
+                    .map(|h| (f64::from(h.x) * 1e-7, f64::from(h.y) * 1e-7));
+                for f in protocols::fence::lint(&fence_items, home, &rally, &fp) {
+                    let at = f
+                        .seq
+                        .map_or_else(|| "fence".to_string(), |s| format!("fence item {s}"));
+                    eprintln!("{:?}: {at}: {}", f.level, f.text);
+                }
+                let zones = protocols::fence::Fence::from_items(&fence_items)
+                    .map_err(|e| format!("{}: {e}", fence_file.display()))?;
                 if zones.is_empty() && fp.circle_radius_m.is_none() && fp.alt_max_m.is_none() {
                     return Err(format!("{}: no fence zones", fence_file.display()));
                 }
