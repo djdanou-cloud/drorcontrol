@@ -610,6 +610,9 @@ enum LogCmd {
     Events {
         /// Path to the .bin log.
         path: std::path::PathBuf,
+        /// Write CSV (time_s,kind,detail) to this file instead of printing.
+        #[arg(long)]
+        csv: Option<std::path::PathBuf>,
     },
     /// Parameters changed after boot (values the autopilot updates itself are marked).
     Changes {
@@ -3926,11 +3929,19 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
         LogCmd::Compass { path, instance } => print_log_compass(&open(path)?, instance)?,
         LogCmd::Battery { path, instance } => print_log_battery(&open(path)?, instance)?,
         LogCmd::Attitude { path } => print_log_attitude(&open(path)?)?,
-        LogCmd::Events { path } => {
+        LogCmd::Events { path, csv } => {
             let log = open(path)?;
             let ev = logs::flight::events(&log);
             let fw = log_firmware(&ev);
+            let mut rows = String::from("time_s,kind,detail\n");
             for (t, e) in &ev {
+                let kind = match e {
+                    logs::flight::Event::Mode { .. } => "mode",
+                    logs::flight::Event::Arm { .. } => "arm",
+                    logs::flight::Event::Ev(_) => "event",
+                    logs::flight::Event::Err(..) => "error",
+                    logs::flight::Event::Text(_) => "message",
+                };
                 let text = match e {
                     logs::flight::Event::Mode { mode, reason } => {
                         format!("MODE {} (reason {reason})", mode_label(fw, *mode))
@@ -3946,7 +3957,19 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                     logs::flight::Event::Err(sub, code) => format!("ERR {sub} {code}"),
                     logs::flight::Event::Text(t) => t.clone(),
                 };
-                println!("{:10.3} s  {text}", *t as f64 / 1e6);
+                if csv.is_some() {
+                    rows.push_str(&format!(
+                        "{:.6},{kind},\"{}\"\n",
+                        *t as f64 / 1e6,
+                        text.replace('"', "\"\"")
+                    ));
+                } else {
+                    println!("{:10.3} s  {text}", *t as f64 / 1e6);
+                }
+            }
+            if let Some(out) = csv {
+                std::fs::write(out, &rows).map_err(|e| format!("{}: {e}", out.display()))?;
+                eprintln!("wrote {} ({} events)", out.display(), ev.len());
             }
         }
         LogCmd::Changes { path } => print_log_changes(&open(path)?)?,

@@ -606,6 +606,7 @@ Arguments:
   <PATH>  Path to the .bin log
 
 Options:
+      --csv <CSV>        Write CSV (time_s,kind,detail) to this file instead of printing
       --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
       --compid <COMPID>  Our MAVLink component id [default: 190]
       --tlog <TLOG>      Record everything to this .tlog file
