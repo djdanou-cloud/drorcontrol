@@ -7,6 +7,13 @@ use std::f64::consts::PI;
 
 use rustfft::{FftPlanner, num_complex::Complex};
 
+/// Where a tone at `f_hz` shows up when sampled at `fs_hz`: frequencies above the Nyquist
+/// frequency (`fs_hz / 2`) fold back into 0..Nyquist (aliasing).
+pub fn alias(f_hz: f64, fs_hz: f64) -> f64 {
+    let r = f_hz.rem_euclid(fs_hz);
+    if r > fs_hz / 2.0 { fs_hz - r } else { r }
+}
+
 /// Averaged power spectrum.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Spectrum {
@@ -83,6 +90,14 @@ pub fn peaks(s: &Spectrum, min_hz: f64, count: usize) -> Vec<(f64, f64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tones_above_nyquist_fold_back() {
+        assert_eq!(alias(40.0, 200.0), 40.0);
+        assert_eq!(alias(160.0, 200.0), 40.0);
+        assert_eq!(alias(260.0, 200.0), 60.0);
+        assert_eq!(alias(100.0, 200.0), 100.0);
+    }
 
     #[test]
     fn finds_the_frequencies_of_mixed_sines() {

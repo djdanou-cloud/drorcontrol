@@ -24,6 +24,8 @@ pub struct NotchAdvice {
     pub span_s: f64,
     /// See `span_s`.
     pub samples: usize,
+    /// Rate the IMU data was logged at, Hz: nothing above half of it can be seen.
+    pub sample_rate_hz: f64,
     /// The vehicle's current settings from the log (`INS_HNTCH_ENABLE`, `_MODE`, `_FREQ`,
     /// `_BW`, `_REF`), where logged.
     pub current: Vec<(String, f64)>,
@@ -95,6 +97,7 @@ pub fn suggest(
         ref_throttle,
         span_s: (b - a) as f64 / 1e6,
         samples: t.len(),
+        sample_rate_hz: s.sample_rate_hz,
         current,
     })
 }

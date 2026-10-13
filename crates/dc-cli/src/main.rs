@@ -1375,6 +1375,47 @@ fn print_log_compass(log: &logs::Log, instance: &u8) -> Result<(), String> {
     Ok(())
 }
 
+/// Aliasing note for IMU data logged at `fs_hz` (plan 05 §2.2): the Nyquist limit, and where
+/// the motors' rotation (ESC telemetry) and the configured notch frequency would appear if
+/// they are above it.
+fn print_aliasing(log: &logs::Log, fs_hz: f64) {
+    let nyq = fs_hz / 2.0;
+    let mut tones: Vec<(String, f64)> = Vec::new();
+    let esc = logs::esc::esc_stats(log);
+    if let Some(rpm) = esc.iter().map(|e| e.mean_rpm).max_by(f64::total_cmp)
+        && rpm > 0.0
+    {
+        tones.push((
+            format!("motor rotation (ESC mean {rpm:.0} rpm)"),
+            rpm / 60.0,
+        ));
+    }
+    let params = log.params();
+    if params.get("INS_HNTCH_ENABLE").is_some_and(|v| *v > 0.0)
+        && let Some(f) = params.get("INS_HNTCH_FREQ").copied().filter(|f| *f > 0.0)
+    {
+        tones.push(("INS_HNTCH_FREQ".into(), f));
+    }
+    let above: Vec<String> = tones
+        .iter()
+        .filter(|(_, f)| *f > nyq)
+        .map(|(name, f)| {
+            format!(
+                "{name} {f:.0} Hz would appear at {:.0} Hz",
+                logs::spectrum::alias(*f, fs_hz)
+            )
+        })
+        .collect();
+    if above.is_empty() {
+        println!("logged at {fs_hz:.0} Hz: frequencies up to {nyq:.0} Hz are visible");
+    } else {
+        println!(
+            "CHECK: logged at {fs_hz:.0} Hz, so nothing above {nyq:.0} Hz is visible and higher tones fold back (alias): {}. Log faster (batch sampler INS_LOG_BAT_MASK, or fast IMU logging) before trusting peaks for notch settings",
+            above.join("; ")
+        );
+    }
+}
+
 fn print_log_notch(
     log: &logs::Log,
     field: &str,
@@ -1391,6 +1432,7 @@ fn print_log_notch(
         "steady flight analysed: {:.1} s, {} samples of {field}",
         n.span_s, n.samples
     );
+    print_aliasing(log, n.sample_rate_hz);
     println!("suggested throttle-based harmonic notch (review before use; nothing is written):");
     println!("  INS_HNTCH_ENABLE 1");
     println!("  INS_HNTCH_MODE   1  (throttle)");
@@ -2689,6 +2731,7 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
             for (freq, p) in logs::spectrum::peaks(&sp, 5.0, 5) {
                 println!("  peak {freq:7.1} Hz  power {p:.3e}");
             }
+            print_aliasing(&log, sp.sample_rate_hz);
         }
         LogCmd::Summary { path } => print_log_summary(&open(path)?)?,
         LogCmd::Compare { a, b } => {
