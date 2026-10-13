@@ -507,6 +507,18 @@ enum MissionCmd {
         #[arg(long)]
         fence: Option<std::path::PathBuf>,
     },
+    /// A mission from a path drawn in Google Earth (the KML's first LineString): takeoff, a
+    /// waypoint per point in drawing order, RTL. Offline; check and upload it as usual.
+    FromKml {
+        /// The KML file.
+        kml: std::path::PathBuf,
+        /// Altitude above home, m.
+        #[arg(long)]
+        alt: f32,
+        /// Output file (.waypoints or .plan; default: print).
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
     /// Convert a mission between QGroundControl `.plan` and `.waypoints` (QGC WPL 110), by the
     /// file extensions. A .plan's geofence and rally points are listed; only the mission is
     /// written to a .waypoints file.
@@ -3610,6 +3622,22 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
                 );
             }
             Ok(())
+        }
+        MissionCmd::FromKml { kml, alt, out } => {
+            if !(alt.is_finite() && *alt > 0.0) {
+                return Err("--alt must be above 0 m".into());
+            }
+            let text =
+                std::fs::read_to_string(kml).map_err(|e| format!("{}: {e}", kml.display()))?;
+            let pts = protocols::kml::first_line(&text)
+                .map_err(|e| format!("{}: no usable path ({e})", kml.display()))?;
+            let items = protocols::mission::route(&pts, *alt);
+            print_stats(&items);
+            write_or_print(
+                out.as_deref(),
+                &mission_text(out.as_deref(), &items),
+                &format!("{} waypoints from the path", pts.len()),
+            )
         }
         MissionCmd::Convert { input, output } => {
             let text =

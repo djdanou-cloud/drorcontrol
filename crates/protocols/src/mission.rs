@@ -525,9 +525,41 @@ pub fn verify(draft: &[MissionItem], vehicle: &[MissionItem], skip_home: bool) -
     out
 }
 
+/// A mission flying `points` (latitude, longitude) in order at `alt_m` above home: home at
+/// the first point, TAKEOFF there, a waypoint per point, RTL. Same layout as a survey.
+pub fn route(points: &[(f64, f64)], alt_m: f32) -> Vec<MissionItem> {
+    let item = |command: u16, frame: u8, (lat, lon): (f64, f64), z: f32| MissionItem {
+        frame,
+        command,
+        params: [0.0; 4],
+        x: (lat * 1e7).round() as i32,
+        y: (lon * 1e7).round() as i32,
+        z,
+        autocontinue: true,
+    };
+    let Some(&first) = points.first() else {
+        return Vec::new();
+    };
+    let mut m = vec![item(16, 0, first, 0.0), item(22, 3, (0.0, 0.0), alt_m)];
+    m.extend(points.iter().map(|p| item(16, 3, *p, alt_m)));
+    m.push(item(20, 2, (0.0, 0.0), 0.0));
+    m
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_route_is_home_takeoff_waypoints_rtl() {
+        let r = route(&[(-35.0, 149.0), (-35.001, 149.0)], 30.0);
+        assert_eq!(
+            r.iter().map(|i| (i.command, i.frame)).collect::<Vec<_>>(),
+            [(16, 0), (22, 3), (16, 3), (16, 3), (20, 2)]
+        );
+        assert_eq!((r[3].x, r[3].z), (-350_010_000, 30.0));
+        assert!(route(&[], 30.0).is_empty());
+    }
 
     fn item(command: u16, frame: u8, params: [f32; 4]) -> MissionItem {
         MissionItem {
