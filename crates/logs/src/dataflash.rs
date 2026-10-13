@@ -256,7 +256,7 @@ impl TypeIndex {
     }
 
     /// Absolute offsets, block by block (each slice paired with its block base).
-    fn block_slices(&self) -> impl Iterator<Item = (usize, &[u32])> {
+    pub(crate) fn block_slices(&self) -> impl Iterator<Item = (usize, &[u32])> {
         self.blocks.iter().enumerate().map(move |(i, &(b, start))| {
             let end = self.blocks.get(i + 1).map_or(self.rel.len(), |n| n.1);
             (b as usize * BLOCK, &self.rel[start..end])

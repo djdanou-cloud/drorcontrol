@@ -36,6 +36,7 @@ pub mod takeoff;
 #[cfg(test)]
 mod testlog;
 pub mod track;
+pub mod trim;
 pub mod tuning;
 pub mod wind;
 

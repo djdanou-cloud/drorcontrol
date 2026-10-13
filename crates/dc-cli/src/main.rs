@@ -553,6 +553,24 @@ enum LogCmd {
         )]
         to: String,
     },
+    /// Write a smaller copy holding only a time window (default: the armed time with a
+    /// margin), with the formats, parameters and boot messages that explain it.
+    Trim {
+        /// Path to the .bin log.
+        path: std::path::PathBuf,
+        /// Output .bin file.
+        #[arg(long)]
+        out: std::path::PathBuf,
+        /// Window start, seconds since boot (instead of the armed time).
+        #[arg(long, requires = "until")]
+        from: Option<f64>,
+        /// Window end, seconds since boot.
+        #[arg(long, requires = "from")]
+        until: Option<f64>,
+        /// Seconds kept before the first arming and after the last disarm.
+        #[arg(long, default_value_t = 10.0)]
+        margin: f64,
+    },
     /// Takeoffs: time from arming to liftoff, climb, attitude error just after liftoff.
     Takeoffs {
         /// Path to the .bin log.
@@ -2692,6 +2710,41 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
         LogCmd::Cells { path } => print_log_cells(&open(path)?)?,
         LogCmd::Lanes { path } => print_log_lanes(&open(path)?)?,
         LogCmd::Takeoffs { path } => print_log_takeoffs(&open(path)?)?,
+        LogCmd::Trim {
+            path,
+            out,
+            from,
+            until,
+            margin,
+        } => {
+            if out == path {
+                return Err("--out must differ from the input".into());
+            }
+            let log = open(path)?;
+            let us = |s: f64| (s.max(0.0) * 1e6) as u64;
+            let (t0, t1) = match (from, until) {
+                (Some(a), Some(b)) if b > a => (us(*a), us(*b)),
+                (Some(_), Some(_)) => return Err("--until must be after --from".into()),
+                _ => logs::trim::armed_window(&log, us(*margin))
+                    .ok_or("the log never armed: give --from and --until")?,
+            };
+            let (bytes, r) = logs::trim::trim(&log, t0, t1);
+            std::fs::write(out, &bytes).map_err(|e| format!("{}: {e}", out.display()))?;
+            let end = if t1 == u64::MAX {
+                "end of log".to_string()
+            } else {
+                format!("{:.1} s", t1 as f64 / 1e6)
+            };
+            println!(
+                "kept {} of {} records ({:.1} of {:.1} MiB), {:.1} s to {end}; wrote {}",
+                r.records_out,
+                r.records_in,
+                r.bytes_out as f64 / 1048576.0,
+                log.bytes().len() as f64 / 1048576.0,
+                t0 as f64 / 1e6,
+                out.display()
+            );
+        }
         LogCmd::Landings { path } => print_log_landings(&open(path)?)?,
         LogCmd::Sanitize { path, out, to } => {
             let log = open(path)?;
