@@ -1272,6 +1272,18 @@ async fn start(cli: &Cli, link: &LinkSpec) -> Result<Core, String> {
     Ok(core)
 }
 
+/// One parameter's outcome, for people (bench: the debug form read
+/// `Verified(Param { value: 12.0, ty: 2, index: 65535 })`).
+fn set_status_text(status: &protocols::params::SetStatus) -> String {
+    use protocols::params::SetStatus;
+    match status {
+        SetStatus::Verified(p) => format!("= {} (verified by read-back)", p.value),
+        SetStatus::Failed(Some(p)) => format!("NOT set: the vehicle reports {}", p.value),
+        SetStatus::Failed(None) => "NOT confirmed: no read-back from the vehicle".into(),
+        SetStatus::Pending => "not confirmed yet".into(),
+    }
+}
+
 /// Ask a yes/no question on the terminal; `None` when there is no terminal to ask on.
 fn ask(question: &str) -> Option<bool> {
     use std::io::{BufRead, IsTerminal, Write};
@@ -1769,7 +1781,7 @@ async fn param_set(
     };
     eprintln!("baseline saved to {}", report.snapshot.display());
     for r in &report.results {
-        println!("{} {:?}", r.name, r.status);
+        println!("{} {}", r.name, set_status_text(&r.status));
     }
     if let Some(why) = &report.interruption {
         eprintln!("stopped: {why}");
@@ -1914,7 +1926,7 @@ async fn param_rollback(
     };
     eprintln!("recovery baseline saved to {}", report.snapshot.display());
     for r in &report.results {
-        println!("{} {:?}", r.name, r.status);
+        println!("{} {}", r.name, set_status_text(&r.status));
     }
     if report.verified() {
         println!("all {} parameter(s) restored and verified", report.planned);
@@ -5942,6 +5954,30 @@ fn print_fleet(core: &Core) {
             parts.join(" | "),
             age
         );
+    }
+}
+
+#[cfg(test)]
+mod set_status_tests {
+    use super::set_status_text;
+    use protocols::params::{Param, SetStatus};
+
+    #[test]
+    fn parameter_outcomes_read_as_text() {
+        let p = |value| Param {
+            value,
+            ty: 2,
+            index: 65535,
+        };
+        assert_eq!(
+            set_status_text(&SetStatus::Verified(p(12.0))),
+            "= 12 (verified by read-back)"
+        );
+        assert_eq!(
+            set_status_text(&SetStatus::Failed(Some(p(0.5)))),
+            "NOT set: the vehicle reports 0.5"
+        );
+        assert!(set_status_text(&SetStatus::Failed(None)).starts_with("NOT confirmed"));
     }
 }
 
