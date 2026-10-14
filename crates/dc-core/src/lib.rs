@@ -559,6 +559,16 @@ pub enum CoreEvent {
         /// Operator-facing text.
         text: String,
     },
+    /// The annunciator says to sound an alert now (new, escalated or back after its quiet
+    /// time; see [`annunciator`]). The UI plays the tone or speech for `level`.
+    Sound {
+        /// System id.
+        sysid: u8,
+        /// Annunciator id, e.g. `FENCE`.
+        id: String,
+        /// Level to sound.
+        level: annunciator::AlertLevel,
+    },
     /// A link went up/down.
     Link {
         /// Link id.
@@ -692,6 +702,8 @@ pub struct Core {
     audit: Option<std::sync::mpsc::Sender<(SystemTime, AuditEvent)>>,
     /// Last navigation trust per vehicle, to alert on changes.
     nav_trust: Arc<std::sync::Mutex<HashMap<u8, PositionTrust>>>,
+    /// Annunciator per vehicle, fed by every [`CoreEvent::Alert`].
+    annunciators: Arc<std::sync::Mutex<HashMap<u8, annunciator::Annunciator>>>,
     /// Last fence state per vehicle (outside, breach count), to alert on breaches.
     fence_seen: Arc<std::sync::Mutex<HashMap<u8, (bool, u16)>>>,
     /// Recent STATUSTEXT per vehicle (kept outside the fleet, which is cloned per message).
@@ -740,6 +752,7 @@ impl Core {
             audit,
             nav_trust: Arc::default(),
             fence_seen: Arc::default(),
+            annunciators: Arc::default(),
             messages: Arc::default(),
             geotags: Arc::default(),
             sequences: Arc::default(),
@@ -1150,11 +1163,7 @@ impl Core {
         }
         for s in changed {
             if let Some(a) = s.alert() {
-                let _ = self.events.send(CoreEvent::Alert {
-                    sysid: s.target.sysid,
-                    level: a.level,
-                    text: a.text,
-                });
+                self.alert(s.target.sysid, a.level, a.text);
             }
             let _ = self.events.send(CoreEvent::Command(Box::new(s)));
         }
@@ -1401,7 +1410,77 @@ impl Core {
             }
             _ => return,
         };
+        self.alert(sysid, level, text);
+    }
+
+    /// Tell the operator: a [`CoreEvent::Alert`], and the vehicle's annunciator updated (with
+    /// a [`CoreEvent::Sound`] when it says to sound).
+    fn alert(&self, sysid: u8, level: AlertLevel, text: String) {
+        use annunciator::{AlertLevel as A, Effect, classify};
+        let shown = match level {
+            AlertLevel::Advisory => A::Advisory,
+            AlertLevel::Caution => A::Caution,
+            AlertLevel::Warning => A::Warning,
+        };
+        let now = Instant::now();
+        let sound = {
+            let mut all = self.annunciators.lock().unwrap_or_else(|e| e.into_inner());
+            let ann = all.entry(sysid).or_default();
+            match classify(&text) {
+                Effect::Condition(id) => ann.raise(&id, shown, &text, now),
+                Effect::Event(id) => {
+                    let s = ann.raise(&id, shown, &text, now);
+                    ann.clear(&id);
+                    s
+                }
+                Effect::Clear(id) => {
+                    ann.clear(&id);
+                    None
+                }
+            }
+        };
         let _ = self.events.send(CoreEvent::Alert { sysid, level, text });
+        if let Some(s) = sound {
+            let _ = self.events.send(CoreEvent::Sound {
+                sysid,
+                id: s.id,
+                level: s.level,
+            });
+        }
+    }
+
+    /// The alerts `sysid`'s annunciator shows, highest level first, then oldest first.
+    pub fn annunciator(&self, sysid: u8) -> Vec<annunciator::Alert> {
+        self.annunciators
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&sysid)
+            .map(|a| a.shown().into_iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// The master light for `sysid`: the highest unacknowledged warning or caution.
+    pub fn master_alert(&self, sysid: u8) -> Option<annunciator::AlertLevel> {
+        self.annunciators
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&sysid)
+            .and_then(annunciator::Annunciator::master)
+    }
+
+    /// The operator acknowledges alert `id` of `sysid` (`None`: all of them).
+    pub fn ack_alert(&self, sysid: u8, id: Option<&str>) {
+        if let Some(a) = self
+            .annunciators
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_mut(&sysid)
+        {
+            match id {
+                Some(id) => a.ack(id),
+                None => a.ack_all(),
+            }
+        }
     }
 
     /// Alert when the navigation trust of `sysid` changes: Untrusted is a Warning, Degraded
@@ -1431,7 +1510,7 @@ impl Core {
             }
             _ => return,
         };
-        let _ = self.events.send(CoreEvent::Alert { sysid, level, text });
+        self.alert(sysid, level, text);
     }
 
     /// Ask the autopilot for its version banner (`MAV_CMD_DO_SEND_BANNER`), which confirms the

@@ -57,11 +57,16 @@ async fn breaches_and_return_are_alerted_once() {
         .await
         .unwrap();
     let mut alerts = Vec::new();
+    let mut sounds: Vec<String> = Vec::new();
     let _ = tokio::time::timeout(Duration::from_secs(5), async {
         while alerts.len() < 3 {
-            if let Ok(CoreEvent::Alert { sysid, level, text }) = events.recv().await {
-                assert_eq!(sysid, 3);
-                alerts.push((level, text));
+            match events.recv().await {
+                Ok(CoreEvent::Alert { sysid, level, text }) => {
+                    assert_eq!(sysid, 3);
+                    alerts.push((level, text));
+                }
+                Ok(CoreEvent::Sound { id, .. }) => sounds.push(id),
+                _ => {}
             }
         }
     })
@@ -69,10 +74,23 @@ async fn breaches_and_return_are_alerted_once() {
     // Nothing more after the last one.
     tokio::time::sleep(Duration::from_millis(300)).await;
     while let Ok(e) = events.try_recv() {
-        if let CoreEvent::Alert { level, text, .. } = e {
-            alerts.push((level, text));
+        match e {
+            CoreEvent::Alert { level, text, .. } => alerts.push((level, text)),
+            CoreEvent::Sound { id, .. } => sounds.push(id),
+            _ => {}
         }
     }
+    // The annunciator: FENCE latched (a warning, now cleared) until acknowledged.
+    let shown = core.annunciator(3);
+    assert_eq!(shown.len(), 1, "{shown:?}");
+    assert_eq!((shown[0].id.as_str(), shown[0].active), ("FENCE", false));
+    assert_eq!(shown[0].count, 2, "the second breach updated it");
+    assert_eq!(
+        core.master_alert(3),
+        Some(dc_core::annunciator::AlertLevel::Warning)
+    );
+    core.ack_alert(3, Some("FENCE"));
+    assert!(core.annunciator(3).is_empty() && core.master_alert(3).is_none());
     assert_eq!(
         alerts,
         [
@@ -84,5 +102,7 @@ async fn breaches_and_return_are_alerted_once() {
             (AlertLevel::Advisory, "Back inside the fence".to_string()),
         ]
     );
+    // Sounded once: the second breach came within the 10 s quiet time at the same level.
+    assert_eq!(sounds, ["FENCE"]);
     let _ = std::fs::remove_dir_all(dir);
 }

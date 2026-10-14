@@ -15,6 +15,40 @@
 
 use std::time::{Duration, Instant};
 
+/// What one of the core's alerts (`CoreEvent::Alert`) does to the annunciator.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Effect {
+    /// A condition that lasts until a later alert clears it (fence breach, position trust).
+    Condition(String),
+    /// A one-off event (a command expired or was rejected): raised and cleared at once, so a
+    /// warning or caution stays latched until acknowledged and an advisory is not kept.
+    Event(String),
+    /// The condition behind this id is over.
+    Clear(String),
+}
+
+/// Map a core alert's text to its annunciator id and effect. The ids are the fixed labels:
+/// `FENCE`, `POSITION`, and for one-off events the text before `:` or ` — `.
+pub fn classify(text: &str) -> Effect {
+    match text {
+        "Back inside the fence" => return Effect::Clear("FENCE".into()),
+        "Position good again" => return Effect::Clear("POSITION".into()),
+        _ => {}
+    }
+    if text.starts_with("FENCE BREACH") {
+        return Effect::Condition("FENCE".into());
+    }
+    if text.starts_with("POSITION ") {
+        return Effect::Condition("POSITION".into());
+    }
+    let end = [text.find(" — "), text.find(':')]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or(text.len());
+    Effect::Event(text[..end].trim().to_string())
+}
+
 /// How urgent an alert is (ordered: `Warning` is the highest).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum AlertLevel {
@@ -269,5 +303,33 @@ mod tests {
         // A lower level does not downgrade a shown alert.
         assert!(a.raise("LOW BATT", Caution, "", s(14)).is_none());
         assert_eq!(a.shown()[0].level, Warning);
+    }
+
+    #[test]
+    fn core_alerts_map_to_fixed_ids() {
+        assert_eq!(
+            classify("FENCE BREACH: boundary"),
+            Effect::Condition("FENCE".into())
+        );
+        assert_eq!(
+            classify("Back inside the fence"),
+            Effect::Clear("FENCE".into())
+        );
+        assert_eq!(
+            classify("POSITION UNTRUSTED: EKF variance"),
+            Effect::Condition("POSITION".into())
+        );
+        assert_eq!(
+            classify("Position good again"),
+            Effect::Clear("POSITION".into())
+        );
+        assert_eq!(
+            classify("MODE 6 NOT CONFIRMED — EXPIRED: check the vehicle"),
+            Effect::Event("MODE 6 NOT CONFIRMED".into())
+        );
+        assert_eq!(
+            classify("MODE 4 engaged"),
+            Effect::Event("MODE 4 engaged".into())
+        );
     }
 }

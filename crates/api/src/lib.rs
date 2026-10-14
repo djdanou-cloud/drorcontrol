@@ -826,6 +826,9 @@ impl CoreApi for CoreService {
                             text,
                         })
                     }
+                    // Annunciator sounds are for a local display; clients sound alerts from
+                    // AlertEvent levels.
+                    Ok(CoreEvent::Sound { .. }) => continue,
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 };

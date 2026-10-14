@@ -2334,6 +2334,9 @@ async fn run(cli: Cli) -> Result<(), String> {
                         Ok(CoreEvent::Alert { sysid, level, text }) => {
                             eprintln!("[{sysid}] {} {text}", format!("{level:?}").to_uppercase())
                         }
+                        Ok(CoreEvent::Sound { sysid, id, level }) => {
+                            eprintln!("[{sysid}] annunciator sounds {id} ({level:?})")
+                        }
                         Ok(CoreEvent::Recorder { stopped, detail }) => {
                             eprintln!("tlog {}: {detail}", if stopped { "STOPPED" } else { "warning" })
                         }
