@@ -1728,6 +1728,7 @@ Telemetry logs (.tlog, as recorded with --tlog or by Mission Planner)
 Usage: dc-cli tlog [OPTIONS] <COMMAND>
 
 Commands:
+  alerts    The alerts DrorControl would have raised during the recording (position trust, geofence breaches, traffic), replayed through the core, with their time, and what the annunciator still shows at the end
   link      Link quality over time (range tests): frames received and lost per window, the radio's signal, and the longest heartbeat gap
   index     Index the recording for playback: checkpoints, key events, and what a seek to a time would restore (the latest message of each stream)
   health    Health checks from the telemetry (vibration, battery, EKF, GPS, errors), for when there is no dataflash log: the same thresholds as `log health`
@@ -1741,6 +1742,24 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
+      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>  Our MAVLink component id [default: 190]
+      --tlog <TLOG>      Record everything to this .tlog file
+  -h, --help             Print help
+```
+
+#### `dc-cli tlog alerts`
+
+```text
+The alerts DrorControl would have raised during the recording (position trust, geofence breaches, traffic), replayed through the core, with their time, and what the annunciator still shows at the end
+
+Usage: dc-cli tlog alerts [OPTIONS] <FILE>
+
+Arguments:
+  <FILE>  The .tlog file
+
+Options:
+      --speed <SPEED>    Replay speed (1..=100); times are from the recording either way, within about speed × 5 ms [default: 100]
       --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
       --compid <COMPID>  Our MAVLink component id [default: 190]
       --tlog <TLOG>      Record everything to this .tlog file

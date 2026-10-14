@@ -144,3 +144,25 @@ fn kml_by_flight_mode() {
     }
     std::fs::remove_file(kml).unwrap();
 }
+
+#[test]
+fn alerts_replayed_from_the_recording() {
+    let (ok, text) = dc(&["tlog", "alerts", fixture().to_str().unwrap()]);
+    assert!(ok, "{text}");
+    let lines: Vec<&str> = text.lines().collect();
+    assert!(
+        lines[0].ends_with(
+            "[1] WARNING  POSITION UNTRUSTED: EKF not initialised, no absolute position"
+        ),
+        "{text}"
+    );
+    assert!(
+        lines[1].ends_with("[1] ADVISORY Position good again"),
+        "{text}"
+    );
+    // The warning stays latched until acknowledged.
+    assert!(
+        lines[2].starts_with("at the end, vehicle 1 shows WARNING POSITION (cleared"),
+        "{text}"
+    );
+}

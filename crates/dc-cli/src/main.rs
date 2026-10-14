@@ -381,6 +381,17 @@ enum ListKind {
 
 #[derive(Subcommand)]
 enum TlogCmd {
+    /// The alerts DrorControl would have raised during the recording (position trust,
+    /// geofence breaches, traffic), replayed through the core, with their time, and what the
+    /// annunciator still shows at the end.
+    Alerts {
+        /// The .tlog file.
+        file: std::path::PathBuf,
+        /// Replay speed (1..=100); times are from the recording either way, within about
+        /// speed × 5 ms.
+        #[arg(long, default_value_t = 100)]
+        speed: u32,
+    },
     /// Link quality over time (range tests): frames received and lost per window, the
     /// radio's signal, and the longest heartbeat gap.
     Link {
@@ -1297,6 +1308,67 @@ fn ask(question: &str) -> Option<bool> {
     Some(matches!(line.trim(), "y" | "Y" | "yes" | "YES"))
 }
 
+async fn tlog_alerts(file: &std::path::Path, speed: u32) -> Result<(), String> {
+    if !(1..=100).contains(&speed) {
+        return Err("--speed is 1..=100".into());
+    }
+    // The recording's first time stamp: alert times are offsets from it.
+    let start = {
+        let f = std::fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()))?;
+        let mut r = recorder::TlogReader::new(std::io::BufReader::new(f));
+        r.next_record()
+            .map_err(|e| format!("{}: {e}", file.display()))?
+            .ok_or_else(|| format!("{}: no records", file.display()))?
+            .unix_us
+    };
+    let core = Core::start(CoreConfig::default())
+        .await
+        .map_err(|e| format!("cannot start core: {e}"))?;
+    let mut events = core.events();
+    let t0 = Instant::now();
+    core.connect(&LinkSpec::Tlog {
+        path: file.to_path_buf(),
+        speed,
+    })
+    .await
+    .map_err(|e| format!("{}: {e}", file.display()))?;
+    let mut sysids = std::collections::BTreeSet::new();
+    let mut count = 0;
+    loop {
+        match events.recv().await {
+            Ok(CoreEvent::Alert { sysid, level, text }) => {
+                let at_us = start + (t0.elapsed().as_micros() as u64) * u64::from(speed);
+                println!(
+                    "{}  [{sysid}] {:<8} {text}",
+                    tlog::utc(at_us),
+                    format!("{level:?}").to_uppercase()
+                );
+                sysids.insert(sysid);
+                count += 1;
+            }
+            Ok(CoreEvent::Link {
+                up: false, detail, ..
+            }) if detail.contains("finished") => break,
+            Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+        }
+    }
+    eprintln!("{count} alerts");
+    for sysid in sysids {
+        for a in core.annunciator(sysid) {
+            println!(
+                "at the end, vehicle {sysid} shows {} {} ({}{}, raised {} times)",
+                format!("{:?}", a.level).to_uppercase(),
+                a.id,
+                if a.active { "active" } else { "cleared" },
+                if a.acked { ", acknowledged" } else { "" },
+                a.count
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Where the vehicle-change settings are kept: `$DC_SETTINGS`, else the platform's
 /// configuration directory.
 fn settings_path() -> Result<std::path::PathBuf, String> {
@@ -2193,6 +2265,9 @@ async fn run(cli: Cli) -> Result<(), String> {
         Cmd::Log { what } => log_cmd(what),
         Cmd::Settings { what } => settings_cmd(what.as_ref().unwrap_or(&SettingsCmd::Show)).await,
         Cmd::Mission { what } => mission_cmd(&cli, what).await,
+        Cmd::Tlog {
+            what: TlogCmd::Alerts { file, speed },
+        } => tlog_alerts(file, *speed).await,
         Cmd::Tlog { what } => tlog_cmd(what),
         Cmd::Terrain { what } => terrain_cmd(what),
         Cmd::Coord { point } => {
@@ -3329,6 +3404,8 @@ fn load_params(path: &std::path::Path) -> Result<std::collections::BTreeMap<Stri
 
 fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
     let file = match what {
+        // Handled by tlog_alerts (it runs the core).
+        TlogCmd::Alerts { .. } => return Ok(()),
         TlogCmd::Info { file } => file,
         TlogCmd::Link {
             file,
