@@ -265,6 +265,58 @@ impl Terrain {
     }
 }
 
+/// Samples per side of one `TERRAIN_DATA` message.
+pub const TERRAIN_SUBGRID: u32 = 4;
+/// Sub-grids per block north (7) and east (8): a block is 28 × 32 samples
+/// (`AP_Terrain.h`, 4.6.3 and 4.7.1).
+pub const TERRAIN_BLOCK_MUL: (u32, u32) = (7, 8);
+
+/// ArduPilot's `Location::offset_latlng`: move `(lat, lon)` (1e-7 degrees) by metres north and
+/// east on its flat-earth approximation, so the GCS samples exactly where the vehicle files
+/// each terrain height.
+pub fn offset_e7(lat: i32, lon: i32, north_m: f64, east_m: f64) -> (i32, i32) {
+    const LATLON_TO_M_INV: f64 = 89.832_049_533_689_22;
+    let dlat = (north_m * LATLON_TO_M_INV) as i32;
+    let mid = f64::from(lat) + f64::from(dlat / 2);
+    let scale = (mid * 1e-7_f64).to_radians().cos().max(0.01);
+    let dlon = (east_m * LATLON_TO_M_INV / scale) as i64;
+    (lat + dlat, (i64::from(lon) + dlon) as i32)
+}
+
+/// The 16 heights (whole metres above mean sea level, row = north index) of sub-grid
+/// `gridbit` of the block whose south-west corner is `(lat, lon)` (1e-7 degrees) at
+/// `spacing` metres, as `TERRAIN_DATA` carries them (`AP_Terrain::handle_terrain_data`:
+/// `gridbit / 8` steps north, `gridbit % 8` east, 4 samples each). `None` when any of the 16
+/// points has no elevation: a partly known sub-grid is not sent.
+pub fn terrain_subgrid(
+    t: &Terrain,
+    lat: i32,
+    lon: i32,
+    spacing: u16,
+    gridbit: u8,
+) -> Option<[i16; 16]> {
+    let (mul_x, mul_y) = TERRAIN_BLOCK_MUL;
+    if u32::from(gridbit) >= mul_x * mul_y || spacing == 0 {
+        return None;
+    }
+    let x0 = u32::from(gridbit) / mul_y * TERRAIN_SUBGRID;
+    let y0 = u32::from(gridbit) % mul_y * TERRAIN_SUBGRID;
+    let mut out = [0i16; 16];
+    for i in 0..TERRAIN_SUBGRID {
+        for j in 0..TERRAIN_SUBGRID {
+            let (la, lo) = offset_e7(
+                lat,
+                lon,
+                f64::from((x0 + i) * u32::from(spacing)),
+                f64::from((y0 + j) * u32::from(spacing)),
+            );
+            let h = t.elevation(f64::from(la) * 1e-7, f64::from(lo) * 1e-7)?;
+            out[(i * TERRAIN_SUBGRID + j) as usize] = h.round().clamp(-32768.0, 32767.0) as i16;
+        }
+    }
+    Some(out)
+}
+
 /// Lowest clearance over terrain on one leg of a mission.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LegClearance {
@@ -782,5 +834,49 @@ pub(crate) mod tests {
         t.add_grid(g);
         assert_eq!(t.len(), 1);
         assert!(near(t.elevation(-35.02, 149.02), 320.0));
+    }
+
+    #[test]
+    fn terrain_subgrids_sample_where_ardupilot_files_them() {
+        // ArduPilot's own debug check (TerrainGCS.cpp): the far corner of a 100 m block is the
+        // corner offset by 28 × 100 m north and 32 × 100 m east.
+        let (lat, lon) = (-353_700_000, 1_491_500_000);
+        let (la, lo) = offset_e7(lat, lon, 2800.0, 3200.0);
+        assert_eq!(la - lat, 251_529, "2800 m × 89.832…");
+        assert!(
+            (f64::from(lo - lon) - 3200.0 * 89.832_049_5 / (-35.3574f64).to_radians().cos()).abs()
+                < 2.0
+        );
+        // A plane rising 1 m per 10 m east: each row of a sub-grid rises by spacing/10.
+        let g = GeoGrid::new(
+            -35.30,
+            149.10,
+            (0.001, 0.001),
+            (200, 200),
+            (0..200 * 200)
+                .map(|k| {
+                    let c = k % 200;
+                    500.0 + (c as f32) * 0.001 * 91_000.0 / 10.0
+                })
+                .collect(),
+            None,
+        )
+        .unwrap();
+        let mut t = Terrain::default();
+        t.add_grid(g);
+        let d = terrain_subgrid(&t, lat, lon, 100, 9).unwrap(); // second row, second column
+        // Same east offset down a column, 10 m more per 100 m east along a row.
+        assert_eq!(d[0], d[4]);
+        assert!((i32::from(d[1]) - i32::from(d[0]) - 10).abs() <= 1, "{d:?}");
+        assert_eq!(
+            terrain_subgrid(&t, lat, lon, 100, 56),
+            None,
+            "only 56 sub-grids"
+        );
+        assert_eq!(
+            terrain_subgrid(&t, -100_000_000, lon, 100, 0),
+            None,
+            "no terrain there"
+        );
     }
 }
