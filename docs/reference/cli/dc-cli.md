@@ -49,7 +49,7 @@ Commands:
   settings        Vehicle-change settings: in-flight mission upload, geofence/rally upload and log erase. All off by default; each shows its danger when turned on. Without a subcommand: show them
   mission         Mission files (QGC WPL 110, Mission Planner's .waypoints, QGC .plan): download, upload, check, compare, generate
   coord           A position in every display format: decimal degrees, DMS, degrees and decimal minutes, UTM and MGRS (WGS-84)
-  terrain         Ground elevation from SRTM .hgt tiles on disk (offline)
+  terrain         Ground elevation from SRTM .hgt tiles and elevation GeoTIFFs on disk (offline)
   tlog            Telemetry logs (.tlog, as recorded with --tlog or by Mission Planner)
   cot             Cursor-on-Target position events for every vehicle (ATAK/WinTAK/TAK), printed or sent over UDP (e.g. the ATAK multicast 239.2.3.1:6969)
   telemetry       Print a telemetry summary once per second
@@ -1392,7 +1392,7 @@ Options:
       --sysid <SYSID>                  Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
       --compid <COMPID>                Our MAVLink component id [default: 190]
       --fence <FENCE>                  Check the whole path against this geofence (fence items as saved by `mission download --type fence --out` or `mission fence-from-kml`, or a .plan's geofence); exits with failure on a breach
-      --dem <DEM>                      Check the height above the ground along every leg with the SRTM tiles in this directory (heights above home taken from the ground at home); exits with failure below --min-clearance
+      --dem <DEM>                      Check the height above the ground along every leg with the terrain tiles in this directory (heights above home taken from the ground at home); exits with failure below --min-clearance
       --tlog <TLOG>                    Record everything to this .tlog file
       --min-clearance <MIN_CLEARANCE>  Lowest acceptable height above the ground with --dem, m [default: 20]
   -h, --help                           Print help
@@ -1485,7 +1485,7 @@ Arguments:
   <FILE>  The mission file
 
 Options:
-      --dem <DEM>        Directory holding the SRTM tiles
+      --dem <DEM>        Directory holding the terrain tiles (SRTM .hgt and/or elevation GeoTIFFs)
       --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
       --agl <AGL>        Height above the ground, m
       --compid <COMPID>  Our MAVLink component id [default: 190]
@@ -1506,7 +1506,7 @@ Arguments:
   <FILE>  The mission file
 
 Options:
-      --dem <DEM>        Directory holding the SRTM tiles
+      --dem <DEM>        Directory holding the terrain tiles (SRTM .hgt and/or elevation GeoTIFFs)
       --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
       --compid <COMPID>  Our MAVLink component id [default: 190]
       --step <STEP>      Sample spacing along the legs, m [default: 25]
@@ -1727,7 +1727,7 @@ Options:
 ### `dc-cli terrain`
 
 ```text
-Ground elevation from SRTM .hgt tiles on disk (offline)
+Ground elevation from SRTM .hgt tiles and elevation GeoTIFFs on disk (offline)
 
 Usage: dc-cli terrain [OPTIONS] <COMMAND>
 
@@ -1753,7 +1753,7 @@ Arguments:
   <POINTS>  Points as "lat,lon;lat,lon;..."
 
 Options:
-      --dem <DEM>        Directory holding the tiles (e.g. S36E149.hgt, 1″ or 3″)
+      --dem <DEM>        Directory holding the tiles: SRTM .hgt (e.g. S36E149.hgt, 1″ or 3″) and elevation GeoTIFFs in EPSG:4326 (e.g. Copernicus GLO-30; heights above EGM2008, within a metre or so of SRTM's EGM96)
       --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
       --compid <COMPID>  Our MAVLink component id [default: 190]
       --tlog <TLOG>      Record everything to this .tlog file

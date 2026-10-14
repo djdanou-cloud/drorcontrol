@@ -138,10 +138,101 @@ impl HgtTile {
     }
 }
 
+/// A georeferenced elevation grid of any extent (from a GeoTIFF, e.g. Copernicus GLO-30
+/// or an SRTM GeoTIFF): samples on a regular latitude/longitude grid (WGS-84), rows from
+/// north to south. Sampled like the `.hgt` tiles (bilinear, nodata corners left out).
+#[derive(Debug, Clone, PartialEq)]
+pub struct GeoGrid {
+    /// Latitude of the first row's sample centres, degrees.
+    pub north: f64,
+    /// Longitude of the first column's sample centres, degrees.
+    pub west: f64,
+    /// Spacing between rows (positive, going south) and columns, degrees.
+    pub step: (f64, f64),
+    /// Columns and rows.
+    pub size: (usize, usize),
+    data: Vec<f32>,
+    nodata: Option<f32>,
+}
+
+impl GeoGrid {
+    /// A grid from its samples (row-major, north first). `None` if `data` does not match
+    /// `size` or a step is not positive.
+    pub fn new(
+        north: f64,
+        west: f64,
+        step: (f64, f64),
+        size: (usize, usize),
+        data: Vec<f32>,
+        nodata: Option<f32>,
+    ) -> Option<GeoGrid> {
+        (data.len() == size.0 * size.1
+            && step.0 > 0.0
+            && step.1 > 0.0
+            && size.0 >= 2
+            && size.1 >= 2)
+            .then_some(GeoGrid {
+                north,
+                west,
+                step,
+                size,
+                data,
+                nodata,
+            })
+    }
+
+    /// Elevation at (lat, lon); `None` outside the grid or over nodata.
+    pub fn elevation(&self, lat: f64, lon: f64) -> Option<f64> {
+        let (cols, rows) = self.size;
+        // A point on the edge can land a rounding error outside it: allow 1e-6 of a step.
+        const EDGE: f64 = 1e-6;
+        let fr = (self.north - lat) / self.step.0;
+        let fc = (lon - self.west) / self.step.1;
+        let (rmax, cmax) = ((rows - 1) as f64, (cols - 1) as f64);
+        if !(-EDGE..=rmax + EDGE).contains(&fr) || !(-EDGE..=cmax + EDGE).contains(&fc) {
+            return None;
+        }
+        let (fr, fc) = (fr.clamp(0.0, rmax), fc.clamp(0.0, cmax));
+        let (r0, c0) = (
+            (fr.floor() as usize).min(rows - 2),
+            (fc.floor() as usize).min(cols - 2),
+        );
+        let (dr, dc) = (fr - r0 as f64, fc - c0 as f64);
+        let mut sum = 0.0;
+        let mut weight = 0.0;
+        for (r, c, w) in [
+            (r0, c0, (1.0 - dr) * (1.0 - dc)),
+            (r0, c0 + 1, (1.0 - dr) * dc),
+            (r0 + 1, c0, dr * (1.0 - dc)),
+            (r0 + 1, c0 + 1, dr * dc),
+        ] {
+            let v = self.data[r * cols + c];
+            if v.is_nan() || self.nodata.is_some_and(|n| v == n) {
+                continue;
+            }
+            sum += f64::from(v) * w;
+            weight += w;
+        }
+        // A point exactly on valid corners has weight; on a void it takes the valid mean.
+        if weight > 1e-12 {
+            Some(sum / weight)
+        } else {
+            let valid: Vec<f64> = [(r0, c0), (r0, c0 + 1), (r0 + 1, c0), (r0 + 1, c0 + 1)]
+                .iter()
+                .map(|&(r, c)| self.data[r * cols + c])
+                .filter(|v| !v.is_nan() && self.nodata.is_none_or(|n| *v != n))
+                .map(f64::from)
+                .collect();
+            (!valid.is_empty()).then(|| valid.iter().sum::<f64>() / valid.len() as f64)
+        }
+    }
+}
+
 /// A set of tiles.
 #[derive(Debug, Clone, Default)]
 pub struct Terrain {
     tiles: HashMap<(i32, i32), HgtTile>,
+    grids: Vec<GeoGrid>,
 }
 
 impl Terrain {
@@ -150,21 +241,27 @@ impl Terrain {
         self.tiles.insert((t.lat0, t.lon0), t);
     }
 
-    /// Number of tiles.
+    /// Add a georeferenced grid (searched after the `.hgt` tiles, in the order added).
+    pub fn add_grid(&mut self, g: GeoGrid) {
+        self.grids.push(g);
+    }
+
+    /// Number of tiles and grids.
     pub fn len(&self) -> usize {
-        self.tiles.len()
+        self.tiles.len() + self.grids.len()
     }
 
-    /// No tiles.
+    /// No tiles or grids.
     pub fn is_empty(&self) -> bool {
-        self.tiles.is_empty()
+        self.tiles.is_empty() && self.grids.is_empty()
     }
 
-    /// Elevation at (lat, lon); `None` without a tile there or over a void.
+    /// Elevation at (lat, lon); `None` without a tile or grid there or over a void.
     pub fn elevation(&self, lat: f64, lon: f64) -> Option<f64> {
         self.tiles
-            .get(&(lat.floor() as i32, lon.floor() as i32))?
-            .elevation(lat, lon)
+            .get(&(lat.floor() as i32, lon.floor() as i32))
+            .and_then(|t| t.elevation(lat, lon))
+            .or_else(|| self.grids.iter().find_map(|g| g.elevation(lat, lon)))
     }
 }
 
@@ -656,5 +753,34 @@ pub(crate) mod tests {
         );
         assert!(p.windows(2).all(|w| w[1].dist_m >= w[0].dist_m));
         assert_eq!(p.last().unwrap().alt_rel_m, 0.0, "landed");
+    }
+
+    #[test]
+    fn geogrid_bilinear_and_nodata() {
+        // 3×3 samples, 0.01° apart, NW corner sample at (-35.0, 149.0).
+        let g = GeoGrid::new(
+            -35.0,
+            149.0,
+            (0.01, 0.01),
+            (3, 3),
+            vec![
+                100.0, 110.0, 120.0, 200.0, 210.0, -9999.0, 300.0, 310.0, 320.0,
+            ],
+            Some(-9999.0),
+        )
+        .unwrap();
+        let near = |a: Option<f64>, b: f64| a.is_some_and(|a| (a - b).abs() < 1e-6);
+        assert!(near(g.elevation(-35.0, 149.0), 100.0));
+        assert!(near(g.elevation(-35.01, 149.01), 210.0));
+        let mid = g.elevation(-35.005, 149.005).unwrap();
+        assert!((mid - 155.0).abs() < 1e-9, "{mid}");
+        // Next to the nodata sample: the valid corners re-weighted.
+        let near_void = g.elevation(-35.01, 149.015).unwrap();
+        assert!((near_void - 210.0).abs() < 1e-9, "{near_void}");
+        assert_eq!(g.elevation(-34.99, 149.0), None, "north of the grid");
+        let mut t = Terrain::default();
+        t.add_grid(g);
+        assert_eq!(t.len(), 1);
+        assert!(near(t.elevation(-35.02, 149.02), 320.0));
     }
 }

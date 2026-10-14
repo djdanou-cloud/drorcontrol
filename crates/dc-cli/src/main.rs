@@ -24,6 +24,7 @@
 //! armed needs its in-flight warning acknowledged as well). Vehicle commands go only through
 //! the safety interlocks (`CommandPolicy`, plan 08 §4).
 
+mod geotiff;
 mod tlog;
 mod tlog_health;
 mod tlog_link;
@@ -280,7 +281,7 @@ enum Cmd {
         #[arg(allow_hyphen_values = true)]
         point: String,
     },
-    /// Ground elevation from SRTM .hgt tiles on disk (offline).
+    /// Ground elevation from SRTM .hgt tiles and elevation GeoTIFFs on disk (offline).
     Terrain {
         #[command(subcommand)]
         what: TerrainCmd,
@@ -345,7 +346,9 @@ struct VehicleArgs {
 enum TerrainCmd {
     /// Elevation above the geoid (EGM96) at each point, bilinear between samples.
     Elevation {
-        /// Directory holding the tiles (e.g. S36E149.hgt, 1″ or 3″).
+        /// Directory holding the tiles: SRTM .hgt (e.g. S36E149.hgt, 1″ or 3″) and elevation
+        /// GeoTIFFs in EPSG:4326 (e.g. Copernicus GLO-30; heights above EGM2008, within a
+        /// metre or so of SRTM's EGM96).
         #[arg(long)]
         dem: std::path::PathBuf,
         /// Points as "lat,lon;lat,lon;...".
@@ -637,7 +640,7 @@ enum MissionCmd {
         /// geofence); exits with failure on a breach.
         #[arg(long)]
         fence: Option<std::path::PathBuf>,
-        /// Check the height above the ground along every leg with the SRTM tiles in this
+        /// Check the height above the ground along every leg with the terrain tiles in this
         /// directory (heights above home taken from the ground at home); exits with failure
         /// below --min-clearance.
         #[arg(long)]
@@ -705,7 +708,7 @@ enum MissionCmd {
     TerrainFollow {
         /// The mission file.
         file: std::path::PathBuf,
-        /// Directory holding the SRTM tiles.
+        /// Directory holding the terrain tiles (SRTM .hgt and/or elevation GeoTIFFs).
         #[arg(long)]
         dem: std::path::PathBuf,
         /// Height above the ground, m.
@@ -723,7 +726,7 @@ enum MissionCmd {
     Profile {
         /// The mission file.
         file: std::path::PathBuf,
-        /// Directory holding the SRTM tiles.
+        /// Directory holding the terrain tiles (SRTM .hgt and/or elevation GeoTIFFs).
         #[arg(long)]
         dem: std::path::PathBuf,
         /// Sample spacing along the legs, m.
@@ -3904,18 +3907,39 @@ fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
     Ok(())
 }
 
-/// The SRTM tiles under `dir` covering `points` (file names as published, upper or lower
-/// case). Tiles that are not there are listed by name.
+/// The terrain under `dir` covering `points`: every elevation GeoTIFF there, and the SRTM
+/// tiles (file names as published, upper or lower case) for points no GeoTIFF covers; tiles
+/// that are not there are listed by name.
 fn load_terrain(
     dir: &std::path::Path,
     points: impl IntoIterator<Item = (f64, f64)>,
 ) -> Result<(protocols::terrain::Terrain, Vec<String>), String> {
     let mut t = protocols::terrain::Terrain::default();
     let mut missing = Vec::new();
+    // GeoTIFF grids (any extent): every .tif/.tiff in the directory.
+    let mut grids = Vec::new();
+    for e in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
+        let p = e.map_err(|e| e.to_string())?.path();
+        if p.extension()
+            .is_some_and(|x| x.eq_ignore_ascii_case("tif") || x.eq_ignore_ascii_case("tiff"))
+        {
+            let f = std::fs::File::open(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+            grids.push(
+                geotiff::read(std::io::BufReader::new(f))
+                    .map_err(|e| format!("{}: {e}", p.display()))?,
+            );
+        }
+    }
+    let points: Vec<(f64, f64)> = points.into_iter().collect();
+    let in_grids = |lat: f64, lon: f64| grids.iter().any(|g| g.elevation(lat, lon).is_some());
     let names: std::collections::BTreeSet<String> = points
-        .into_iter()
-        .map(|(lat, lon)| protocols::terrain::tile_name(lat, lon))
+        .iter()
+        .filter(|(lat, lon)| !in_grids(*lat, *lon))
+        .map(|(lat, lon)| protocols::terrain::tile_name(*lat, *lon))
         .collect();
+    for g in grids {
+        t.add_grid(g);
+    }
     for name in names {
         let found = [name.clone(), name.to_lowercase()]
             .into_iter()
