@@ -716,6 +716,20 @@ enum MissionCmd {
         #[arg(long)]
         out: Option<std::path::PathBuf>,
     },
+    /// Where RTL would go from a position: home or a rally point, by ArduCopter's rules
+    /// (nearest rally point inside the fence; home if it is beyond RALLY_LIMIT_KM or, with
+    /// RALLY_INCL_HOME, if home is nearer). Home, rally points and fence from a .plan.
+    RtlTarget {
+        /// The .plan (home is its mission's item 0).
+        file: std::path::PathBuf,
+        /// The position, as lat,lon.
+        #[arg(long, allow_hyphen_values = true)]
+        from: String,
+        /// The vehicle's parameters (RALLY_LIMIT_KM, RALLY_INCL_HOME, FENCE_ENABLE,
+        /// FENCE_TYPE...); Copter defaults without.
+        #[arg(long)]
+        params: Option<std::path::PathBuf>,
+    },
     /// A geofence from polygons drawn in Google Earth: every KML polygon becomes an inclusion
     /// zone, or an exclusion zone when its name contains "exclusion", "no-fly", "no fly" or
     /// "nofly" (any case). Offline; check a mission against it with `mission check --fence`.
@@ -4262,6 +4276,65 @@ async fn download_mission(
 
 async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
     match what {
+        MissionCmd::RtlTarget { file, from, params } => {
+            let [at] = parse_polygon(from)?[..] else {
+                return Err("--from is one lat,lon".into());
+            };
+            let mission = read_mission(file)?;
+            let home = mission
+                .first()
+                .map(|h| (f64::from(h.x) * 1e-7, f64::from(h.y) * 1e-7))
+                .ok_or_else(|| format!("{}: no home (mission item 0)", file.display()))?;
+            let rally: Vec<(f64, f64)> = read_rally(file)?
+                .iter()
+                .map(|r| (f64::from(r.x) * 1e-7, f64::from(r.y) * 1e-7))
+                .collect();
+            let fence = protocols::fence::Fence::from_items(&read_fence(file)?)?;
+            let p = match params {
+                Some(p) => Some(load_params(p)?),
+                None => None,
+            };
+            let rp = p
+                .as_ref()
+                .map_or_else(Default::default, protocols::rally::RallyParams::from_params);
+            let fp = p
+                .as_ref()
+                .map_or_else(Default::default, protocols::fence::FenceParams::from_params);
+            // Copter skips rally points outside the fence only while it is enabled.
+            let fence_on = !fence.is_empty()
+                && p.as_ref()
+                    .is_none_or(|p| p.get("FENCE_ENABLE").is_some_and(|v| *v != 0.0));
+            println!(
+                "RALLY_LIMIT_KM {}, RALLY_INCL_HOME {}, fence {}{}",
+                rp.limit_km,
+                u8::from(rp.incl_home),
+                if fence_on { "on" } else { "off" },
+                if p.is_none() {
+                    " (Copter defaults; a fence in the file is taken as enabled: --params for the vehicle's)"
+                } else {
+                    ""
+                }
+            );
+            let d_home = protocols::rally::distance_m(at, home);
+            match protocols::rally::rtl_target(
+                at,
+                home,
+                &rally,
+                rp,
+                fence_on.then_some((&fence, &fp)),
+            ) {
+                protocols::rally::RtlTarget::Home { why } => {
+                    println!("RTL goes home, {d_home:.0} m away: {why}");
+                }
+                protocols::rally::RtlTarget::Rally { index, distance_m } => println!(
+                    "RTL goes to rally point {} at {:.7},{:.7}, {distance_m:.0} m away (home is {d_home:.0} m)",
+                    index + 1,
+                    rally[index].0,
+                    rally[index].1
+                ),
+            }
+            Ok(())
+        }
         MissionCmd::Upload {
             vehicle,
             file,

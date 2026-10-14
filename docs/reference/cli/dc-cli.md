@@ -1268,6 +1268,7 @@ Commands:
   terrain-follow  Terrain following without terrain data on the vehicle: sets every waypoint above home to --agl above the ground under it (SRTM tiles in --dem), optionally adding waypoints every --step m between them. Offline; prints the resulting clearance
   profile         The mission's altitude against the ground along the path, as CSV (dist_m, seq, lat, lon, ground_m, alt_msl_m, agl_m; SRTM tiles in --dem), for a profile chart
   from-kml        A mission from a path drawn in Google Earth (the KML's first LineString): takeoff, a waypoint per point in drawing order, RTL. Offline; check and upload it as usual
+  rtl-target      Where RTL would go from a position: home or a rally point, by ArduCopter's rules (nearest rally point inside the fence; home if it is beyond RALLY_LIMIT_KM or, with RALLY_INCL_HOME, if home is nearer). Home, rally points and fence from a .plan
   fence-from-kml  A geofence from polygons drawn in Google Earth: every KML polygon becomes an inclusion zone, or an exclusion zone when its name contains "exclusion", "no-fly", "no fly" or "nofly" (any case). Offline; check a mission against it with `mission check --fence`
   rally-from-kml  Rally points from points (placemarks) drawn in Google Earth, at one altitude above home. Offline
   convert         Convert a mission between QGroundControl `.plan` and `.waypoints` (QGC WPL 110), by the file extensions. A .plan's geofence and rally points are listed; only the mission is written to a .waypoints file
@@ -1509,6 +1510,25 @@ Options:
       --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
       --compid <COMPID>  Our MAVLink component id [default: 190]
       --out <OUT>        Output file (.waypoints or .plan; default: print)
+      --tlog <TLOG>      Record everything to this .tlog file
+  -h, --help             Print help
+```
+
+#### `dc-cli mission rtl-target`
+
+```text
+Where RTL would go from a position: home or a rally point, by ArduCopter's rules (nearest rally point inside the fence; home if it is beyond RALLY_LIMIT_KM or, with RALLY_INCL_HOME, if home is nearer). Home, rally points and fence from a .plan
+
+Usage: dc-cli mission rtl-target [OPTIONS] --from <FROM> <FILE>
+
+Arguments:
+  <FILE>  The .plan (home is its mission's item 0)
+
+Options:
+      --from <FROM>      The position, as lat,lon
+      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>  Our MAVLink component id [default: 190]
+      --params <PARAMS>  The vehicle's parameters (RALLY_LIMIT_KM, RALLY_INCL_HOME, FENCE_ENABLE, FENCE_TYPE...); Copter defaults without
       --tlog <TLOG>      Record everything to this .tlog file
   -h, --help             Print help
 ```

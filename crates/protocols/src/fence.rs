@@ -172,7 +172,7 @@ fn dist(o: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
 }
 
 /// What `p` (at `alt_rel` above home) breaches, if anything.
-fn breach_at(
+pub(crate) fn breach_at(
     home: (f64, f64),
     fence: &Fence,
     params: &FenceParams,

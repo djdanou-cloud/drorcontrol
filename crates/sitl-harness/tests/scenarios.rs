@@ -2105,3 +2105,130 @@ async fn fence_breach_is_reported_and_alerted() {
     let f = core.fleet().get(1).unwrap().fence.clone().unwrap().value;
     assert!(f.breached && f.breach_count >= 1, "{f:?}");
 }
+
+/// RTL picks the rally point the GCS predicts (`protocols::rally::rtl_target`, Copter's
+/// rules): with home 220 m away and a rally point 30 m away, RTL flies to the rally point.
+#[tokio::test(flavor = "multi_thread")]
+async fn rtl_goes_where_the_gcs_predicts() {
+    use dc_core::{
+        ArmedWrite, Command, CommandState, MissionItem, MissionType, PositionTrust, VehicleChange,
+    };
+    let Some(cfg) = SitlConfig::copter_or_skip() else {
+        return;
+    };
+    let sitl = Sitl::start(&cfg).unwrap();
+    let core = core_on(sitl.addr()).await;
+    assert_eq!(
+        core.wait_for_vehicle(Duration::from_secs(60)).await,
+        Some(1)
+    );
+    until(Duration::from_secs(90), "position good (EKF)", || {
+        core.nav_health(1).trust == PositionTrust::Good
+    })
+    .await;
+    until(Duration::from_secs(20), "home", || {
+        core.fleet().get(1).is_some_and(|v| v.home.is_some())
+    })
+    .await;
+    let home = core.fleet().get(1).unwrap().home.clone().unwrap().value;
+    let (h, m_lat, m_lon) = (
+        (home.lat_deg, home.lon_deg),
+        111_195.0,
+        111_195.0 * home.lat_deg.to_radians().cos(),
+    );
+    let at = |n: f64, e: f64| (h.0 + n / m_lat, h.1 + e / m_lon);
+    let rally = [at(250.0, 0.0), at(0.0, 250.0)];
+    let items: Vec<MissionItem> = rally
+        .iter()
+        .map(|(lat, lon)| MissionItem {
+            frame: 3,
+            command: 5100,
+            params: [0.0; 4],
+            x: (lat * 1e7).round() as i32,
+            y: (lon * 1e7).round() as i32,
+            z: 20.0,
+            autocontinue: true,
+        })
+        .collect();
+    core.set_vehicle_change(VehicleChange::FenceRallyUpload, true);
+    let r = core
+        .upload_items((1, 1), MissionType::Rally, items, ArmedWrite::DisarmedOnly)
+        .await
+        .unwrap();
+    assert!(r.verified(), "{r:?}");
+    let target = at(0.0, 220.0);
+    let predicted = protocols::rally::rtl_target(
+        target,
+        h,
+        &rally,
+        protocols::rally::RallyParams::default(),
+        None,
+    );
+    assert!(
+        matches!(
+            predicted,
+            protocols::rally::RtlTarget::Rally { index: 1, .. }
+        ),
+        "{predicted:?}"
+    );
+
+    let mode = |name| dc_core::Firmware::Copter.mode_number(name).unwrap();
+    let s = command(
+        &core,
+        Command::SetMode {
+            custom_mode: mode("GUIDED"),
+        },
+    )
+    .await;
+    assert_eq!(s.state, CommandState::Verified, "{}", s.summary());
+    let t0 = Instant::now();
+    loop {
+        let s = command(&core, Command::Arm).await;
+        if s.state == CommandState::Verified {
+            break;
+        }
+        assert!(t0.elapsed() < Duration::from_secs(60), "{}", s.summary());
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+    command(&core, Command::Takeoff { alt_m: 20.0 }).await;
+    let pos = || {
+        core.fleet()
+            .get(1)
+            .and_then(|v| v.position.clone())
+            .map(|p| p.value)
+    };
+    until(Duration::from_secs(60), "climb to 18 m", || {
+        pos().is_some_and(|p| p.alt_rel_m > 18.0)
+    })
+    .await;
+    command(
+        &core,
+        Command::Reposition {
+            lat_deg: target.0,
+            lon_deg: target.1,
+            alt_m: 20.0,
+        },
+    )
+    .await;
+    let dist = |p: (f64, f64)| {
+        protocols::rally::distance_m(p, pos().map_or(h, |q| (q.lat_deg, q.lon_deg)))
+    };
+    until(Duration::from_secs(90), "at the go-to point", || {
+        dist(target) < 5.0
+    })
+    .await;
+    let s = command(
+        &core,
+        Command::SetMode {
+            custom_mode: mode("RTL"),
+        },
+    )
+    .await;
+    assert_eq!(s.state, CommandState::Verified, "{}", s.summary());
+    until(Duration::from_secs(60), "at rally point 2", || {
+        dist(rally[1]) < 10.0
+    })
+    .await;
+    eprintln!("RTL reached rally point 2 ({:.0} m from home)", dist(h));
+    assert!(dist(h) > 200.0, "it did not go home");
+}
