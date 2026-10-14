@@ -20,6 +20,9 @@ pub struct Landing {
     pub to_disarm_s: Option<f64>,
 }
 
+/// How long before the touchdown event a disarm still belongs to that landing.
+const DISARM_BEFORE_TOUCHDOWN_US: u64 = 1_000_000;
+
 /// Every landing in the log.
 pub fn landings(log: &Log) -> Vec<Landing> {
     let Some(ev) = log.column("EV", "Id", None) else {
@@ -43,10 +46,13 @@ pub fn landings(log: &Log) -> Vec<Landing> {
                         .collect()
                 })
                 .unwrap_or_default();
+            // A disarm can be logged just before the touchdown event: disarming on the ground
+            // makes the land detector report landed at once (bench, 4.6.3: both at 47.584 s, the
+            // disarm first). Up to 1 s before counts, as 0 s to disarm.
             let disarm = armed
                 .iter()
                 .filter_map(|p| p.end_us)
-                .filter(|e| *e >= *t)
+                .filter(|e| *e + DISARM_BEFORE_TOUCHDOWN_US >= *t)
                 .min();
             Landing {
                 time_us: *t,
@@ -56,7 +62,7 @@ pub fn landings(log: &Log) -> Vec<Landing> {
                 } else {
                     before.iter().sum::<f64>() / before.len() as f64
                 },
-                to_disarm_s: disarm.map(|d| (d - t) as f64 / 1e6),
+                to_disarm_s: disarm.map(|d| d.saturating_sub(*t) as f64 / 1e6),
             }
         })
         .collect()
@@ -91,5 +97,18 @@ mod tests {
         assert_eq!(l[0].max_descent_ms, 1.5, "7.5 s is within 3 s of touchdown");
         assert!((l[0].mean_descent_ms - 0.625).abs() < 1e-9, "{l:?}");
         assert_eq!(l[0].to_disarm_s, Some(2.5));
+    }
+
+    #[test]
+    fn a_disarm_logged_just_before_touchdown_counts() {
+        let mut b = LogBuilder::default();
+        b.format("ARM", "QBIBB", "TimeUS,ArmState,ArmChecks,Forced,Method")
+            .format("EV", "QB", "TimeUS,Id");
+        b.rec("ARM", &[N(25e6), N(1.0), N(0.0), N(0.0), N(0.0)]);
+        // Bench, 4.6.3: DISARMED and LAND_COMPLETE both at 47.584 s, the disarm 40 µs first.
+        b.rec("ARM", &[N(47_584_000.0), N(0.0), N(0.0), N(0.0), N(0.0)]);
+        b.rec("EV", &[N(47_584_040.0), N(18.0)]);
+        let l = landings(&b.open());
+        assert_eq!(l[0].to_disarm_s, Some(0.0), "{l:?}");
     }
 }
