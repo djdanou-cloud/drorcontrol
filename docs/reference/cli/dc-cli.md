@@ -2043,6 +2043,8 @@ Options:
       --sysid <SYSID>      Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
       --compid <COMPID>    Our MAVLink component id [default: 190]
       --seconds <SECONDS>  Stop after this many seconds [default: 10]
+      --fence <FENCE>      Also show each vehicle's margin to this geofence (a .plan's, or QGC WPL fence items): inside or not, the nearest boundary, the height left below FENCE_ALT_MAX
       --tlog <TLOG>        Record everything to this .tlog file
+      --params <PARAMS>    The vehicle's parameters, for FENCE_TYPE's circle and altitude
   -h, --help               Print help
 ```

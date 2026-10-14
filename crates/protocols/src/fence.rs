@@ -224,6 +224,89 @@ pub(crate) fn breach_at(
     None
 }
 
+/// Where a position stands against the fence.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Margin {
+    /// What it breaches now, if anything (as [`check_path`] words it).
+    pub breach: Option<String>,
+    /// Distance to the nearest horizontal boundary (any zone edge or circle, and
+    /// `FENCE_RADIUS`), m, and which; `None` without horizontal fences.
+    pub nearest: Option<(f64, String)>,
+    /// Height left below `FENCE_ALT_MAX`, m (negative above it).
+    pub below_alt_max_m: Option<f64>,
+}
+
+/// Distance from `p` to the segment `a`–`b`, on the local plane about `o`.
+fn to_segment(o: (f64, f64), p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
+    let (p, a, b) = (xy(o, p), xy(o, a), xy(o, b));
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let len2 = dx * dx + dy * dy;
+    let t = if len2 > 0.0 {
+        (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / len2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    (p.0 - a.0 - t * dx).hypot(p.1 - a.1 - t * dy)
+}
+
+/// Where `p` (at `alt_rel` above `home`) stands against the fence: breach, nearest
+/// boundary and height margin.
+pub fn margin(
+    home: (f64, f64),
+    fence: &Fence,
+    params: &FenceParams,
+    p: (f64, f64),
+    alt_rel: f64,
+) -> Margin {
+    let mut near: Vec<(f64, String)> = Vec::new();
+    let polys = fence
+        .inclusion_polygons
+        .iter()
+        .map(|q| ("inclusion polygon", q))
+        .chain(
+            fence
+                .exclusion_polygons
+                .iter()
+                .map(|q| ("exclusion polygon", q)),
+        );
+    let mut counts = (0, 0);
+    for (kind, poly) in polys {
+        let n = if kind.starts_with("in") {
+            counts.0 += 1;
+            counts.0
+        } else {
+            counts.1 += 1;
+            counts.1
+        };
+        let d = poly
+            .iter()
+            .zip(poly.iter().cycle().skip(1))
+            .map(|(a, b)| to_segment(home, p, *a, *b))
+            .fold(f64::INFINITY, f64::min);
+        near.push((d, format!("{kind} {n}")));
+    }
+    for (k, (c, r)) in fence.inclusion_circles.iter().enumerate() {
+        near.push((
+            (dist(home, *c, p) - r).abs(),
+            format!("inclusion circle {}", k + 1),
+        ));
+    }
+    for (k, (c, r)) in fence.exclusion_circles.iter().enumerate() {
+        near.push((
+            (dist(home, *c, p) - r).abs(),
+            format!("exclusion circle {}", k + 1),
+        ));
+    }
+    if let Some(r) = params.circle_radius_m {
+        near.push(((dist(home, home, p) - r).abs(), "FENCE_RADIUS".into()));
+    }
+    Margin {
+        breach: breach_at(home, fence, params, p, alt_rel),
+        nearest: near.into_iter().min_by(|a, b| a.0.total_cmp(&b.0)),
+        below_alt_max_m: params.alt_max_m.map(|a| a - alt_rel),
+    }
+}
+
 /// Breaches along `path` (from [`crate::mission::path`]; its first point is home), sampled
 /// every `step_m` metres along each leg; at most one per leg.
 pub fn check_path(
@@ -603,5 +686,45 @@ mod tests {
         // A broken polygon is reported once, as ArduPilot would refuse it.
         let l = lint(&f.to_items()[1..], None, &[], &p);
         assert!(l.iter().any(|f| f.text.contains("refuses")), "{l:#?}");
+    }
+
+    #[test]
+    fn margin_to_the_nearest_boundary() {
+        let home = (-35.0, 149.0);
+        let m = 1.0 / 111_195.0;
+        let mlon = m / 35f64.to_radians().cos();
+        // A 200 m square around home, a 30 m no-fly circle 60 m north.
+        let sq = vec![
+            (home.0 - 100.0 * m, home.1 - 100.0 * mlon),
+            (home.0 + 100.0 * m, home.1 - 100.0 * mlon),
+            (home.0 + 100.0 * m, home.1 + 100.0 * mlon),
+            (home.0 - 100.0 * m, home.1 + 100.0 * mlon),
+        ];
+        let fence = Fence {
+            inclusion_polygons: vec![sq],
+            exclusion_circles: vec![((home.0 + 60.0 * m, home.1), 30.0)],
+            ..Default::default()
+        };
+        let params = FenceParams {
+            alt_max_m: Some(50.0),
+            ..Default::default()
+        };
+        // 80 m east: 20 m from the square's east edge.
+        let g = margin(home, &fence, &params, (home.0, home.1 + 80.0 * mlon), 10.0);
+        assert!(g.breach.is_none());
+        let (d, what) = g.nearest.unwrap();
+        assert!(
+            (d - 20.0).abs() < 0.5 && what == "inclusion polygon 1",
+            "{d} {what}"
+        );
+        assert_eq!(g.below_alt_max_m, Some(40.0));
+        // 55 m north: inside the no-fly circle, 25 m from its edge.
+        let g = margin(home, &fence, &params, (home.0 + 55.0 * m, home.1), 10.0);
+        assert_eq!(g.breach.as_deref(), Some("inside exclusion circle 1"));
+        let (d, what) = g.nearest.unwrap();
+        assert!(
+            (d - 25.0).abs() < 0.5 && what == "exclusion circle 1",
+            "{d} {what}"
+        );
     }
 }

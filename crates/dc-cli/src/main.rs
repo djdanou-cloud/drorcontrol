@@ -314,6 +314,13 @@ enum Cmd {
         /// Stop after this many seconds.
         #[arg(long, default_value_t = 10)]
         seconds: u64,
+        /// Also show each vehicle's margin to this geofence (a .plan's, or QGC WPL fence
+        /// items): inside or not, the nearest boundary, the height left below FENCE_ALT_MAX.
+        #[arg(long)]
+        fence: Option<std::path::PathBuf>,
+        /// The vehicle's parameters, for FENCE_TYPE's circle and altitude.
+        #[arg(long, requires = "fence")]
+        params: Option<std::path::PathBuf>,
     },
 }
 
@@ -1380,6 +1387,38 @@ async fn preflight(cli: &Cli, vehicle: &VehicleArgs, settle: f64) -> Result<(), 
         Ok(())
     } else {
         Err(format!("vehicle {sysid}: failed: {}", failed.join(", ")))
+    }
+}
+
+/// Each vehicle's margin to `fence` (needs its position and home).
+fn print_fence_margin(
+    core: &Core,
+    fence: &protocols::fence::Fence,
+    params: &protocols::fence::FenceParams,
+) {
+    for v in core.fleet().vehicles() {
+        let (Some(pos), Some(home)) = (&v.position, &v.home) else {
+            continue;
+        };
+        let (p, h) = (pos.value, home.value);
+        let m = protocols::fence::margin(
+            (h.lat_deg, h.lon_deg),
+            fence,
+            params,
+            (p.lat_deg, p.lon_deg),
+            f64::from(p.alt_rel_m),
+        );
+        let mut parts = vec![match &m.breach {
+            Some(b) => format!("OUTSIDE: {b}"),
+            None => "inside".to_string(),
+        }];
+        if let Some((d, what)) = &m.nearest {
+            parts.push(format!("{d:.0} m to {what}"));
+        }
+        if let Some(a) = m.below_alt_max_m {
+            parts.push(format!("{a:.0} m below FENCE_ALT_MAX"));
+        }
+        println!("[{}] fence margin: {}", v.sysid, parts.join(", "));
     }
 }
 
@@ -2466,14 +2505,34 @@ async fn run(cli: Cli) -> Result<(), String> {
             eprintln!("{sent} CoT events");
             Ok(())
         }
-        Cmd::Telemetry { connect, seconds } => {
+        Cmd::Telemetry {
+            connect,
+            seconds,
+            fence,
+            params,
+        } => {
+            let fence = match fence {
+                Some(f) => Some((
+                    protocols::fence::Fence::from_items(&read_fence(f)?)?,
+                    match params {
+                        Some(p) => protocols::fence::FenceParams::from_params(&load_params(p)?),
+                        None => Default::default(),
+                    },
+                )),
+                None => None,
+            };
             let core = start(&cli, connect).await?;
             let mut events = core.events();
             let end = Instant::now() + Duration::from_secs(*seconds);
             let mut tick = tokio::time::interval(Duration::from_secs(1));
             while Instant::now() < end {
                 tokio::select! {
-                    _ = tick.tick() => print_fleet(&core),
+                    _ = tick.tick() => {
+                        print_fleet(&core);
+                        if let Some((f, p)) = &fence {
+                            print_fence_margin(&core, f, p);
+                        }
+                    }
                     ev = events.recv() => match ev {
                         Ok(CoreEvent::StatusText { sysid, text }) => println!("[{sysid}] sev{} {}", text.severity, text.text),
                         Ok(CoreEvent::Link { link, up, detail }) => println!("{link} {}: {detail}", if up { "up" } else { "down" }),

@@ -182,3 +182,24 @@ fn preflight_from_the_recording() {
         assert!(text.contains(line), "{line}\n{text}");
     }
 }
+
+#[test]
+fn telemetry_shows_the_fence_margin() {
+    let link = format!("tlog:{}@20", fixture().display());
+    let plan =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/dev/bench/bench-test.plan");
+    let (ok, text) = dc(&[
+        "telemetry",
+        "--connect",
+        &link,
+        "--seconds",
+        "3",
+        "--fence",
+        plan.to_str().unwrap(),
+    ]);
+    assert!(ok, "{text}");
+    assert!(
+        text.contains("[1] fence margin: inside, 112 m to inclusion polygon 1"),
+        "{text}"
+    );
+}
