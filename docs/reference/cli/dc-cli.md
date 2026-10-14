@@ -45,6 +45,7 @@ Commands:
   params-review   Which safety nets a parameter set has switched off (advisory; .param or .bin)
   params-diff     Compare two parameter sets, each a .param file or the parameters recorded in a .bin log
   log             Dataflash (.bin) log tools: index statistics and downsampled plots, with timings
+  inspect         MAVLink inspector: every message stream per sender (system/component) with its count and rate, and with --msg the latest field values of that message. Listens only
   preflight       Pre-flight checklist from what the vehicle reports: link, firmware, the autopilot's pre-arm checks, sensor health, RC, GPS, position (EKF), home, battery, vibration, mission, fence and traffic. Advice only: nothing is sent but telemetry requests. Exit status 1 when an item fails. Works on a recording too (--connect tlog:FILE@100)
   settings        Vehicle-change settings: in-flight mission upload, geofence/rally upload and log erase. All off by default; each shows its danger when turned on. Without a subcommand: show them
   mission         Mission files (QGC WPL 110, Mission Planner's .waypoints, QGC .plan): download, upload, check, compare, generate
@@ -1182,6 +1183,23 @@ Options:
   -h, --help                 Print help
 ```
 
+### `dc-cli inspect`
+
+```text
+MAVLink inspector: every message stream per sender (system/component) with its count and rate, and with --msg the latest field values of that message. Listens only
+
+Usage: dc-cli inspect [OPTIONS] --connect <CONNECT>
+
+Options:
+      --connect <CONNECT>  Link to open (tlog:FILE@N replays a recording)
+      --sysid <SYSID>      Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>    Our MAVLink component id [default: 190]
+      --seconds <SECONDS>  Seconds to listen [default: 10]
+      --msg <MSG>          Also print the latest fields of this message (e.g. GPS_RAW_INT)
+      --tlog <TLOG>        Record everything to this .tlog file
+  -h, --help               Print help
+```
+
 ### `dc-cli preflight`
 
 ```text
@@ -1770,6 +1788,7 @@ Usage: dc-cli tlog [OPTIONS] <COMMAND>
 
 Commands:
   alerts    The alerts DrorControl would have raised during the recording (position trust, geofence breaches, traffic), replayed through the core, with their time, and what the annunciator still shows at the end
+  inspect   Every message stream in the recording per sender, with count and rate (from the recording's time stamps), and with --msg the last field values of that message
   signing   MAVLink 2 signing in the recording, per sender: how many frames are signed, the link ids, timestamps that did not increase, and with --key-file whether the signatures match (to check a vehicle's signing set-up). Reads only
   link      Link quality over time (range tests): frames received and lost per window, the radio's signal, and the longest heartbeat gap
   index     Index the recording for playback: checkpoints, key events, and what a seek to a time would restore (the latest message of each stream)
@@ -1802,6 +1821,24 @@ Arguments:
 
 Options:
       --speed <SPEED>    Replay speed (1..=100); times are from the recording either way, within about speed × 5 ms [default: 100]
+      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>  Our MAVLink component id [default: 190]
+      --tlog <TLOG>      Record everything to this .tlog file
+  -h, --help             Print help
+```
+
+#### `dc-cli tlog inspect`
+
+```text
+Every message stream in the recording per sender, with count and rate (from the recording's time stamps), and with --msg the last field values of that message
+
+Usage: dc-cli tlog inspect [OPTIONS] <FILE>
+
+Arguments:
+  <FILE>  The .tlog file
+
+Options:
+      --msg <MSG>        Also print the last fields of this message
       --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
       --compid <COMPID>  Our MAVLink component id [default: 190]
       --tlog <TLOG>      Record everything to this .tlog file

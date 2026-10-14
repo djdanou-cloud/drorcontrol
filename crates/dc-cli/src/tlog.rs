@@ -167,7 +167,7 @@ struct Seen {
 /// was read before it is kept.
 /// One CSV cell for a MAVLink field: numbers in their shortest form (floats sent as 32-bit
 /// written as such), text up to its first NUL and quoted, arrays quoted and space-separated.
-fn csv_cell(v: &mavlink_codec::FieldValue) -> String {
+pub(crate) fn csv_cell(v: &mavlink_codec::FieldValue) -> String {
     use mavlink_codec::FieldValue as F;
     let float = |x: f64| {
         if f64::from(x as f32) == x {

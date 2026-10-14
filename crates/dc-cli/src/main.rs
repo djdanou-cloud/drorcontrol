@@ -25,6 +25,7 @@
 //! the safety interlocks (`CommandPolicy`, plan 08 §4).
 
 mod geotiff;
+mod inspect;
 mod tlog;
 mod tlog_health;
 mod tlog_link;
@@ -254,6 +255,19 @@ enum Cmd {
         #[command(subcommand)]
         what: LogCmd,
     },
+    /// MAVLink inspector: every message stream per sender (system/component) with its count
+    /// and rate, and with --msg the latest field values of that message. Listens only.
+    Inspect {
+        /// Link to open (tlog:FILE@N replays a recording).
+        #[arg(long)]
+        connect: LinkSpec,
+        /// Seconds to listen.
+        #[arg(long, default_value_t = 10)]
+        seconds: u64,
+        /// Also print the latest fields of this message (e.g. GPS_RAW_INT).
+        #[arg(long)]
+        msg: Option<String>,
+    },
     /// Pre-flight checklist from what the vehicle reports: link, firmware, the autopilot's
     /// pre-arm checks, sensor health, RC, GPS, position (EKF), home, battery, vibration,
     /// mission, fence and traffic. Advice only: nothing is sent but telemetry requests.
@@ -420,6 +434,15 @@ enum TlogCmd {
         /// speed × 5 ms.
         #[arg(long, default_value_t = 100)]
         speed: u32,
+    },
+    /// Every message stream in the recording per sender, with count and rate (from the
+    /// recording's time stamps), and with --msg the last field values of that message.
+    Inspect {
+        /// The .tlog file.
+        file: std::path::PathBuf,
+        /// Also print the last fields of this message.
+        #[arg(long)]
+        msg: Option<String>,
     },
     /// MAVLink 2 signing in the recording, per sender: how many frames are signed, the link
     /// ids, timestamps that did not increase, and with --key-file whether the signatures
@@ -2398,6 +2421,39 @@ async fn run(cli: Cli) -> Result<(), String> {
                 },
         } => log_erase(&cli, vehicle, *yes, audit).await,
         Cmd::Log { what } => log_cmd(what),
+        Cmd::Inspect {
+            connect,
+            seconds,
+            msg,
+        } => {
+            let core = start(&cli, connect).await?;
+            let mut rx = core.subscribe();
+            let t0 = Instant::now();
+            let end = t0 + Duration::from_secs(*seconds);
+            let mut ins = inspect::Inspector::default();
+            loop {
+                let left = end.saturating_duration_since(Instant::now());
+                if left.is_zero() {
+                    break;
+                }
+                match tokio::time::timeout(left, rx.recv()).await {
+                    Ok(Ok(m)) => {
+                        ins.add(t0.elapsed().as_micros() as u64, m.sysid, m.compid, &m.msg)
+                    }
+                    Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => {}
+                    Ok(Err(_)) | Err(_) => break,
+                }
+            }
+            print!("{}", ins.table());
+            if let Some(name) = msg {
+                print!(
+                    "{}",
+                    ins.fields(name)
+                        .unwrap_or_else(|| format!("no {name} received\n"))
+                );
+            }
+            Ok(())
+        }
         Cmd::Preflight { vehicle, settle } => preflight(&cli, vehicle, *settle).await,
         Cmd::Settings { what } => settings_cmd(what.as_ref().unwrap_or(&SettingsCmd::Show)).await,
         Cmd::Mission { what } => mission_cmd(&cli, what).await,
@@ -3572,6 +3628,28 @@ fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
     let file = match what {
         // Handled by tlog_alerts (it runs the core).
         TlogCmd::Alerts { .. } => return Ok(()),
+        TlogCmd::Inspect { file, msg } => {
+            let f = std::fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()))?;
+            let mut r = recorder::TlogReader::new(std::io::BufReader::new(f));
+            let mut ins = inspect::Inspector::default();
+            while let Some(rec) = r
+                .next_record()
+                .map_err(|e| format!("{}: {e}", file.display()))?
+            {
+                if let Ok(m) = rec.frame.decode() {
+                    ins.add(rec.unix_us, rec.frame.sysid(), rec.frame.compid(), &m);
+                }
+            }
+            print!("{}", ins.table());
+            if let Some(name) = msg {
+                print!(
+                    "{}",
+                    ins.fields(name)
+                        .unwrap_or_else(|| format!("no {name} in the recording\n"))
+                );
+            }
+            return Ok(());
+        }
         TlogCmd::Signing { file, key_file } => {
             let key = match key_file {
                 Some(k) => Some(tlog::signing_key(

@@ -203,3 +203,23 @@ fn telemetry_shows_the_fence_margin() {
         "{text}"
     );
 }
+
+#[test]
+fn inspect_lists_streams_with_their_rates() {
+    let (ok, text) = dc(&[
+        "tlog",
+        "inspect",
+        fixture().to_str().unwrap(),
+        "--msg",
+        "gps_raw_int",
+    ]);
+    assert!(ok, "{text}");
+    for line in [
+        "1/1       ATTITUDE                         1336    10.00",
+        "1/1       GLOBAL_POSITION_INT               668     5.00",
+        "GPS_RAW_INT from 1/1:",
+        "  fix_type                 6",
+    ] {
+        assert!(text.contains(line), "{line}\n{text}");
+    }
+}
