@@ -5959,7 +5959,11 @@ fn print_fleet(core: &Core) {
                 Some(false) => " (not covered by DrorControl's tests: ArduCopter 4.6 and 4.7)",
                 _ => "",
             };
-            format!("fw {}{note}", a.value.version_string())
+            let build = a
+                .value
+                .build_note()
+                .map_or(String::new(), |b| format!(" ({b})"));
+            format!("fw {}{build}{note}", a.value.version_string())
         });
         // Packet loss over the last 10 s, all components of this vehicle together.
         let (rx, lost) = core

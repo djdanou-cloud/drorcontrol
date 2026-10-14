@@ -574,7 +574,21 @@ impl AutopilotVersion {
         let (a, b, c) = self.version;
         format!("{a}.{b}.{c}-{t}")
     }
+
+    /// What a known build's version label does not say, from its git hash.
+    pub fn build_note(&self) -> Option<&'static str> {
+        KNOWN_BUILDS
+            .iter()
+            .find(|(hash, _)| self.git_hash.starts_with(hash))
+            .map(|(_, note)| *note)
+    }
 }
+
+/// Builds whose version label misleads. `3fc7011a` (ArduPilot "Plane: version to 4.6.3") has
+/// the 4.6.3 release code but `FW_TYPE` still BETA; the next commit, the `Copter-4.6.3` tag
+/// `92b0cd78` ("Copter: version to 4.6.3 official fix"), changes only that line. Seen on a
+/// MicoAir743v2, 2026-10-13.
+const KNOWN_BUILDS: [(&str, &str); 1] = [("3fc7011a", "4.6.3 release code, labelled beta")];
 
 /// `WIND` (ArduPilot, autopilot component): the autopilot's wind estimate.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -1512,6 +1526,18 @@ mod tests {
         );
         let a = &f.get(1).unwrap().autopilot_version.as_ref().unwrap().value;
         assert_eq!(a.version_string(), "4.7.1-official");
+        assert_eq!(a.build_note(), None);
+        let bench = AutopilotVersion {
+            version: (4, 6, 3),
+            release_type: 128,
+            git_hash: "3fc7011a".into(),
+            ..Default::default()
+        };
+        assert_eq!(bench.version_string(), "4.6.3-beta");
+        assert_eq!(
+            bench.build_note(),
+            Some("4.6.3 release code, labelled beta")
+        );
         assert_eq!((a.git_hash.as_str(), a.board_id), ("dbe79216", 140));
     }
 
