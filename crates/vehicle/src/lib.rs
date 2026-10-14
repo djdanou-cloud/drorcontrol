@@ -590,6 +590,49 @@ impl AutopilotVersion {
 /// MicoAir743v2, 2026-10-13.
 const KNOWN_BUILDS: [(&str, &str); 1] = [("3fc7011a", "4.6.3 release code, labelled beta")];
 
+/// What the vehicle is outside of (`FENCE_BREACH`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FenceBreach {
+    /// No breach.
+    None,
+    /// Below the minimum altitude.
+    MinAlt,
+    /// Above the maximum altitude.
+    MaxAlt,
+    /// Outside a polygon or circle (inclusion) or inside an exclusion zone.
+    Boundary,
+    /// A value this build does not know.
+    Other(u8),
+}
+
+impl FenceBreach {
+    /// Operator-facing name.
+    pub fn label(self) -> String {
+        match self {
+            FenceBreach::None => "none".into(),
+            FenceBreach::MinAlt => "below minimum altitude".into(),
+            FenceBreach::MaxAlt => "above maximum altitude".into(),
+            FenceBreach::Boundary => "boundary".into(),
+            FenceBreach::Other(n) => format!("type {n}"),
+        }
+    }
+}
+
+/// `FENCE_STATUS` (autopilot component). ArduPilot (`GCS_MAVLINK::send_fence_status`, 4.6.3
+/// and 4.7.1) sends it only while the fence is enabled, and reports one breach type: altitude
+/// first, then boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FenceStatus {
+    /// Outside the fence now.
+    pub breached: bool,
+    /// Breaches since boot.
+    pub breach_count: u16,
+    /// Last breach type.
+    pub breach_type: FenceBreach,
+    /// Time of the last breach, ms since the autopilot booted.
+    pub breach_time_ms: u32,
+}
+
 /// `WIND` (ArduPilot, autopilot component): the autopilot's wind estimate.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Wind {
@@ -694,6 +737,8 @@ pub struct VehicleState {
     /// ADS-B traffic reported through this vehicle, by ICAO address (forgotten after
     /// [`TRAFFIC_FORGET`] without a report).
     pub traffic: BTreeMap<u32, Timed<Traffic>>,
+    /// Geofence state (`FENCE_STATUS`; ArduPilot sends it only while a fence is enabled).
+    pub fence: Option<Timed<FenceStatus>>,
     /// Mission progress.
     pub mission: Option<Timed<MissionProgress>>,
     /// Last mission item the vehicle reported reached (`MISSION_ITEM_REACHED`).
@@ -1037,6 +1082,23 @@ impl Fleet {
                         txbuf_pct: r.txbuf,
                         rx_errors: r.rxerrors,
                         corrected: r.fixed,
+                    },
+                );
+            }
+            Message::FenceStatus(f) if compid == AUTOPILOT_COMPID => {
+                v.fence = timed(
+                    now,
+                    FenceStatus {
+                        breached: f.breach_status != 0,
+                        breach_count: f.breach_count,
+                        breach_type: match f.breach_type {
+                            0 => FenceBreach::None,
+                            1 => FenceBreach::MinAlt,
+                            2 => FenceBreach::MaxAlt,
+                            3 => FenceBreach::Boundary,
+                            n => FenceBreach::Other(n),
+                        },
+                        breach_time_ms: f.breach_time,
                     },
                 );
             }
@@ -1743,5 +1805,34 @@ mod tests {
             (m.total, m.state, m.in_mission_mode),
             (Some(0), MissionState::NoMission, Some(false))
         );
+    }
+
+    #[test]
+    fn fence_status_is_read() {
+        use mavlink_codec::messages::FenceStatus as Fs;
+        let mut f = Fleet::new();
+        let t0 = Instant::now();
+        f.apply(
+            1,
+            1,
+            &Message::FenceStatus(Fs {
+                breach_status: 1,
+                breach_count: 2,
+                breach_type: 3,
+                breach_time: 81_000,
+                ..Default::default()
+            }),
+            t0,
+        );
+        let s = f.get(1).unwrap().fence.as_ref().unwrap().value;
+        assert!(s.breached);
+        assert_eq!(
+            (s.breach_count, s.breach_type, s.breach_time_ms),
+            (2, FenceBreach::Boundary, 81_000)
+        );
+        assert_eq!(FenceBreach::MaxAlt.label(), "above maximum altitude");
+        // Another component's FENCE_STATUS is not the autopilot's.
+        f.apply(2, 154, &Message::FenceStatus(Fs::default()), t0);
+        assert!(f.get(2).unwrap().fence.is_none());
     }
 }

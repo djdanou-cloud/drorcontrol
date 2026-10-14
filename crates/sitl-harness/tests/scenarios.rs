@@ -2023,3 +2023,85 @@ async fn in_flight_uploads_and_log_erase_need_their_settings() {
         assert!(e.size < before[0].size / 10, "{r:?}");
     }
 }
+
+/// FENCE_STATUS and the breach alert on a real autopilot: a 10 m maximum-altitude fence,
+/// a take-off to 20 m; ArduPilot reports the breach (and flies its fence action, RTL) and the
+/// GCS raises "FENCE BREACH: above maximum altitude" as a Warning.
+#[tokio::test(flavor = "multi_thread")]
+async fn fence_breach_is_reported_and_alerted() {
+    use dc_core::{AlertLevel, Command, CommandState, PositionTrust};
+    let Some(mut cfg) = SitlConfig::copter_or_skip() else {
+        return;
+    };
+    cfg.params = vec![
+        ("FENCE_ENABLE".into(), 1.0),
+        ("FENCE_TYPE".into(), 1.0), // maximum altitude only
+        ("FENCE_ALT_MAX".into(), 10.0),
+    ];
+    let sitl = Sitl::start(&cfg).unwrap();
+    let core = core_on(sitl.addr()).await;
+    let mut events = core.events();
+    assert_eq!(
+        core.wait_for_vehicle(Duration::from_secs(60)).await,
+        Some(1)
+    );
+    until(Duration::from_secs(90), "position good (EKF)", || {
+        core.nav_health(1).trust == PositionTrust::Good
+    })
+    .await;
+    until(Duration::from_secs(20), "FENCE_STATUS, inside", || {
+        core.fleet()
+            .get(1)
+            .and_then(|v| v.fence.as_ref())
+            .is_some_and(|f| !f.value.breached)
+    })
+    .await;
+    let mode = |name| dc_core::Firmware::Copter.mode_number(name).unwrap();
+    let s = command(
+        &core,
+        Command::SetMode {
+            custom_mode: mode("GUIDED"),
+        },
+    )
+    .await;
+    assert_eq!(s.state, CommandState::Verified, "{}", s.summary());
+    let t0 = Instant::now();
+    loop {
+        let s = command(&core, Command::Arm).await;
+        if s.state == CommandState::Verified {
+            break;
+        }
+        assert!(
+            t0.elapsed() < Duration::from_secs(60),
+            "never armed: {}",
+            s.summary()
+        );
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+    let s = command(&core, Command::Takeoff { alt_m: 20.0 }).await;
+    assert!(
+        matches!(s.state, CommandState::Verified | CommandState::Accepted),
+        "{}",
+        s.summary()
+    );
+    let alert = tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            if let Ok(CoreEvent::Alert { level, text, .. }) = events.recv().await
+                && text.starts_with("FENCE BREACH")
+            {
+                return (level, text);
+            }
+        }
+    })
+    .await
+    .expect("a fence breach alert");
+    assert_eq!(
+        alert,
+        (
+            AlertLevel::Warning,
+            "FENCE BREACH: above maximum altitude".to_string()
+        )
+    );
+    let f = core.fleet().get(1).unwrap().fence.clone().unwrap().value;
+    assert!(f.breached && f.breach_count >= 1, "{f:?}");
+}

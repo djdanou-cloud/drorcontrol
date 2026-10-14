@@ -2,9 +2,9 @@
 agent: core-1
 role: workstream-agent
 workstream: WS-CORE
-state: idle
-task: idle: bench findings 2026-10-13 fixed (local commits)
-updated: 2026-10-14T06:51:31Z
+state: active
+task: batch 9: 20 tasks, local commits
+updated: 2026-10-14T07:19:39Z
 ---
 
 ## Current focus

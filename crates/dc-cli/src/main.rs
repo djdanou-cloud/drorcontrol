@@ -5950,6 +5950,18 @@ fn print_fleet(core: &Core) {
             .as_ref()
             .map(|h| h.age(now).as_secs_f32())
             .unwrap_or(f32::NAN);
+        let fence = v.fence.as_ref().map(|f| {
+            let f = f.value;
+            if f.breached {
+                format!(
+                    "FENCE BREACH ({}, {} so far)",
+                    f.breach_type.label(),
+                    f.breach_count
+                )
+            } else {
+                format!("fence inside ({} breaches so far)", f.breach_count)
+            }
+        });
         let mission = v.mission.as_ref().map(|m| match m.value.total {
             Some(t) => format!("mission {}/{t} {:?}", m.value.current, m.value.state),
             None => format!("mission item {} {:?}", m.value.current, m.value.state),
@@ -5979,7 +5991,7 @@ fn print_fleet(core: &Core) {
                 rx + lost
             )
         });
-        let parts: Vec<String> = [hb, att, pos, bat, mission, loss, fw]
+        let parts: Vec<String> = [hb, att, pos, bat, fence, mission, loss, fw]
             .into_iter()
             .flatten()
             .collect();

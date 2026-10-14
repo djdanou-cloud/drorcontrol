@@ -493,6 +493,8 @@ impl Default for CoreConfig {
                 (132, 2.0),
                 // TERRAIN_REPORT
                 (136, 1.0),
+                // FENCE_STATUS (ArduPilot sends it only while a fence is enabled)
+                (162, 1.0),
             ],
             link_stale: Duration::from_millis(1500),
             link_lost: Duration::from_secs(5),
@@ -690,6 +692,8 @@ pub struct Core {
     audit: Option<std::sync::mpsc::Sender<(SystemTime, AuditEvent)>>,
     /// Last navigation trust per vehicle, to alert on changes.
     nav_trust: Arc<std::sync::Mutex<HashMap<u8, PositionTrust>>>,
+    /// Last fence state per vehicle (outside, breach count), to alert on breaches.
+    fence_seen: Arc<std::sync::Mutex<HashMap<u8, (bool, u16)>>>,
     /// Recent STATUSTEXT per vehicle (kept outside the fleet, which is cloned per message).
     messages: Arc<std::sync::Mutex<HashMap<u8, std::collections::VecDeque<LoggedText>>>>,
     /// MAVLink sequence tracking per (system, component).
@@ -735,6 +739,7 @@ impl Core {
             policy,
             audit,
             nav_trust: Arc::default(),
+            fence_seen: Arc::default(),
             messages: Arc::default(),
             geotags: Arc::default(),
             sequences: Arc::default(),
@@ -936,6 +941,9 @@ impl Core {
         };
         if !changed.is_empty() {
             self.deliver(Vec::new(), changed).await;
+        }
+        if compid == vehicle::AUTOPILOT_COMPID && matches!(msg, Message::FenceStatus(_)) {
+            self.check_fence(sysid);
         }
         if compid == vehicle::AUTOPILOT_COMPID
             && matches!(msg, Message::EkfStatusReport(_) | Message::GpsRawInt(_))
@@ -1363,6 +1371,37 @@ impl Core {
                 reasons: vec!["vehicle not seen"],
             },
         }
+    }
+
+    /// Alert on a geofence breach (Warning: a new breach, or another one counted while still
+    /// outside) and when the vehicle is back inside (Advisory).
+    fn check_fence(&self, sysid: u8) {
+        let Some(f) = self
+            .fleet()
+            .get(sysid)
+            .and_then(|v| v.fence.as_ref())
+            .map(|f| f.value)
+        else {
+            return;
+        };
+        let before = self
+            .fence_seen
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(sysid, (f.breached, f.breach_count));
+        let (level, text) = match before {
+            _ if f.breached && before.is_none_or(|(was, count)| !was || f.breach_count > count) => {
+                (
+                    AlertLevel::Warning,
+                    format!("FENCE BREACH: {}", f.breach_type.label()),
+                )
+            }
+            Some((true, _)) if !f.breached => {
+                (AlertLevel::Advisory, "Back inside the fence".to_string())
+            }
+            _ => return,
+        };
+        let _ = self.events.send(CoreEvent::Alert { sysid, level, text });
     }
 
     /// Alert when the navigation trust of `sysid` changes: Untrusted is a Warning, Degraded
