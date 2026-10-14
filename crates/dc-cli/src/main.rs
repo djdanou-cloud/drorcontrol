@@ -4975,9 +4975,24 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
             let (msg, f) = field
                 .split_once('.')
                 .ok_or("--field is MSG.FIELD, e.g. ACC.AccZ")?;
-            let c = log
-                .column(msg, f, Some(("I", f64::from(*imu))))
-                .ok_or_else(|| format!("{}: no {field} for IMU {imu}", path.display()))?;
+            // ACC and GYR are only logged with raw IMU logging (LOG_BITMASK bit 19); IMU has the
+            // same fields at the logging rate (bench, 4.6.3: no ACC messages). Fall back to it.
+            let (c, shown) = match log.column(msg, f, Some(("I", f64::from(*imu)))) {
+                Some(c) => (c, field.clone()),
+                None if matches!(msg, "ACC" | "GYR") => {
+                    let c = log
+                        .column("IMU", f, Some(("I", f64::from(*imu))))
+                        .ok_or_else(|| {
+                            format!("{}: no {field} or IMU.{f} for IMU {imu}", path.display())
+                        })?;
+                    eprintln!(
+                        "note: no {msg} messages (raw IMU logging off); using IMU.{f}, at the \
+                         logging rate, so the highest frequency seen is lower"
+                    );
+                    (c, format!("IMU.{f}"))
+                }
+                None => return Err(format!("{}: no {field} for IMU {imu}", path.display())),
+            };
             let armed = logs::flight::armed_periods(&log);
             let in_flight = |t: u64| {
                 armed.is_empty()
@@ -4996,7 +5011,7 @@ fn log_cmd(what: &LogCmd) -> Result<(), String> {
                 format!("{} samples: fewer than one segment of {segment}", v.len())
             })?;
             println!(
-                "{field} IMU {imu}: {} samples at {:.0} Hz{}, {} segments, {:.2} Hz bins",
+                "{shown} IMU {imu}: {} samples at {:.0} Hz{}, {} segments, {:.2} Hz bins",
                 v.len(),
                 sp.sample_rate_hz,
                 if armed.is_empty() { "" } else { " while armed" },
