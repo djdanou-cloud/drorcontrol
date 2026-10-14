@@ -418,15 +418,14 @@ impl Core {
         .await;
         let deadline = Instant::now() + ERASE_CONFIRM_TIME;
         let mut after = before.clone();
+        let mut previous: Option<Vec<LogEntry>> = None;
         while Instant::now() < deadline {
             tokio::time::sleep(Duration::from_millis(500)).await;
             if let Ok(now) = self.list_logs(target).await {
-                after = now;
-                let r = EraseReport {
-                    before: before.clone(),
-                    after: after.clone(),
-                };
-                if r.verified() {
+                let settled = erase_settled(&before, previous.as_deref(), &now);
+                after = now.clone();
+                previous = Some(now);
+                if settled {
                     break;
                 }
             }
@@ -450,6 +449,24 @@ impl Core {
         );
         Ok(report)
     }
+}
+
+/// Whether the listing after `LOG_ERASE` can be taken as the result. ArduPilot lists logs
+/// while it is still erasing them (seen on a MicoAir743v2, 4.6.3: two shrunken entries, then
+/// none 8 s later), so a listing counts only when it is empty, or when no earlier log is in it
+/// and the previous listing had the same logs at the same sizes. Times are not compared: the
+/// newest log's time changes with every listing (4.6.3).
+fn erase_settled(before: &[LogEntry], previous: Option<&[LogEntry]>, now: &[LogEntry]) -> bool {
+    if now.is_empty() {
+        return true;
+    }
+    let shape = |l: &[LogEntry]| l.iter().map(|e| (e.id, e.size)).collect::<Vec<_>>();
+    let verified = EraseReport {
+        before: before.to_vec(),
+        after: now.to_vec(),
+    }
+    .verified();
+    verified && previous.is_some_and(|p| shape(p) == shape(now))
 }
 
 fn kind_name(kind: MissionType) -> &'static str {
@@ -492,6 +509,33 @@ mod tests {
             assert_eq!(VehicleChange::from_key(c.key()), Some(c));
             assert!(!c.title().is_empty() && c.warning().len() > 40);
         }
+    }
+
+    #[test]
+    fn an_erase_result_waits_for_a_settled_listing() {
+        let e = |id, size| LogEntry {
+            id,
+            size,
+            time_utc: 0,
+        };
+        // Bench, MicoAir743v2 4.6.3: two logs, a mid-erase listing with both shrunken, then none.
+        let before = [e(1, 21_600_000), e(2, 18_700_000)];
+        let mid = [e(1, 4096), e(2, 4096)];
+        assert!(
+            !erase_settled(&before, None, &mid),
+            "first sight of shrunken logs"
+        );
+        assert!(erase_settled(&before, Some(&mid), &[]), "empty is final");
+        // A real new log after a flight (SITL 4.6.3): counted once two listings agree.
+        let new = [e(1, 76_944)];
+        assert!(!erase_settled(&before, None, &new));
+        assert!(
+            !erase_settled(&before, Some(&[e(1, 70_000)]), &new),
+            "still growing"
+        );
+        assert!(erase_settled(&before, Some(&new), &new));
+        // An old log still there never settles as a result.
+        assert!(!erase_settled(&before, Some(&before), &before));
     }
 
     #[test]

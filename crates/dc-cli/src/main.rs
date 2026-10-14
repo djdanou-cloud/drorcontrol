@@ -1603,7 +1603,7 @@ async fn log_erase(
                 String::new()
             } else {
                 format!(
-                    "; the vehicle started {} new log(s) after the erase (normal after a flight)",
+                    "; the vehicle started {} new log(s) after the erase (ArduPilot does that when its log file was open, e.g. after arming since boot)",
                     new.len()
                 )
             }
