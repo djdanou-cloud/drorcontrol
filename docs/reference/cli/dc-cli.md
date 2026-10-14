@@ -168,6 +168,7 @@ Options:
       --token-file <TOKEN_FILE>  File holding the API key clients must present (else the DC_API_TOKEN variable)
       --param-dir <PARAM_DIR>    Allow parameter writes over the API (SetParams), saving each baseline in this directory; without it the API cannot change parameters
       --audit <AUDIT>            Hash-chained audit log (commands and parameter writes) [default: dc-audit.log]
+      --terrain <TERRAIN>        Answer the vehicles' terrain requests from every SRTM .hgt and elevation GeoTIFF in this directory (off without it)
   -h, --help                     Print help
 ```
 
@@ -2046,5 +2047,6 @@ Options:
       --fence <FENCE>      Also show each vehicle's margin to this geofence (a .plan's, or QGC WPL fence items): inside or not, the nearest boundary, the height left below FENCE_ALT_MAX
       --tlog <TLOG>        Record everything to this .tlog file
       --params <PARAMS>    The vehicle's parameters, for FENCE_TYPE's circle and altitude
+      --terrain <TERRAIN>  Answer the vehicle's terrain requests from every SRTM .hgt and elevation GeoTIFF in this directory (off without it)
   -h, --help               Print help
 ```

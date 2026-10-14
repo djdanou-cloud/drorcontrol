@@ -496,6 +496,9 @@ impl Default for CoreConfig {
                 (136, 1.0),
                 // FENCE_STATUS (ArduPilot sends it only while a fence is enabled)
                 (162, 1.0),
+                // TERRAIN_REQUEST: ArduPilot schedules it like a stream message and sends one
+                // only while it lacks terrain (AP_Terrain::send_request, at most every 2 s)
+                (133, 1.0),
             ],
             link_stale: Duration::from_millis(1500),
             link_lost: Duration::from_secs(5),
@@ -706,6 +709,10 @@ pub struct Core {
     audit: Option<std::sync::mpsc::Sender<(SystemTime, AuditEvent)>>,
     /// Last navigation trust per vehicle, to alert on changes.
     nav_trust: Arc<std::sync::Mutex<HashMap<u8, PositionTrust>>>,
+    /// Terrain served to vehicles that ask (`TERRAIN_REQUEST`); none by default.
+    terrain: Arc<std::sync::Mutex<Option<Arc<protocols::terrain::Terrain>>>>,
+    /// Terrain sub-grids sent, and requested ones not covered by the terrain.
+    terrain_counts: Arc<(std::sync::atomic::AtomicU64, std::sync::atomic::AtomicU64)>,
     /// Annunciator per vehicle, fed by every [`CoreEvent::Alert`].
     annunciators: Arc<std::sync::Mutex<HashMap<u8, annunciator::Annunciator>>>,
     /// Last traffic threat per vehicle and aircraft (ICAO), with its name for "clear".
@@ -760,6 +767,8 @@ impl Core {
             fence_seen: Arc::default(),
             traffic_seen: Arc::default(),
             annunciators: Arc::default(),
+            terrain: Arc::default(),
+            terrain_counts: Arc::default(),
             messages: Arc::default(),
             geotags: Arc::default(),
             sequences: Arc::default(),
@@ -961,6 +970,11 @@ impl Core {
         };
         if !changed.is_empty() {
             self.deliver(Vec::new(), changed).await;
+        }
+        if let Message::TerrainRequest(r) = &msg
+            && compid == vehicle::AUTOPILOT_COMPID
+        {
+            self.answer_terrain(r);
         }
         if matches!(msg, Message::AdsbVehicle(_)) {
             self.check_traffic(sysid);
@@ -1390,6 +1404,60 @@ impl Core {
                 reasons: vec!["vehicle not seen"],
             },
         }
+    }
+
+    /// Answer vehicles' terrain requests from `terrain` (`None`: stop). Off by default: a
+    /// vehicle with terrain enabled (`TERRAIN_ENABLE`) asks the GCS for the heights it lacks,
+    /// in 4×4 sub-grids, and files what it gets; only sub-grids the terrain fully covers are
+    /// sent, as whole metres above mean sea level.
+    pub fn serve_terrain(&self, terrain: Option<protocols::terrain::Terrain>) {
+        *self.terrain.lock().unwrap_or_else(|e| e.into_inner()) = terrain.map(Arc::new);
+    }
+
+    /// Terrain sub-grids sent so far, and requested ones the terrain did not cover.
+    pub fn terrain_served(&self) -> (u64, u64) {
+        (
+            self.terrain_counts.0.load(Ordering::Relaxed),
+            self.terrain_counts.1.load(Ordering::Relaxed),
+        )
+    }
+
+    fn answer_terrain(&self, r: &mavlink_codec::messages::TerrainRequest) {
+        let Some(t) = self
+            .terrain
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+        else {
+            return;
+        };
+        let (lat, lon, spacing, mask) = (r.lat, r.lon, r.grid_spacing, r.mask);
+        let core = self.clone();
+        tokio::spawn(async move {
+            for gridbit in 0..56u8 {
+                if mask & (1u64 << gridbit) == 0 {
+                    continue;
+                }
+                match protocols::terrain::terrain_subgrid(&t, lat, lon, spacing, gridbit) {
+                    Some(data) => {
+                        core.send(&Message::TerrainData(
+                            mavlink_codec::messages::TerrainData {
+                                lat,
+                                lon,
+                                grid_spacing: spacing,
+                                data,
+                                gridbit,
+                            },
+                        ))
+                        .await;
+                        core.terrain_counts.0.fetch_add(1, Ordering::Relaxed);
+                    }
+                    None => {
+                        core.terrain_counts.1.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            }
+        });
     }
 
     /// The automatic pre-flight checklist for `sysid` now (advice only; see

@@ -2232,3 +2232,66 @@ async fn rtl_goes_where_the_gcs_predicts() {
     eprintln!("RTL reached rally point 2 ({:.0} m from home)", dist(h));
     assert!(dist(h) > 200.0, "it did not go home");
 }
+
+/// The GCS terrain service: the vehicle asks for terrain (TERRAIN_REQUEST) and loads what
+/// the core sends (TERRAIN_DATA) from a synthetic grid: a plane 600 m above sea level at home,
+/// rising 1 m per 100 m east. TERRAIN_REPORT then shows nothing pending and 600 m at home.
+#[tokio::test(flavor = "multi_thread")]
+async fn terrain_requests_are_answered_from_the_gcs_terrain() {
+    use dc_core::PositionTrust;
+    use protocols::terrain::{GeoGrid, Terrain};
+    let Some(cfg) = SitlConfig::copter_or_skip() else {
+        return;
+    };
+    let sitl = Sitl::start(&cfg).unwrap();
+    let core = core_on(sitl.addr()).await;
+    // The harness starts SITL at -35.363261, 149.165230.
+    let (lat0, lon0): (f64, f64) = (-35.363_261, 149.165_230);
+    let step = 0.0005;
+    let n = 400; // ±0.1°
+    let (north, west) = (lat0 + 0.1, lon0 - 0.1);
+    let m_lon = 111_195.0 * lat0.to_radians().cos();
+    let data: Vec<f32> = (0..n * n)
+        .map(|k| {
+            let lon = west + (k % n) as f64 * step;
+            (600.0 + (lon - lon0) * m_lon / 100.0) as f32
+        })
+        .collect();
+    let mut t = Terrain::default();
+    t.add_grid(GeoGrid::new(north, west, (step, step), (n, n), data, None).unwrap());
+    core.serve_terrain(Some(t));
+    assert_eq!(
+        core.wait_for_vehicle(Duration::from_secs(60)).await,
+        Some(1)
+    );
+    until(Duration::from_secs(90), "position good (EKF)", || {
+        core.nav_health(1).trust == PositionTrust::Good
+    })
+    .await;
+    let report = || {
+        let v = core.fleet().get(1).cloned();
+        eprintln!(
+            "terrain {:?}; requests seen {:?}; served {:?}",
+            v.as_ref().and_then(|v| v.terrain.clone()).map(|t| t.value),
+            v.as_ref().and_then(|v| v.message_counts.get(&133).copied()),
+            core.terrain_served()
+        );
+    };
+    report();
+    until(Duration::from_secs(90), "terrain loaded", || {
+        core.fleet()
+            .get(1)
+            .and_then(|v| v.terrain.clone())
+            .is_some_and(|r| {
+                let r = r.value;
+                r.pending == 0 && r.loaded > 0 && !r.extrapolated && !r.no_position
+            })
+    })
+    .await;
+    report();
+    let r = core.fleet().get(1).unwrap().terrain.clone().unwrap().value;
+    let (sent, missing) = core.terrain_served();
+    eprintln!("terrain report {r:?}; {sent} sub-grids sent, {missing} not covered");
+    assert!((r.terrain_msl_m - 600.0).abs() < 1.0, "{r:?}");
+    assert!(sent > 0 && missing == 0);
+}

@@ -175,6 +175,10 @@ enum Cmd {
         /// Hash-chained audit log (commands and parameter writes).
         #[arg(long, default_value = "dc-audit.log")]
         audit: std::path::PathBuf,
+        /// Answer the vehicles' terrain requests from every SRTM .hgt and elevation GeoTIFF
+        /// in this directory (off without it).
+        #[arg(long)]
+        terrain: Option<std::path::PathBuf>,
     },
     /// This build and machine, for test reports: version, OS and architecture, serial ports
     /// seen, and the firmware versions tested in CI.
@@ -322,6 +326,10 @@ enum Cmd {
         /// The vehicle's parameters, for FENCE_TYPE's circle and altitude.
         #[arg(long, requires = "fence")]
         params: Option<std::path::PathBuf>,
+        /// Answer the vehicle's terrain requests from every SRTM .hgt and elevation GeoTIFF
+        /// in this directory (off without it).
+        #[arg(long)]
+        terrain: Option<std::path::PathBuf>,
     },
 }
 
@@ -2327,6 +2335,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             token_file,
             param_dir,
             audit,
+            terrain,
         } => {
             if let Some(d) = param_dir
                 && !d.is_dir()
@@ -2349,6 +2358,15 @@ async fn run(cli: Cli) -> Result<(), String> {
             let core = Core::start(cfg)
                 .await
                 .map_err(|e| format!("cannot start core: {e}"))?;
+            if let Some(dir) = terrain {
+                let t = load_terrain_dir(dir)?;
+                eprintln!(
+                    "serving terrain from {} ({} tiles and grids)",
+                    dir.display(),
+                    t.len()
+                );
+                core.serve_terrain(Some(t));
+            }
             for link in connect {
                 core.connect(link)
                     .await
@@ -2513,6 +2531,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             seconds,
             fence,
             params,
+            terrain,
         } => {
             let fence = match fence {
                 Some(f) => Some((
@@ -2525,6 +2544,15 @@ async fn run(cli: Cli) -> Result<(), String> {
                 None => None,
             };
             let core = start(&cli, connect).await?;
+            if let Some(dir) = terrain {
+                let t = load_terrain_dir(dir)?;
+                eprintln!(
+                    "serving terrain from {} ({} tiles and grids)",
+                    dir.display(),
+                    t.len()
+                );
+                core.serve_terrain(Some(t));
+            }
             let mut events = core.events();
             let end = Instant::now() + Duration::from_secs(*seconds);
             let mut tick = tokio::time::interval(Duration::from_secs(1));
@@ -3905,6 +3933,43 @@ fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
         eprintln!("warning: stopped early: {why}");
     }
     Ok(())
+}
+
+/// Every SRTM .hgt tile and elevation GeoTIFF in `dir`.
+fn load_terrain_dir(dir: &std::path::Path) -> Result<protocols::terrain::Terrain, String> {
+    let mut t = protocols::terrain::Terrain::default();
+    for e in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
+        let p = e.map_err(|e| e.to_string())?.path();
+        let ext = p
+            .extension()
+            .map(|x| x.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        let name = p
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        match ext.as_str() {
+            "hgt" => {
+                let bytes = std::fs::read(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+                t.add(
+                    protocols::terrain::HgtTile::from_bytes(&name, &bytes)
+                        .map_err(|e| format!("{}: {e}", p.display()))?,
+                );
+            }
+            "tif" | "tiff" => {
+                let f = std::fs::File::open(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+                t.add_grid(
+                    geotiff::read(std::io::BufReader::new(f))
+                        .map_err(|e| format!("{}: {e}", p.display()))?,
+                );
+            }
+            _ => {}
+        }
+    }
+    if t.is_empty() {
+        return Err(format!("{}: no .hgt or GeoTIFF terrain", dir.display()));
+    }
+    Ok(t)
 }
 
 /// The terrain under `dir` covering `points`: every elevation GeoTIFF there, and the SRTM
