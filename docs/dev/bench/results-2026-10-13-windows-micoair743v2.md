@@ -63,6 +63,19 @@ write without one (`error: no terminal to confirm on: pass --yes`). The question
    * `log takeoffs` reports a liftoff with a 0.00 m/s climb (the land detector on the bench).
    * `log export --kml` stops with `no POS records with a position`: expected without GPS.
 
+## Follow-up (2026-10-14)
+
+| Finding | Done |
+|---|---|
+| 1 No terminal | The sheet now says to run it in an interactive window, and what `--yes` skips |
+| 2 Firmware shown as beta | Explained: `3fc7011a` is ArduPilot's "Plane: version to 4.6.3", the 4.6.3 release code with `FW_TYPE` still BETA; the `Copter-4.6.3` tag `92b0cd78` ("official fix") changes only that line. `telemetry` now shows `fw 4.6.3-beta (4.6.3 release code, labelled beta)`. Flashing the official 4.6.3 binary for the board would report `official` |
+| 3 `log fft` on 4.6.3 | Falls back to `IMU.<field>` without `ACC`/`GYR` messages, and says so |
+| 4 `log landings` | A disarm logged up to 1 s before the touchdown event counts (0 s to disarm) |
+| 5 `tlog health` | PreArm/Arm messages reported once, as `arming`, not also as `error`; sheet updated |
+| 6 Erase result | The result waits for a settled listing (empty, or the same twice); a mid-erase listing no longer reads as new logs |
+| 7 Debug text, notch, takeoff | `param-set`/`param-rollback` print `NAME = value (verified by read-back)`; `log notch` warns on under 30 s or a log that never climbed above 1 m; `log takeoffs` notes a liftoff with no climb |
+| 7 KML without GPS | Unchanged: no positions, no track (the message says so) |
+
 ## Still to do on this bench
 
 * Step 1 `ports --watch` replug, step 2 tilt and 5 s unplug.

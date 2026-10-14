@@ -58,6 +58,13 @@ Run the commands below in PowerShell, in the folder containing `dc-cli.exe`. Rep
 with your port. The audit log (`dc-audit.log`) is written to this folder; the settings
 file to `%APPDATA%\DrorControl\vehicle-changes.conf`.
 
+**Run it in an interactive PowerShell window.** Every command that changes the vehicle or a
+setting asks once (`[y/N]`), and these questions are part of the test. Without a terminal
+(a script, or an agent running the commands) the tool asks nothing and refuses:
+`error: no terminal to confirm on: pass --yes`. `--yes` (and `--armed-ok` for the armed
+warning) skip the questions for scripts; if you use them, note it in the results, because
+the questions were then not tested.
+
 ## Steps
 
 1. **Find the port.** Plug in the flight controller.
@@ -128,7 +135,8 @@ file to `%APPDATA%\DrorControl\vehicle-changes.conf`.
    ```
    Compare the summary (armed time, altitude, distance) and the event timeline with your
    notes and Mission Planner. Note the FFT peak frequency; it should match what Mission
-   Planner's FFT shows.
+   Planner's FFT shows. Without raw IMU logging (the usual 4.6 setting) the log has no `ACC`
+   messages: `log fft` then says so and uses `IMU.AccZ`, at the lower logging rate.
 
    Then the full set of analyses, and the machine-readable health result:
    ```
@@ -158,8 +166,9 @@ file to `%APPDATA%\DrorControl\vehicle-changes.conf`.
    .\dc-cli.exe tlog health bench.tlog
    .\dc-cli.exe tlog index bench.tlog --at 30
    ```
-   `tlog health` judges armed time only, so a disarmed bench recording reports
-   `no checks apply`; run it on a recording of a real flight if you have one.
+   `tlog health` judges armed time only. A disarmed bench recording reports `no checks
+   apply`, or, if the vehicle was failing its arming checks, those `PreArm:` messages as
+   `arming` CAUTION lines (once each). Run it on a recording of a real flight if you have one.
 
 9. **Parameter write and rollback (vehicle disarmed, propellers off).** Change one harmless
    value, check it, then put it back from the baseline the tool saved:
@@ -170,7 +179,8 @@ file to `%APPDATA%\DrorControl\vehicle-changes.conf`.
    .\dc-cli.exe params --connect serial:COM3:115200 --compare vehicle.param
    ```
    Expect:
-   * `param-set` lists the change and asks once; answer `y`. It ends with
+   * `param-set` lists the change and asks once; answer `y`. It prints
+     `DISARM_DELAY = 12 (verified by read-back)`, ends with
      `all 1 change(s) verified by read-back` and names the baseline file;
    * the first compare shows exactly `DISARM_DELAY` 10 → 12 (plus values the autopilot
      maintains itself, which are marked) and ends with `error: the vehicle differs from the
@@ -257,9 +267,10 @@ file to `%APPDATA%\DrorControl\vehicle-changes.conf`.
     ```
     Expect: the first erase is refused (setting off, nothing sent); `enable` shows the
     warning; the second erase shows how many logs there are, the warning, asks once (`y`),
-    and ends with `erased: the N earlier logs are gone` (possibly `the vehicle started 1 new
-    log(s) after the erase`: normal when its log file was open); the last list shows none of
-    the earlier logs. An SD card can take a while; if it says `NOT verified`, run
+    and ends with `erased: the N earlier logs are gone`. If the vehicle was armed since boot
+    (even on the bench) it may add `the vehicle started 1 new log(s) after the erase`:
+    ArduPilot opens a new, small log at once when its log file was open. The last list must
+    match what the erase said: none of the earlier logs, and only the new logs it named. An SD card can take a while; if it says `NOT verified`, run
     `log list` again a minute later and note the result.
 
 15. **Make a log safe to share.** Before sending any real log, move its positions to a

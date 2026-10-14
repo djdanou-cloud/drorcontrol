@@ -3,8 +3,8 @@ agent: core-1
 role: workstream-agent
 workstream: WS-CORE
 state: idle
-task: idle: items 3-5 behind opt-in settings committed locally, not pushed
-updated: 2026-10-13T11:32:55Z
+task: idle: bench findings 2026-10-13 fixed (local commits)
+updated: 2026-10-14T06:51:31Z
 ---
 
 ## Current focus
