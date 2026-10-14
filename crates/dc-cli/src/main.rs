@@ -2642,6 +2642,7 @@ fn report_json(path: &std::path::Path, log: &logs::Log) -> String {
             "at_s": secs(k.time_us),
             "from_arm_s": k.from_arm_s,
             "max_climb_ms": k.max_climb_ms,
+            "climbed": k.climbed(),
             "max_roll_err_deg": k.max_roll_err_deg,
             "max_pitch_err_deg": k.max_pitch_err_deg,
         })).collect::<Vec<_>>(),
@@ -2998,7 +2999,10 @@ fn print_log_takeoffs(log: &logs::Log) -> Result<(), String> {
             x.max_climb_ms,
             x.max_roll_err_deg,
             x.max_pitch_err_deg,
-            if x.max_roll_err_deg.max(x.max_pitch_err_deg) > 10.0 {
+            if !x.climbed() {
+                "  note: no climb after it: the land detector said not landed, but the vehicle \
+                 did not leave the ground (bench, or a hop)"
+            } else if x.max_roll_err_deg.max(x.max_pitch_err_deg) > 10.0 {
                 "  CHECK: over 10° (motor order/direction, centre of gravity, props)"
             } else {
                 ""

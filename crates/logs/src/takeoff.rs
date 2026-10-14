@@ -27,6 +27,18 @@ pub struct Takeoff {
     pub max_pitch_err_deg: f64,
 }
 
+/// Below this climb rate after liftoff, m/s, the vehicle did not really leave the ground.
+pub const MIN_CLIMB_MS: f64 = 0.2;
+
+impl Takeoff {
+    /// The vehicle climbed after the land detector's liftoff. On the bench (props off, motors
+    /// spinning) the land detector can report `NOT_LANDED` with no climb at all (MicoAir743v2,
+    /// 4.6.3, 2026-10-13: 0.00 m/s).
+    pub fn climbed(&self) -> bool {
+        self.max_climb_ms >= MIN_CLIMB_MS
+    }
+}
+
 /// Largest |a − b| over samples with `t0 <= t < t1`.
 fn max_err(log: &Log, des: &str, act: &str, t0: u64, t1: u64) -> f64 {
     let (Some(d), Some(a)) = (log.column("ATT", des, None), log.column("ATT", act, None)) else {
@@ -107,5 +119,18 @@ mod tests {
         assert_eq!(k[0].from_arm_s, Some(2.5));
         assert_eq!(k[0].max_climb_ms, 2.5, "9 s is outside the 5 s window");
         assert_eq!((k[0].max_roll_err_deg, k[0].max_pitch_err_deg), (6.0, 2.0));
+        assert!(k[0].climbed());
+    }
+
+    #[test]
+    fn a_liftoff_without_a_climb_is_flagged() {
+        let mut b = LogBuilder::default();
+        b.format("EV", "QB", "TimeUS,Id")
+            .format("CTUN", "Qf", "TimeUS,CRt");
+        b.rec("EV", &[N(30e6), N(28.0)]);
+        b.rec("CTUN", &[N(31e6), N(0.0)]);
+        b.rec("CTUN", &[N(32e6), N(0.05)]);
+        let k = takeoffs(&b.open());
+        assert!(!k[0].climbed(), "{k:?}");
     }
 }
