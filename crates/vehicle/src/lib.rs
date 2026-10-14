@@ -327,6 +327,92 @@ impl Traffic {
     }
 }
 
+/// How serious a traffic conflict is (`MAV_COLLISION_THREAT_LEVEL`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Threat {
+    /// Not on a conflicting course within the look-ahead.
+    None,
+    /// Inside the warning distances (ArduPilot `AVD_W_*`).
+    Low,
+    /// Inside the failure distances (ArduPilot `AVD_F_*`).
+    High,
+}
+
+/// Look-ahead, s (ArduPilot Copter `AVD_W_TIME` / `AVD_F_TIME` defaults, 4.6.3).
+pub const CPA_HORIZON_S: f64 = 30.0;
+/// Warning distances, m (Copter `AVD_W_DIST_XY`, `AVD_W_DIST_Z`).
+pub const CPA_WARN_M: (f64, f64) = (300.0, 300.0);
+/// Failure distances, m (Copter `AVD_F_DIST_XY`, `AVD_F_DIST_Z`).
+pub const CPA_FAIL_M: (f64, f64) = (100.0, 100.0);
+
+/// Closest approach of a traffic aircraft to the vehicle, both flying straight on.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Approach {
+    /// Seconds from now to the closest horizontal approach (0 when already diverging),
+    /// within [`CPA_HORIZON_S`].
+    pub time_s: f64,
+    /// Horizontal distance then, m.
+    pub miss_xy_m: f64,
+    /// Smallest vertical separation within the look-ahead, m (`None` without a traffic
+    /// altitude: then the threat assumes the same height).
+    pub miss_z_m: Option<f64>,
+    /// Threat level from the distances above.
+    pub threat: Threat,
+}
+
+impl Traffic {
+    /// Closest approach to the vehicle at `own` within [`CPA_HORIZON_S`], on a flat local
+    /// frame (good to a few metres over the distances that matter). Traffic without a speed
+    /// is taken as stationary, without an altitude as at the vehicle's height.
+    pub fn approach(&self, own: &Position) -> Approach {
+        let rel = self.relative_to(own);
+        let b = rel.bearing_deg.to_radians();
+        let (pn, pe) = (rel.distance_m * b.cos(), rel.distance_m * b.sin());
+        let (tn, te) = match (self.speed_ms, self.heading_deg) {
+            (Some(v), Some(h)) => {
+                let h = f64::from(h).to_radians();
+                (f64::from(v) * h.cos(), f64::from(v) * h.sin())
+            }
+            _ => (0.0, 0.0),
+        };
+        let (vn, ve) = (
+            tn - f64::from(own.vel_ned[0]),
+            te - f64::from(own.vel_ned[1]),
+        );
+        let v2 = vn * vn + ve * ve;
+        let t = if v2 > 1e-9 {
+            (-(pn * vn + pe * ve) / v2).clamp(0.0, CPA_HORIZON_S)
+        } else {
+            0.0
+        };
+        let miss_xy_m = ((pn + vn * t).powi(2) + (pe + ve * t).powi(2)).sqrt();
+        let miss_z_m = rel.above_m.map(|dz| {
+            // Height difference over the look-ahead: dz + rate·τ, smallest |·| for τ in 0..H.
+            let rate = f64::from(self.climb_ms.unwrap_or(0.0)) + f64::from(own.vel_ned[2]);
+            let (a, b) = (f64::from(dz), f64::from(dz) + rate * CPA_HORIZON_S);
+            if a.signum() != b.signum() {
+                0.0
+            } else {
+                a.abs().min(b.abs())
+            }
+        });
+        let within = |(xy, z): (f64, f64)| miss_xy_m < xy && miss_z_m.is_none_or(|m| m < z);
+        let threat = if within(CPA_FAIL_M) {
+            Threat::High
+        } else if within(CPA_WARN_M) {
+            Threat::Low
+        } else {
+            Threat::None
+        };
+        Approach {
+            time_s: t,
+            miss_xy_m,
+            miss_z_m,
+            threat,
+        }
+    }
+}
+
 /// Traffic not reported for this long is forgotten.
 pub const TRAFFIC_FORGET: Duration = Duration::from_secs(60);
 
@@ -1834,5 +1920,65 @@ mod tests {
         // Another component's FENCE_STATUS is not the autopilot's.
         f.apply(2, 154, &Message::FenceStatus(Fs::default()), t0);
         assert!(f.get(2).unwrap().fence.is_none());
+    }
+
+    #[test]
+    fn closest_approach_and_threat() {
+        let own = Position {
+            lat_deg: -35.0,
+            lon_deg: 149.0,
+            alt_msl_m: 600.0,
+            alt_rel_m: 100.0,
+            vel_ned: [0.0, 0.0, 0.0],
+            heading_deg: None,
+        };
+        // 1 km north at 50 m/s, flying south straight at us, same height: 20 s to impact.
+        let head_on = Traffic {
+            icao: 1,
+            lat_deg: -35.0 + 1000.0 / 111_195.0,
+            lon_deg: 149.0,
+            alt_msl_m: Some((600.0, true)),
+            heading_deg: Some(180.0),
+            speed_ms: Some(50.0),
+            climb_ms: Some(0.0),
+            callsign: None,
+            squawk: None,
+            emitter_type: 1,
+            tslc_s: 0,
+            simulated: false,
+        };
+        let a = head_on.approach(&own);
+        assert!((a.time_s - 20.0).abs() < 0.1, "{a:?}");
+        assert!(a.miss_xy_m < 1.0 && a.miss_z_m == Some(0.0), "{a:?}");
+        assert_eq!(a.threat, Threat::High);
+        // Same, 250 m above and level: inside the warning height, outside the failure one.
+        let above = Traffic {
+            alt_msl_m: Some((850.0, true)),
+            ..head_on.clone()
+        };
+        assert_eq!(above.approach(&own).threat, Threat::Low);
+        // Flying away (north): closest is now, 1 km off.
+        let away = Traffic {
+            heading_deg: Some(0.0),
+            ..head_on.clone()
+        };
+        let a = away.approach(&own);
+        assert_eq!((a.time_s, a.threat), (0.0, Threat::None));
+        // Passing 200 m to the east: LOW. Unknown altitude counts as same height.
+        let passing = Traffic {
+            lon_deg: 149.0 + 200.0 / (111_195.0 * 35f64.to_radians().cos()),
+            alt_msl_m: None,
+            ..head_on.clone()
+        };
+        let a = passing.approach(&own);
+        assert!((a.miss_xy_m - 200.0).abs() < 1.0, "{a:?}");
+        assert_eq!((a.miss_z_m, a.threat), (None, Threat::Low));
+        // Descending through our height within the look-ahead: vertical miss 0.
+        let descending = Traffic {
+            alt_msl_m: Some((900.0, true)),
+            climb_ms: Some(-15.0),
+            ..head_on
+        };
+        assert_eq!(descending.approach(&own).miss_z_m, Some(0.0));
     }
 }
