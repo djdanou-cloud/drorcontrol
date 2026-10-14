@@ -779,6 +779,20 @@ enum MissionCmd {
         #[arg(long)]
         out: Option<std::path::PathBuf>,
     },
+    /// Edit a mission file offline, operation by operation in the order given: insert:N:LAT,LON,ALT
+    /// (a waypoint at N, ALT above home), delete:N, move:FROM:TO, alt:N:ALT (one item's
+    /// altitude), alt-all:ALT (every waypoint above home). DO_JUMP targets are renumbered to
+    /// keep pointing at the same item. A .plan keeps its fence and rally points.
+    Edit {
+        /// The mission (.plan or QGC WPL 110).
+        file: std::path::PathBuf,
+        /// Where to write the result (.plan or .waypoints by extension).
+        #[arg(long)]
+        out: std::path::PathBuf,
+        /// Operations, applied in order.
+        #[arg(required = true, allow_hyphen_values = true)]
+        ops: Vec<String>,
+    },
     /// Where RTL would go from a position: home or a rally point, by ArduCopter's rules
     /// (nearest rally point inside the fence; home if it is beyond RALLY_LIMIT_KM or, with
     /// RALLY_INCL_HOME, if home is nearer). Home, rally points and fence from a .plan.
@@ -4607,6 +4621,107 @@ async fn download_mission(
 
 async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
     match what {
+        MissionCmd::Edit { file, out, ops } => {
+            let mut ed = protocols::mission_edit::MissionEditor::new(read_mission(file)?);
+            let num = |s: &str, what: &str| -> Result<usize, String> {
+                s.parse()
+                    .map_err(|_| format!("{what}: {s:?} is not an item number"))
+            };
+            let alt = |s: &str| -> Result<f32, String> {
+                s.parse().map_err(|_| format!("{s:?} is not an altitude"))
+            };
+            for op in ops {
+                let parts: Vec<&str> = op.splitn(3, ':').collect();
+                let done = match parts.as_slice() {
+                    ["delete", n] => {
+                        let n = num(n, op)?;
+                        let jumps = ed.delete(n).map_err(|e| format!("{op}: {e}"))?;
+                        if jumps.is_empty() {
+                            format!("deleted item {n}")
+                        } else {
+                            format!(
+                                "deleted item {n}; DO_JUMP at {:?} pointed at it and now points at the item that took its place",
+                                jumps
+                            )
+                        }
+                    }
+                    ["move", from, to] => {
+                        let (f, t) = (num(from, op)?, num(to, op)?);
+                        ed.move_item(f, t).map_err(|e| format!("{op}: {e}"))?;
+                        format!("moved item {f} to {t}")
+                    }
+                    ["insert", at, pos] => {
+                        let at = num(at, op)?;
+                        let v: Vec<&str> = pos.split(',').collect();
+                        let [lat, lon, a] = v.as_slice() else {
+                            return Err(format!("{op}: insert:N:LAT,LON,ALT"));
+                        };
+                        let (lat, lon): (f64, f64) = (
+                            lat.parse().map_err(|_| format!("{op}: bad latitude"))?,
+                            lon.parse().map_err(|_| format!("{op}: bad longitude"))?,
+                        );
+                        if !(-90.0..=90.0).contains(&lat) || !(-180.0..=180.0).contains(&lon) {
+                            return Err(format!("{op}: not a position"));
+                        }
+                        ed.insert(
+                            at,
+                            dc_core::MissionItem {
+                                frame: 3,
+                                command: 16,
+                                params: [0.0; 4],
+                                x: (lat * 1e7).round() as i32,
+                                y: (lon * 1e7).round() as i32,
+                                z: alt(a)?,
+                                autocontinue: true,
+                            },
+                        )
+                        .map_err(|e| format!("{op}: {e}"))?;
+                        format!("inserted a waypoint at {at}")
+                    }
+                    ["alt", n, a] => {
+                        let n = num(n, op)?;
+                        let mut item = *ed
+                            .items()
+                            .get(n)
+                            .ok_or_else(|| format!("{op}: there is no item {n}"))?;
+                        item.z = alt(a)?;
+                        ed.replace(n, item).map_err(|e| format!("{op}: {e}"))?;
+                        format!("item {n} at {} m", item.z)
+                    }
+                    ["alt-all", a] => {
+                        let a = alt(a)?;
+                        format!(
+                            "{} waypoints set to {a} m above home",
+                            ed.set_all_altitudes(a)
+                        )
+                    }
+                    _ => {
+                        return Err(format!(
+                            "{op:?}: not an operation (insert, delete, move, alt, alt-all)"
+                        ));
+                    }
+                };
+                eprintln!("{done}");
+            }
+            let items = ed.items().to_vec();
+            let text = if is_plan(file) && is_plan(out) {
+                let src = std::fs::read_to_string(file)
+                    .map_err(|e| format!("{}: {e}", file.display()))?;
+                let mut plan =
+                    protocols::plan::parse(&src).map_err(|e| format!("{}: {e}", file.display()))?;
+                plan.mission = items.clone();
+                protocols::plan::to_string(&plan)
+            } else {
+                mission_text(Some(out), &items)
+            };
+            std::fs::write(out, text).map_err(|e| format!("{}: {e}", out.display()))?;
+            eprintln!(
+                "wrote {} ({} items including home)",
+                out.display(),
+                items.len()
+            );
+            Ok(())
+        }
         MissionCmd::RtlTarget { file, from, params } => {
             let [at] = parse_polygon(from)?[..] else {
                 return Err("--from is one lat,lon".into());
