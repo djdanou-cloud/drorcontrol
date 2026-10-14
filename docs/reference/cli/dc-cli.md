@@ -57,11 +57,34 @@ Commands:
   help            Print this message or the help of the given subcommand(s)
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
-  -V, --version          Print version
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
 ```
 
 ### `dc-cli params`
@@ -72,16 +95,53 @@ Download all parameters and print them (or write a .param file)
 Usage: dc-cli params [OPTIONS] --connect <CONNECT>
 
 Options:
-      --connect <CONNECT>      Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
-      --sysid <SYSID>          Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>        Our MAVLink component id [default: 190]
-      --target <TARGET>        Target system id (default: first vehicle heard)
-      --component <COMPONENT>  Target component id [default: 1]
-      --tlog <TLOG>            Record everything to this .tlog file
-      --out <OUT>              Write a Mission Planner-compatible .param file instead of printing
-      --compare <COMPARE>      Compare the vehicle with this .param file or .bin log instead of printing; exits with failure on any difference (read-only)
-      --wait <WAIT>            Seconds to wait for a vehicle heartbeat [default: 15]
-  -h, --help                   Print help
+      --connect <CONNECT>
+          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --target <TARGET>
+          Target system id (default: first vehicle heard)
+
+      --component <COMPONENT>
+          Target component id
+          
+          [default: 1]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --out <OUT>
+          Write a Mission Planner-compatible .param file instead of printing
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+      --compare <COMPARE>
+          Compare the vehicle with this .param file or .bin log instead of printing; exits with failure on any difference (read-only)
+
+      --wait <WAIT>
+          Seconds to wait for a vehicle heartbeat
+          
+          [default: 15]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### `dc-cli param-get`
@@ -92,16 +152,46 @@ Read named parameters without downloading the whole list (fast over a radio)
 Usage: dc-cli param-get [OPTIONS] --connect <CONNECT> <NAMES>...
 
 Arguments:
-  <NAMES>...  Parameter names
+  <NAMES>...
+          Parameter names
 
 Options:
-      --connect <CONNECT>  Link, e.g. tcp:127.0.0.1:5760
-      --sysid <SYSID>      Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>    Our MAVLink component id [default: 190]
-      --target <TARGET>    Target system id (default: first vehicle heard)
-      --tlog <TLOG>        Record everything to this .tlog file
-      --wait <WAIT>        Seconds to wait for a vehicle heartbeat [default: 15]
-  -h, --help               Print help
+      --connect <CONNECT>
+          Link, e.g. tcp:127.0.0.1:5760
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --target <TARGET>
+          Target system id (default: first vehicle heard)
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --wait <WAIT>
+          Seconds to wait for a vehicle heartbeat
+          
+          [default: 15]
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### `dc-cli param-set`
@@ -112,21 +202,63 @@ Change parameters on the vehicle (ADR-0012): every change is listed and confirme
 Usage: dc-cli param-set [OPTIONS] --connect <CONNECT> [NAME=VALUE]...
 
 Arguments:
-  [NAME=VALUE]...  Changes as NAME=VALUE
+  [NAME=VALUE]...
+          Changes as NAME=VALUE
 
 Options:
-      --connect <CONNECT>    Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200
-      --sysid <SYSID>        Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>      Our MAVLink component id [default: 190]
-      --target <TARGET>      Target system id (default: first vehicle heard)
-      --file <FILE>          Apply a .param file (or a .bin log's parameters): only values that differ from the vehicle are written; names it lacks and values the autopilot maintains are left out and listed
-      --tlog <TLOG>          Record everything to this .tlog file
-      --yes                  Confirm the changes without asking (scripts)
-      --armed-ok             Acknowledge the in-flight warning without asking (scripts): write even if armed
-      --snapshot <SNAPSHOT>  Baseline file to create (default: param-baseline-SYSID-UNIXTIME.param)
-      --audit <AUDIT>        Hash-chained audit log to append to [default: dc-audit.log]
-      --wait <WAIT>          Seconds to wait for a vehicle heartbeat [default: 15]
-  -h, --help                 Print help
+      --connect <CONNECT>
+          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --target <TARGET>
+          Target system id (default: first vehicle heard)
+
+      --file <FILE>
+          Apply a .param file (or a .bin log's parameters): only values that differ from the vehicle are written; names it lacks and values the autopilot maintains are left out and listed
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+      --yes
+          Confirm the changes without asking (scripts)
+
+      --armed-ok
+          Acknowledge the in-flight warning without asking (scripts): write even if armed
+
+      --snapshot <SNAPSHOT>
+          Baseline file to create (default: param-baseline-SYSID-UNIXTIME.param)
+
+      --audit <AUDIT>
+          Hash-chained audit log to append to
+          
+          [default: dc-audit.log]
+
+      --wait <WAIT>
+          Seconds to wait for a vehicle heartbeat
+          
+          [default: 15]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### `dc-cli param-rollback`
@@ -137,20 +269,60 @@ Restore parameters from a baseline saved by `param-set` (the vehicle in the base
 Usage: dc-cli param-rollback [OPTIONS] --connect <CONNECT> --baseline <BASELINE> [NAMES]...
 
 Arguments:
-  [NAMES]...  Parameters to restore
+  [NAMES]...
+          Parameters to restore
 
 Options:
-      --connect <CONNECT>    Link, e.g. tcp:127.0.0.1:5760
-      --sysid <SYSID>        Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --baseline <BASELINE>  Baseline file written by `param-set` (or the daemon's --param-dir)
-      --compid <COMPID>      Our MAVLink component id [default: 190]
-      --changed              Restore every parameter whose value now differs from the baseline
-      --tlog <TLOG>          Record everything to this .tlog file
-      --yes                  Confirm without asking (scripts)
-      --armed-ok             Acknowledge the in-flight warning without asking (scripts)
-      --audit <AUDIT>        Hash-chained audit log to append to [default: dc-audit.log]
-      --wait <WAIT>          Seconds to wait for a vehicle heartbeat [default: 15]
-  -h, --help                 Print help
+      --connect <CONNECT>
+          Link, e.g. tcp:127.0.0.1:5760
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --baseline <BASELINE>
+          Baseline file written by `param-set` (or the daemon's --param-dir)
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --changed
+          Restore every parameter whose value now differs from the baseline
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+      --yes
+          Confirm without asking (scripts)
+
+      --armed-ok
+          Acknowledge the in-flight warning without asking (scripts)
+
+      --audit <AUDIT>
+          Hash-chained audit log to append to
+          
+          [default: dc-audit.log]
+
+      --wait <WAIT>
+          Seconds to wait for a vehicle heartbeat
+          
+          [default: 15]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### `dc-cli daemon`
@@ -161,16 +333,53 @@ Run the core with the gRPC API (proto/dc/v1/core.proto) until interrupted
 Usage: dc-cli daemon [OPTIONS]
 
 Options:
-      --connect <CONNECT>        Links to open at start (repeatable)
-      --sysid <SYSID>            Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>          Our MAVLink component id [default: 190]
-      --listen <LISTEN>          gRPC listen address, e.g. 0.0.0.0:50051 for a field network. Beyond loopback an API key is required (--token-file or DC_API_TOKEN) [default: 127.0.0.1:50051]
-      --tlog <TLOG>              Record everything to this .tlog file
-      --token-file <TOKEN_FILE>  File holding the API key clients must present (else the DC_API_TOKEN variable)
-      --param-dir <PARAM_DIR>    Allow parameter writes over the API (SetParams), saving each baseline in this directory; without it the API cannot change parameters
-      --audit <AUDIT>            Hash-chained audit log (commands and parameter writes) [default: dc-audit.log]
-      --terrain <TERRAIN>        Answer the vehicles' terrain requests from every SRTM .hgt and elevation GeoTIFF in this directory (off without it)
-  -h, --help                     Print help
+      --connect <CONNECT>
+          Links to open at start (repeatable)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --listen <LISTEN>
+          gRPC listen address, e.g. 0.0.0.0:50051 for a field network. Beyond loopback an API key is required (--token-file or DC_API_TOKEN)
+          
+          [default: 127.0.0.1:50051]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --token-file <TOKEN_FILE>
+          File holding the API key clients must present (else the DC_API_TOKEN variable)
+
+      --param-dir <PARAM_DIR>
+          Allow parameter writes over the API (SetParams), saving each baseline in this directory; without it the API cannot change parameters
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+      --audit <AUDIT>
+          Hash-chained audit log (commands and parameter writes)
+          
+          [default: dc-audit.log]
+
+      --terrain <TERRAIN>
+          Answer the vehicles' terrain requests from every SRTM .hgt and elevation GeoTIFF in this directory (off without it)
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### `dc-cli about`
@@ -181,10 +390,31 @@ This build and machine, for test reports: version, OS and architecture, serial p
 Usage: dc-cli about [OPTIONS]
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### `dc-cli audit-verify`
@@ -195,14 +425,40 @@ Check an audit log's hash chain (commands and parameter writes): every record li
 Usage: dc-cli audit-verify [OPTIONS] [FILE]
 
 Arguments:
-  [FILE]  The audit log (default dc-audit.log) [default: dc-audit.log]
+  [FILE]
+          The audit log (default dc-audit.log)
+          
+          [default: dc-audit.log]
 
 Options:
-      --print            Also print the records (time UTC, vehicle, command id, text)
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --print
+          Also print the records (time UTC, vehicle, command id, text)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### `dc-cli remote`
@@ -226,12 +482,39 @@ Commands:
   help        Print this message or the help of the given subcommand(s)
 
 Options:
-      --grpc <GRPC>              Daemon URL [default: http://127.0.0.1:50051]
-      --sysid <SYSID>            Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>          Our MAVLink component id [default: 190]
-      --token-file <TOKEN_FILE>  File holding the daemon's API key (else the DC_API_TOKEN variable)
-      --tlog <TLOG>              Record everything to this .tlog file
-  -h, --help                     Print help
+      --grpc <GRPC>
+          Daemon URL
+          
+          [default: http://127.0.0.1:50051]
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --token-file <TOKEN_FILE>
+          File holding the daemon's API key (else the DC_API_TOKEN variable)
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli remote info`
@@ -242,10 +525,31 @@ Daemon identity
 Usage: dc-cli remote info [OPTIONS]
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli remote vehicles`
@@ -256,10 +560,31 @@ Vehicles and their latest telemetry
 Usage: dc-cli remote vehicles [OPTIONS]
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli remote params`
@@ -270,11 +595,34 @@ Download parameters through the daemon
 Usage: dc-cli remote params [OPTIONS]
 
 Options:
-      --out <OUT>        Write a .param file instead of printing
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --out <OUT>
+          Write a .param file instead of printing
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli remote set-params`
@@ -285,15 +633,41 @@ Change parameters through the daemon (it must run with --param-dir): confirm onc
 Usage: dc-cli remote set-params [OPTIONS] <NAME=VALUE>...
 
 Arguments:
-  <NAME=VALUE>...  Changes as NAME=VALUE
+  <NAME=VALUE>...
+          Changes as NAME=VALUE
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --yes              Confirm the changes without asking (scripts)
-      --armed-ok         Acknowledge the in-flight warning without asking (scripts)
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --yes
+          Confirm the changes without asking (scripts)
+
+      --armed-ok
+          Acknowledge the in-flight warning without asking (scripts)
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli remote items`
@@ -304,11 +678,37 @@ Download the mission, geofence or rally points through the daemon and list them
 Usage: dc-cli remote items [OPTIONS]
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --type <KIND>      Which list [default: mission] [possible values: mission, fence, rally]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --type <KIND>
+          Which list
+          
+          [default: mission]
+          [possible values: mission, fence, rally]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli remote messages`
@@ -319,10 +719,31 @@ The vehicle's recent STATUSTEXT lines (the "Messages" view), oldest first
 Usage: dc-cli remote messages [OPTIONS]
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli remote geotags`
@@ -333,10 +754,31 @@ Photos the vehicle reported taking (CAMERA_FEEDBACK) as CSV, for geotagging
 Usage: dc-cli remote geotags [OPTIONS]
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli remote logs`
@@ -347,12 +789,37 @@ List the vehicle's dataflash logs, or download one through the daemon
 Usage: dc-cli remote logs [OPTIONS]
 
 Options:
-      --download <DOWNLOAD>  Log number to download
-      --sysid <SYSID>        Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>      Our MAVLink component id [default: 190]
-      --out <OUT>            Output file for --download (written to FILE.partial, renamed when complete)
-      --tlog <TLOG>          Record everything to this .tlog file
-  -h, --help                 Print help
+      --download <DOWNLOAD>
+          Log number to download
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --out <OUT>
+          Output file for --download (written to FILE.partial, renamed when complete)
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli remote links`
@@ -363,10 +830,31 @@ The daemon's router: links, routes (which link each system is heard on), counter
 Usage: dc-cli remote links [OPTIONS]
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli remote events`
@@ -377,11 +865,36 @@ Print events (STATUSTEXT, links) for a while
 Usage: dc-cli remote events [OPTIONS]
 
 Options:
-      --seconds <SECONDS>  Seconds to listen [default: 10]
-      --sysid <SYSID>      Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>    Our MAVLink component id [default: 190]
-      --tlog <TLOG>        Record everything to this .tlog file
-  -h, --help               Print help
+      --seconds <SECONDS>
+          Seconds to listen
+          
+          [default: 10]
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### `dc-cli ports`
@@ -392,12 +905,37 @@ List serial ports with board hints; optionally watch hotplug or probe for MAVLin
 Usage: dc-cli ports [OPTIONS]
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --watch <WATCH>    Keep printing attach/remove events for this many seconds
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --probe <PROBE>    Probe this port for a HEARTBEAT at common baud rates
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --watch <WATCH>
+          Keep printing attach/remove events for this many seconds
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --probe <PROBE>
+          Probe this port for a HEARTBEAT at common baud rates
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### `dc-cli soak`
@@ -408,14 +946,47 @@ Serial integrity soak: stream MAVLink frames out of `tx` and verify them on `rx`
 Usage: dc-cli soak [OPTIONS] --tx <TX>
 
 Options:
-      --sysid <SYSID>      Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --tx <TX>            Sending port
-      --compid <COMPID>    Our MAVLink component id [default: 190]
-      --rx <RX>            Receiving port (default: same as --tx, i.e. loopback)
-      --baud <BAUD>        Baud rate [default: 921600]
-      --tlog <TLOG>        Record everything to this .tlog file
-      --seconds <SECONDS>  Duration in seconds [default: 60]
-  -h, --help               Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --tx <TX>
+          Sending port
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --rx <RX>
+          Receiving port (default: same as --tx, i.e. loopback)
+
+      --baud <BAUD>
+          Baud rate
+          
+          [default: 921600]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --seconds <SECONDS>
+          Duration in seconds
+          
+          [default: 60]
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### `dc-cli params-review`
@@ -426,15 +997,43 @@ Which safety nets a parameter set has switched off (advisory; .param or .bin)
 Usage: dc-cli params-review [OPTIONS] [FILE]
 
 Arguments:
-  [FILE]  A .param file or a .bin log (or use --connect for the vehicle itself)
+  [FILE]
+          A .param file or a .bin log (or use --connect for the vehicle itself)
 
 Options:
-      --connect <CONNECT>  Review the parameters on a vehicle instead (downloads them; read-only)
-      --sysid <SYSID>      Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>    Our MAVLink component id [default: 190]
-      --wait <WAIT>        Seconds to wait for a vehicle heartbeat (with --connect) [default: 15]
-      --tlog <TLOG>        Record everything to this .tlog file
-  -h, --help               Print help
+      --connect <CONNECT>
+          Review the parameters on a vehicle instead (downloads them; read-only)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --wait <WAIT>
+          Seconds to wait for a vehicle heartbeat (with --connect)
+          
+          [default: 15]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### `dc-cli params-diff`
@@ -445,14 +1044,38 @@ Compare two parameter sets, each a .param file or the parameters recorded in a .
 Usage: dc-cli params-diff [OPTIONS] <A> <B>
 
 Arguments:
-  <A>  Left side (.param or .bin)
-  <B>  Right side (.param or .bin)
+  <A>
+          Left side (.param or .bin)
+
+  <B>
+          Right side (.param or .bin)
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### `dc-cli log`
@@ -503,10 +1126,31 @@ Commands:
   help         Print this message or the help of the given subcommand(s)
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log info`
@@ -517,13 +1161,35 @@ Index a log and print message counts, timings and memory use
 Usage: dc-cli log info [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log list`
@@ -534,14 +1200,47 @@ List the dataflash logs on the vehicle (over MAVLink; vehicle must be disarmed)
 Usage: dc-cli log list [OPTIONS] --connect <CONNECT>
 
 Options:
-      --connect <CONNECT>      Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
-      --sysid <SYSID>          Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>        Our MAVLink component id [default: 190]
-      --target <TARGET>        Target system id (default: first vehicle heard)
-      --component <COMPONENT>  Target component id [default: 1]
-      --tlog <TLOG>            Record everything to this .tlog file
-      --wait <WAIT>            Seconds to wait for a vehicle heartbeat [default: 15]
-  -h, --help                   Print help
+      --connect <CONNECT>
+          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --target <TARGET>
+          Target system id (default: first vehicle heard)
+
+      --component <COMPONENT>
+          Target component id
+          
+          [default: 1]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+      --wait <WAIT>
+          Seconds to wait for a vehicle heartbeat
+          
+          [default: 15]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log download`
@@ -552,16 +1251,53 @@ Download a dataflash log from the vehicle over MAVLink (vehicle must be disarmed
 Usage: dc-cli log download [OPTIONS] --connect <CONNECT> --out <OUT>
 
 Options:
-      --connect <CONNECT>      Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
-      --sysid <SYSID>          Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>        Our MAVLink component id [default: 190]
-      --target <TARGET>        Target system id (default: first vehicle heard)
-      --component <COMPONENT>  Target component id [default: 1]
-      --tlog <TLOG>            Record everything to this .tlog file
-      --wait <WAIT>            Seconds to wait for a vehicle heartbeat [default: 15]
-      --id <ID>                Log number from `log list` (default: the newest)
-      --out <OUT>              Output file
-  -h, --help                   Print help
+      --connect <CONNECT>
+          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --target <TARGET>
+          Target system id (default: first vehicle heard)
+
+      --component <COMPONENT>
+          Target component id
+          
+          [default: 1]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+      --wait <WAIT>
+          Seconds to wait for a vehicle heartbeat
+          
+          [default: 15]
+
+      --id <ID>
+          Log number from `log list` (default: the newest)
+
+      --out <OUT>
+          Output file
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log erase`
@@ -572,16 +1308,55 @@ Erase every dataflash log on the vehicle (LOG_ERASE), then list them again to ch
 Usage: dc-cli log erase [OPTIONS] --connect <CONNECT>
 
 Options:
-      --connect <CONNECT>      Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
-      --sysid <SYSID>          Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>        Our MAVLink component id [default: 190]
-      --target <TARGET>        Target system id (default: first vehicle heard)
-      --component <COMPONENT>  Target component id [default: 1]
-      --tlog <TLOG>            Record everything to this .tlog file
-      --wait <WAIT>            Seconds to wait for a vehicle heartbeat [default: 15]
-      --yes                    Erase without asking (scripts)
-      --audit <AUDIT>          Hash-chained audit log to append to [default: dc-audit.log]
-  -h, --help                   Print help
+      --connect <CONNECT>
+          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --target <TARGET>
+          Target system id (default: first vehicle heard)
+
+      --component <COMPONENT>
+          Target component id
+          
+          [default: 1]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+      --wait <WAIT>
+          Seconds to wait for a vehicle heartbeat
+          
+          [default: 15]
+
+      --yes
+          Erase without asking (scripts)
+
+      --audit <AUDIT>
+          Hash-chained audit log to append to
+          
+          [default: dc-audit.log]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log compare`
@@ -592,14 +1367,38 @@ Two flights side by side: time, altitude, distance, speeds, battery, motors, tra
 Usage: dc-cli log compare [OPTIONS] <A> <B>
 
 Arguments:
-  <A>  First .bin log
-  <B>  Second .bin log
+  <A>
+          First .bin log
+
+  <B>
+          Second .bin log
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log report`
@@ -610,14 +1409,38 @@ Every analysis at once: summary, health, motors, attitude, battery, compass, win
 Usage: dc-cli log report [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --json             Print a machine-readable report instead (schema `dc.report/1`): summary, health, takeoffs, landings and time per mode
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --json
+          Print a machine-readable report instead (schema `dc.report/1`): summary, health, takeoffs, landings and time per mode
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log summary`
@@ -628,13 +1451,35 @@ Flight summary: armed time, highest altitude, top speed, distance, battery used
 Usage: dc-cli log summary [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log events`
@@ -645,14 +1490,38 @@ Timeline of mode changes, arming, events, errors and messages
 Usage: dc-cli log events [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --csv <CSV>        Write CSV (time_s,kind,detail) to this file instead of printing
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --csv <CSV>
+          Write CSV (time_s,kind,detail) to this file instead of printing
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log changes`
@@ -663,13 +1532,35 @@ Parameters changed after boot (values the autopilot updates itself are marked)
 Usage: dc-cli log changes [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log motors`
@@ -680,13 +1571,35 @@ Motor outputs while flying: how hard each motor works compared with the others
 Usage: dc-cli log motors [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log geotags`
@@ -697,15 +1610,41 @@ Photos in the log (CAM records) as CSV for geotagging, with UTC from the GPS tim
 Usage: dc-cli log geotags [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --trig             Trigger times (TRIG) instead of photos; differs from CAM only with a feedback pin
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --out <OUT>        Output file (default: print)
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --trig
+          Trigger times (TRIG) instead of photos; differs from CAM only with a feedback pin
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --out <OUT>
+          Output file (default: print)
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log notch`
@@ -716,18 +1655,58 @@ Throttle-based harmonic notch settings suggested from the flight (advice only; n
 Usage: dc-cli log notch [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --field <FIELD>        Message and field, e.g. ACC.AccX or GYR.GyrX (raw IMU logging, LOG_BITMASK bit 19) [default: ACC.AccX]
-      --sysid <SYSID>        Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>      Our MAVLink component id [default: 190]
-      --imu <IMU>            IMU instance [default: 0]
-      --segment <SEGMENT>    Samples per FFT segment (any length; powers of two are fastest) [default: 1024]
-      --tlog <TLOG>          Record everything to this .tlog file
-      --min-hz <MIN_HZ>      Ignore peaks below this frequency, Hz (body motion, not vibration) [default: 20]
-      --response <RESPONSE>  Write the filter response of the suggested and the current settings (Hz, dB) to this CSV file
-  -h, --help                 Print help
+      --field <FIELD>
+          Message and field, e.g. ACC.AccX or GYR.GyrX (raw IMU logging, LOG_BITMASK bit 19)
+          
+          [default: ACC.AccX]
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --imu <IMU>
+          IMU instance
+          
+          [default: 0]
+
+      --segment <SEGMENT>
+          Samples per FFT segment (any length; powers of two are fastest)
+          
+          [default: 1024]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --min-hz <MIN_HZ>
+          Ignore peaks below this frequency, Hz (body motion, not vibration)
+          
+          [default: 20]
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+      --response <RESPONSE>
+          Write the filter response of the suggested and the current settings (Hz, dB) to this CSV file
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log rc`
@@ -738,13 +1717,35 @@ RC link: receiver RSSI and link quality while armed, radio failsafes, late frame
 Usage: dc-cli log rc [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log sensors`
@@ -755,13 +1756,35 @@ Optical flow and rangefinders while flying: could the EKF use them?
 Usage: dc-cli log sensors [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log altitude`
@@ -772,13 +1795,35 @@ Do the altitude sources agree while flying (barometer vs EKF, GPS vs EKF)?
 Usage: dc-cli log altitude [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log gps`
@@ -789,13 +1834,35 @@ GPS quality while armed: satellites, HDOP, fix types, glitches
 Usage: dc-cli log gps [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log wind`
@@ -806,13 +1873,35 @@ Wind while flying, as the EKF estimated it
 Usage: dc-cli log wind [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log imu`
@@ -823,13 +1912,35 @@ IMU health: temperatures, error counts, unhealthy samples while armed, sample ra
 Usage: dc-cli log imu [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log sanitize`
@@ -840,15 +1951,43 @@ Write a copy with every position moved to a stand-in location (shapes and distan
 Usage: dc-cli log sanitize [OPTIONS] --out <OUT> <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --out <OUT>        Output .bin file
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --to <TO>          Stand-in location "lat,lon" (default: ArduPilot's SITL home, Canberra) [default: -35.363261,149.165230]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --out <OUT>
+          Output .bin file
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --to <TO>
+          Stand-in location "lat,lon" (default: ArduPilot's SITL home, Canberra)
+          
+          [default: -35.363261,149.165230]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log trim`
@@ -859,17 +1998,49 @@ Write a smaller copy holding only a time window (default: the armed time with a 
 Usage: dc-cli log trim [OPTIONS] --out <OUT> <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --out <OUT>        Output .bin file
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --from <FROM>      Window start, seconds since boot (instead of the armed time)
-      --tlog <TLOG>      Record everything to this .tlog file
-      --until <UNTIL>    Window end, seconds since boot
-      --margin <MARGIN>  Seconds kept before the first arming and after the last disarm [default: 10]
-  -h, --help             Print help
+      --out <OUT>
+          Output .bin file
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --from <FROM>
+          Window start, seconds since boot (instead of the armed time)
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --until <UNTIL>
+          Window end, seconds since boot
+
+      --margin <MARGIN>
+          Seconds kept before the first arming and after the last disarm
+          
+          [default: 10]
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log failsafes`
@@ -880,13 +2051,35 @@ Every failsafe in order: what triggered, what the vehicle did, when it cleared
 Usage: dc-cli log failsafes [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log takeoffs`
@@ -897,13 +2090,35 @@ Takeoffs: time from arming to liftoff, climb, attitude error just after liftoff
 Usage: dc-cli log takeoffs [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log landings`
@@ -914,13 +2129,35 @@ Landings: descent speed before touchdown, time to disarm
 Usage: dc-cli log landings [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log lanes`
@@ -931,13 +2168,35 @@ EKF lane switches (primary core changes), flagged when armed
 Usage: dc-cli log lanes [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log cells`
@@ -948,13 +2207,35 @@ Battery cell balance while flying (packs that report cell voltages)
 Usage: dc-cli log cells [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log perf`
@@ -965,13 +2246,35 @@ Autopilot performance: loop rate and overruns, processor load, memory, internal 
 Usage: dc-cli log perf [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log esc`
@@ -982,13 +2285,35 @@ ESC telemetry while armed: RPM, error rate, temperature and current per ESC
 Usage: dc-cli log esc [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log compass`
@@ -999,14 +2324,40 @@ Compass interference: field strength against battery current while flying
 Usage: dc-cli log compass [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --instance <INSTANCE>  Compass instance (0 = first) [default: 0]
-      --sysid <SYSID>        Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>      Our MAVLink component id [default: 190]
-      --tlog <TLOG>          Record everything to this .tlog file
-  -h, --help                 Print help
+      --instance <INSTANCE>
+          Compass instance (0 = first)
+          
+          [default: 0]
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log battery`
@@ -1017,14 +2368,40 @@ The battery under load while flying: current, power, voltage sag, use, resistanc
 Usage: dc-cli log battery [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --instance <INSTANCE>  Battery instance (0 = first) [default: 0]
-      --sysid <SYSID>        Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>      Our MAVLink component id [default: 190]
-      --tlog <TLOG>          Record everything to this .tlog file
-  -h, --help                 Print help
+      --instance <INSTANCE>
+          Battery instance (0 = first)
+          
+          [default: 0]
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log attitude`
@@ -1035,13 +2412,35 @@ Attitude tracking while flying: desired minus achieved roll, pitch and yaw
 Usage: dc-cli log attitude [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log fft`
@@ -1052,16 +2451,50 @@ Vibration spectrum (Welch FFT) of an IMU axis while armed, and its strongest pea
 Usage: dc-cli log fft [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --field <FIELD>      Message and field, e.g. ACC.AccX or GYR.GyrZ [default: ACC.AccZ]
-      --sysid <SYSID>      Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>    Our MAVLink component id [default: 190]
-      --imu <IMU>          IMU instance [default: 0]
-      --segment <SEGMENT>  Samples per FFT segment (any length; powers of two are fastest) [default: 1024]
-      --tlog <TLOG>        Record everything to this .tlog file
-  -h, --help               Print help
+      --field <FIELD>
+          Message and field, e.g. ACC.AccX or GYR.GyrZ
+          
+          [default: ACC.AccZ]
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --imu <IMU>
+          IMU instance
+          
+          [default: 0]
+
+      --segment <SEGMENT>
+          Samples per FFT segment (any length; powers of two are fastest)
+          
+          [default: 1024]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log spectrogram`
@@ -1072,18 +2505,58 @@ How the vibration spectrum changes over the flight and with throttle: the strong
 Usage: dc-cli log spectrogram [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --field <FIELD>    Message and field, e.g. IMU.AccZ or ACC.AccZ [default: IMU.AccZ]
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --imu <IMU>        IMU instance [default: 0]
-      --bands <BANDS>    Throttle bands (equal widths from 0 to 1) [default: 10]
-      --tlog <TLOG>      Record everything to this .tlog file
-      --min-hz <MIN_HZ>  Ignore peaks below this frequency, Hz [default: 20]
-      --csv <CSV>        Write the spectrogram (1 s slices, armed time) to this CSV file
-  -h, --help             Print help
+      --field <FIELD>
+          Message and field, e.g. IMU.AccZ or ACC.AccZ
+          
+          [default: IMU.AccZ]
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --imu <IMU>
+          IMU instance
+          
+          [default: 0]
+
+      --bands <BANDS>
+          Throttle bands (equal widths from 0 to 1)
+          
+          [default: 10]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --min-hz <MIN_HZ>
+          Ignore peaks below this frequency, Hz
+          
+          [default: 20]
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+      --csv <CSV>
+          Write the spectrogram (1 s slices, armed time) to this CSV file
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log csv`
@@ -1094,15 +2567,41 @@ Every record of one message as CSV (all fields; text quoted)
 Usage: dc-cli log csv [OPTIONS] <PATH> <MSG>
 
 Arguments:
-  <PATH>  Path to the .bin log
-  <MSG>   Message name, e.g. ATT
+  <PATH>
+          Path to the .bin log
+
+  <MSG>
+          Message name, e.g. ATT
 
 Options:
-      --out <OUT>        Output file (default: print)
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --out <OUT>
+          Output file (default: print)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log params`
@@ -1113,14 +2612,38 @@ The parameters recorded in the log as a .param file
 Usage: dc-cli log params [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --out <OUT>        Output file (default: print)
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --out <OUT>
+          Output file (default: print)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log health`
@@ -1131,15 +2654,43 @@ Automatic checks: vibration and clipping, battery against the vehicle's failsafe
 Usage: dc-cli log health [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --json               Print the findings as JSON (schema `dc.health/1`) for scripts and CI
-      --sysid <SYSID>      Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>    Our MAVLink component id [default: 190]
-      --fail-on <FAIL_ON>  Exit with an error when any finding is at this level or worse [possible values: caution, warning]
-      --tlog <TLOG>        Record everything to this .tlog file
-  -h, --help               Print help
+      --json
+          Print the findings as JSON (schema `dc.health/1`) for scripts and CI
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --fail-on <FAIL_ON>
+          Exit with an error when any finding is at this level or worse
+          
+          [possible values: caution, warning]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log export`
@@ -1150,15 +2701,41 @@ Export the flight track (EKF position, UTC from the GPS clock) as GPX and/or KML
 Usage: dc-cli log export [OPTIONS] <PATH>
 
 Arguments:
-  <PATH>  Path to the .bin log
+  <PATH>
+          Path to the .bin log
 
 Options:
-      --gpx <GPX>        Write a GPX 1.1 track
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --kml <KML>        Write a KML 2.2 line (Google Earth), altitude above MSL
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --gpx <GPX>
+          Write a GPX 1.1 track
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --kml <KML>
+          Write a KML 2.2 line (Google Earth), altitude above MSL
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli log plot`
@@ -1169,18 +2746,52 @@ Extract MSG.FIELD and downsample it (MinMaxLTTB) for plotting
 Usage: dc-cli log plot [OPTIONS] <PATH> <MSG> <FIELD>
 
 Arguments:
-  <PATH>   Path to the .bin log
-  <MSG>    Message name, e.g. ATT
-  <FIELD>  Field name, e.g. Roll
+  <PATH>
+          Path to the .bin log
+
+  <MSG>
+          Message name, e.g. ATT
+
+  <FIELD>
+          Field name, e.g. Roll
 
 Options:
-      --sysid <SYSID>        Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --width <WIDTH>        Output points (plot width in pixels) [default: 2000]
-      --compid <COMPID>      Our MAVLink component id [default: 190]
-      --instance <INSTANCE>  Keep only records whose field `I` equals this instance number
-      --csv <CSV>            Write the downsampled points as CSV (time_s,value)
-      --tlog <TLOG>          Record everything to this .tlog file
-  -h, --help                 Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --width <WIDTH>
+          Output points (plot width in pixels)
+          
+          [default: 2000]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --instance <INSTANCE>
+          Keep only records whose field `I` equals this instance number
+
+      --csv <CSV>
+          Write the downsampled points as CSV (time_s,value)
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### `dc-cli inspect`
@@ -1191,13 +2802,42 @@ MAVLink inspector: every message stream per sender (system/component) with its c
 Usage: dc-cli inspect [OPTIONS] --connect <CONNECT>
 
 Options:
-      --connect <CONNECT>  Link to open (tlog:FILE@N replays a recording)
-      --sysid <SYSID>      Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>    Our MAVLink component id [default: 190]
-      --seconds <SECONDS>  Seconds to listen [default: 10]
-      --msg <MSG>          Also print the latest fields of this message (e.g. GPS_RAW_INT)
-      --tlog <TLOG>        Record everything to this .tlog file
-  -h, --help               Print help
+      --connect <CONNECT>
+          Link to open (tlog:FILE@N replays a recording)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --seconds <SECONDS>
+          Seconds to listen
+          
+          [default: 10]
+
+      --msg <MSG>
+          Also print the latest fields of this message (e.g. GPS_RAW_INT)
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### `dc-cli preflight`
@@ -1208,15 +2848,52 @@ Pre-flight checklist from what the vehicle reports: link, firmware, the autopilo
 Usage: dc-cli preflight [OPTIONS] --connect <CONNECT>
 
 Options:
-      --connect <CONNECT>      Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
-      --sysid <SYSID>          Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>        Our MAVLink component id [default: 190]
-      --target <TARGET>        Target system id (default: first vehicle heard)
-      --component <COMPONENT>  Target component id [default: 1]
-      --tlog <TLOG>            Record everything to this .tlog file
-      --wait <WAIT>            Seconds to wait for a vehicle heartbeat [default: 15]
-      --settle <SETTLE>        Seconds to collect telemetry after the vehicle is found [default: 5]
-  -h, --help                   Print help
+      --connect <CONNECT>
+          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --target <TARGET>
+          Target system id (default: first vehicle heard)
+
+      --component <COMPONENT>
+          Target component id
+          
+          [default: 1]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+      --wait <WAIT>
+          Seconds to wait for a vehicle heartbeat
+          
+          [default: 15]
+
+      --settle <SETTLE>
+          Seconds to collect telemetry after the vehicle is found
+          
+          [default: 5]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### `dc-cli settings`
@@ -1233,10 +2910,31 @@ Commands:
   help     Print this message or the help of the given subcommand(s)
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli settings show`
@@ -1247,10 +2945,31 @@ Show each setting, whether it is on, and its danger (and where the file is)
 Usage: dc-cli settings show [OPTIONS]
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli settings enable`
@@ -1261,15 +2980,43 @@ Turn a setting on, after showing its danger and asking once
 Usage: dc-cli settings enable [OPTIONS] <NAME>
 
 Arguments:
-  <NAME>  armed-mission-upload, fence-rally-upload or log-erase
+  <NAME>
+          armed-mission-upload, fence-rally-upload or log-erase
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --yes              Turn it on without asking (scripts)
-      --audit <AUDIT>    Hash-chained audit log to record the change in [default: dc-audit.log]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --yes
+          Turn it on without asking (scripts)
+
+      --audit <AUDIT>
+          Hash-chained audit log to record the change in
+          
+          [default: dc-audit.log]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli settings disable`
@@ -1280,14 +3027,40 @@ Turn a setting off
 Usage: dc-cli settings disable [OPTIONS] <NAME>
 
 Arguments:
-  <NAME>  armed-mission-upload, fence-rally-upload or log-erase
+  <NAME>
+          armed-mission-upload, fence-rally-upload or log-erase
 
 Options:
-      --audit <AUDIT>    Hash-chained audit log to record the change in [default: dc-audit.log]
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --audit <AUDIT>
+          Hash-chained audit log to record the change in
+          
+          [default: dc-audit.log]
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### `dc-cli mission`
@@ -1320,10 +3093,31 @@ Commands:
   help            Print this message or the help of the given subcommand(s)
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli mission upload`
@@ -1334,21 +3128,68 @@ Upload a mission, geofence or rally points from a file (.plan, or .waypoints), t
 Usage: dc-cli mission upload [OPTIONS] --connect <CONNECT> <FILE>
 
 Arguments:
-  <FILE>  The file: a .plan (its mission, geofence or rally points) or QGC WPL 110
+  <FILE>
+          The file: a .plan (its mission, geofence or rally points) or QGC WPL 110
 
 Options:
-      --connect <CONNECT>      Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
-      --sysid <SYSID>          Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>        Our MAVLink component id [default: 190]
-      --target <TARGET>        Target system id (default: first vehicle heard)
-      --component <COMPONENT>  Target component id [default: 1]
-      --tlog <TLOG>            Record everything to this .tlog file
-      --wait <WAIT>            Seconds to wait for a vehicle heartbeat [default: 15]
-      --type <KIND>            Which list to upload [default: mission] [possible values: mission, fence, rally]
-      --yes                    Confirm without asking (scripts)
-      --armed-ok               Acknowledge the in-flight warning without asking (scripts): upload even if armed
-      --audit <AUDIT>          Hash-chained audit log to append to [default: dc-audit.log]
-  -h, --help                   Print help
+      --connect <CONNECT>
+          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --target <TARGET>
+          Target system id (default: first vehicle heard)
+
+      --component <COMPONENT>
+          Target component id
+          
+          [default: 1]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+      --wait <WAIT>
+          Seconds to wait for a vehicle heartbeat
+          
+          [default: 15]
+
+      --type <KIND>
+          Which list to upload
+          
+          [default: mission]
+          [possible values: mission, fence, rally]
+
+      --yes
+          Confirm without asking (scripts)
+
+      --armed-ok
+          Acknowledge the in-flight warning without asking (scripts): upload even if armed
+
+      --audit <AUDIT>
+          Hash-chained audit log to append to
+          
+          [default: dc-audit.log]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli mission download`
@@ -1359,16 +3200,56 @@ Download the vehicle's mission and print it (or write a .waypoints file)
 Usage: dc-cli mission download [OPTIONS] --connect <CONNECT>
 
 Options:
-      --connect <CONNECT>      Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
-      --sysid <SYSID>          Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>        Our MAVLink component id [default: 190]
-      --target <TARGET>        Target system id (default: first vehicle heard)
-      --component <COMPONENT>  Target component id [default: 1]
-      --tlog <TLOG>            Record everything to this .tlog file
-      --wait <WAIT>            Seconds to wait for a vehicle heartbeat [default: 15]
-      --type <KIND>            Which list: the mission, the geofence or the rally points [default: mission] [possible values: mission, fence, rally]
-      --out <OUT>              Write a .waypoints file (QGC WPL 110; fence and rally items as the vehicle holds them)
-  -h, --help                   Print help
+      --connect <CONNECT>
+          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --target <TARGET>
+          Target system id (default: first vehicle heard)
+
+      --component <COMPONENT>
+          Target component id
+          
+          [default: 1]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+      --wait <WAIT>
+          Seconds to wait for a vehicle heartbeat
+          
+          [default: 15]
+
+      --type <KIND>
+          Which list: the mission, the geofence or the rally points
+          
+          [default: mission]
+          [possible values: mission, fence, rally]
+
+      --out <OUT>
+          Write a .waypoints file (QGC WPL 110; fence and rally items as the vehicle holds them)
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli mission survey`
@@ -1379,22 +3260,75 @@ Generate a survey grid ("lawnmower") over a polygon as a .waypoints mission: tak
 Usage: dc-cli mission survey [OPTIONS] --alt <ALT>
 
 Options:
-      --polygon <POLYGON>          Polygon vertices as "lat,lon;lat,lon;..." (at least 3; southern latitudes start with a minus sign)
-      --sysid <SYSID>              Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>            Our MAVLink component id [default: 190]
-      --polygon-kml <POLYGON_KML>  Read the polygon from a KML file instead (its first <Polygon>, e.g. drawn in Google Earth)
-      --spacing <SPACING>          Distance between lines, m (or worked out from --camera and --sidelap)
-      --tlog <TLOG>                Record everything to this .tlog file
-      --camera <CAMERA>            Camera as "sensor_w_mm,sensor_h_mm,focal_mm,image_w_px,image_h_px": prints the ground resolution and photo distance, and sets the line spacing from the overlap. The mission does not trigger the camera
-      --sidelap <SIDELAP>          Side overlap between lines, % (with --camera) [default: 70]
-      --frontlap <FRONTLAP>        Front overlap between photos, % (with --camera) [default: 80]
-      --trigger                    Trigger the camera by distance in the mission (DO_SET_CAM_TRIGG_DIST at the first survey waypoint, off before RTL), at the photo distance from --camera
-      --crosshatch                 Fly a second set of lines at 90 degrees to the first (crosshatch)
-      --overshoot <OVERSHOOT>      Extend each line this many metres beyond the polygon at both ends [default: 0]
-      --angle <ANGLE>              Line direction, degrees clockwise from north [default: 0]
-      --alt <ALT>                  Altitude above home, m
-      --out <OUT>                  Output .waypoints file (default: print)
-  -h, --help                       Print help
+      --polygon <POLYGON>
+          Polygon vertices as "lat,lon;lat,lon;..." (at least 3; southern latitudes start with a minus sign)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --polygon-kml <POLYGON_KML>
+          Read the polygon from a KML file instead (its first <Polygon>, e.g. drawn in Google Earth)
+
+      --spacing <SPACING>
+          Distance between lines, m (or worked out from --camera and --sidelap)
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --camera <CAMERA>
+          Camera as "sensor_w_mm,sensor_h_mm,focal_mm,image_w_px,image_h_px": prints the ground resolution and photo distance, and sets the line spacing from the overlap. The mission does not trigger the camera
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+      --sidelap <SIDELAP>
+          Side overlap between lines, % (with --camera)
+          
+          [default: 70]
+
+      --frontlap <FRONTLAP>
+          Front overlap between photos, % (with --camera)
+          
+          [default: 80]
+
+      --trigger
+          Trigger the camera by distance in the mission (DO_SET_CAM_TRIGG_DIST at the first survey waypoint, off before RTL), at the photo distance from --camera
+
+      --crosshatch
+          Fly a second set of lines at 90 degrees to the first (crosshatch)
+
+      --overshoot <OVERSHOOT>
+          Extend each line this many metres beyond the polygon at both ends
+          
+          [default: 0]
+
+      --angle <ANGLE>
+          Line direction, degrees clockwise from north
+          
+          [default: 0]
+
+      --alt <ALT>
+          Altitude above home, m
+
+      --out <OUT>
+          Output .waypoints file (default: print)
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli mission check`
@@ -1405,17 +3339,49 @@ Read a .waypoints file and list its items (offline)
 Usage: dc-cli mission check [OPTIONS] <FILE>
 
 Arguments:
-  <FILE>  The file
+  <FILE>
+          The file
 
 Options:
-      --params <PARAMS>                The vehicle's parameters (.param or .bin) for the flight-time estimate's speeds (default: ArduCopter 4.7 defaults) and the parameter fences (FENCE_TYPE circle and altitude) of the --fence check
-      --sysid <SYSID>                  Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>                Our MAVLink component id [default: 190]
-      --fence <FENCE>                  Check the whole path against this geofence (fence items as saved by `mission download --type fence --out` or `mission fence-from-kml`, or a .plan's geofence); exits with failure on a breach
-      --dem <DEM>                      Check the height above the ground along every leg with the terrain tiles in this directory (heights above home taken from the ground at home); exits with failure below --min-clearance
-      --tlog <TLOG>                    Record everything to this .tlog file
-      --min-clearance <MIN_CLEARANCE>  Lowest acceptable height above the ground with --dem, m [default: 20]
-  -h, --help                           Print help
+      --params <PARAMS>
+          The vehicle's parameters (.param or .bin) for the flight-time estimate's speeds (default: ArduCopter 4.7 defaults) and the parameter fences (FENCE_TYPE circle and altitude) of the --fence check
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --fence <FENCE>
+          Check the whole path against this geofence (fence items as saved by `mission download --type fence --out` or `mission fence-from-kml`, or a .plan's geofence); exits with failure on a breach
+
+      --dem <DEM>
+          Check the height above the ground along every leg with the terrain tiles in this directory (heights above home taken from the ground at home); exits with failure below --min-clearance
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --min-clearance <MIN_CLEARANCE>
+          Lowest acceptable height above the ground with --dem, m
+          
+          [default: 20]
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli mission corridor`
@@ -1426,17 +3392,54 @@ Corridor scan along a path (a road, river, power line): parallel lines covering 
 Usage: dc-cli mission corridor [OPTIONS] --width <WIDTH> --spacing <SPACING> --alt <ALT>
 
 Options:
-      --path <PATH>            Path points as "lat,lon;lat,lon;..." (at least 2)
-      --sysid <SYSID>          Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>        Our MAVLink component id [default: 190]
-      --path-kml <PATH_KML>    Read the path from a KML file instead (its first LineString)
-      --tlog <TLOG>            Record everything to this .tlog file
-      --width <WIDTH>          Width to cover, m, centred on the path
-      --spacing <SPACING>      Distance between lines, m
-      --overshoot <OVERSHOOT>  Extend each line this many metres past both ends of the path [default: 0]
-      --alt <ALT>              Altitude above home, m
-      --out <OUT>              Output file (.waypoints or .plan; default: print)
-  -h, --help                   Print help
+      --path <PATH>
+          Path points as "lat,lon;lat,lon;..." (at least 2)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --path-kml <PATH_KML>
+          Read the path from a KML file instead (its first LineString)
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --width <WIDTH>
+          Width to cover, m, centred on the path
+
+      --spacing <SPACING>
+          Distance between lines, m
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+      --overshoot <OVERSHOOT>
+          Extend each line this many metres past both ends of the path
+          
+          [default: 0]
+
+      --alt <ALT>
+          Altitude above home, m
+
+      --out <OUT>
+          Output file (.waypoints or .plan; default: print)
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli mission search`
@@ -1476,6 +3479,16 @@ Options:
       --extent <EXTENT>
           Side of the square searched, m (square)
 
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
       --radius <RADIUS>
           Leg length, m (sector)
 
@@ -1502,17 +3515,49 @@ Terrain following without terrain data on the vehicle: sets every waypoint above
 Usage: dc-cli mission terrain-follow [OPTIONS] --dem <DEM> --agl <AGL> <FILE>
 
 Arguments:
-  <FILE>  The mission file
+  <FILE>
+          The mission file
 
 Options:
-      --dem <DEM>        Directory holding the terrain tiles (SRTM .hgt and/or elevation GeoTIFFs)
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --agl <AGL>        Height above the ground, m
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --step <STEP>      Add waypoints this often between waypoints, m (0: none) [default: 0]
-      --tlog <TLOG>      Record everything to this .tlog file
-      --out <OUT>        Output file (.waypoints or .plan; default: print)
-  -h, --help             Print help
+      --dem <DEM>
+          Directory holding the terrain tiles (SRTM .hgt and/or elevation GeoTIFFs)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --agl <AGL>
+          Height above the ground, m
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --step <STEP>
+          Add waypoints this often between waypoints, m (0: none)
+          
+          [default: 0]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --out <OUT>
+          Output file (.waypoints or .plan; default: print)
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli mission profile`
@@ -1523,16 +3568,46 @@ The mission's altitude against the ground along the path, as CSV (dist_m, seq, l
 Usage: dc-cli mission profile [OPTIONS] --dem <DEM> <FILE>
 
 Arguments:
-  <FILE>  The mission file
+  <FILE>
+          The mission file
 
 Options:
-      --dem <DEM>        Directory holding the terrain tiles (SRTM .hgt and/or elevation GeoTIFFs)
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --step <STEP>      Sample spacing along the legs, m [default: 25]
-      --out <OUT>        Output CSV (default: print)
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --dem <DEM>
+          Directory holding the terrain tiles (SRTM .hgt and/or elevation GeoTIFFs)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --step <STEP>
+          Sample spacing along the legs, m
+          
+          [default: 25]
+
+      --out <OUT>
+          Output CSV (default: print)
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli mission from-kml`
@@ -1543,15 +3618,41 @@ A mission from a path drawn in Google Earth (the KML's first LineString): takeof
 Usage: dc-cli mission from-kml [OPTIONS] --alt <ALT> <KML>
 
 Arguments:
-  <KML>  The KML file
+  <KML>
+          The KML file
 
 Options:
-      --alt <ALT>        Altitude above home, m
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --out <OUT>        Output file (.waypoints or .plan; default: print)
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --alt <ALT>
+          Altitude above home, m
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --out <OUT>
+          Output file (.waypoints or .plan; default: print)
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli mission edit`
@@ -1562,15 +3663,41 @@ Edit a mission file offline, operation by operation in the order given: insert:N
 Usage: dc-cli mission edit [OPTIONS] --out <OUT> <FILE> <OPS>...
 
 Arguments:
-  <FILE>    The mission (.plan or QGC WPL 110)
-  <OPS>...  Operations, applied in order
+  <FILE>
+          The mission (.plan or QGC WPL 110)
+
+  <OPS>...
+          Operations, applied in order
 
 Options:
-      --out <OUT>        Where to write the result (.plan or .waypoints by extension)
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --out <OUT>
+          Where to write the result (.plan or .waypoints by extension)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli mission rtl-target`
@@ -1581,15 +3708,41 @@ Where RTL would go from a position: home or a rally point, by ArduCopter's rules
 Usage: dc-cli mission rtl-target [OPTIONS] --from <FROM> <FILE>
 
 Arguments:
-  <FILE>  The .plan (home is its mission's item 0)
+  <FILE>
+          The .plan (home is its mission's item 0)
 
 Options:
-      --from <FROM>      The position, as lat,lon
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --params <PARAMS>  The vehicle's parameters (RALLY_LIMIT_KM, RALLY_INCL_HOME, FENCE_ENABLE, FENCE_TYPE...); Copter defaults without
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --from <FROM>
+          The position, as lat,lon
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --params <PARAMS>
+          The vehicle's parameters (RALLY_LIMIT_KM, RALLY_INCL_HOME, FENCE_ENABLE, FENCE_TYPE...); Copter defaults without
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli mission fence-from-kml`
@@ -1600,14 +3753,38 @@ A geofence from polygons drawn in Google Earth: every KML polygon becomes an inc
 Usage: dc-cli mission fence-from-kml [OPTIONS] <KML>
 
 Arguments:
-  <KML>  The KML file
+  <KML>
+          The KML file
 
 Options:
-      --out <OUT>        Output file (.waypoints fence items, or the geofence of a .plan; default: print)
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --out <OUT>
+          Output file (.waypoints fence items, or the geofence of a .plan; default: print)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli mission rally-from-kml`
@@ -1618,15 +3795,41 @@ Rally points from points (placemarks) drawn in Google Earth, at one altitude abo
 Usage: dc-cli mission rally-from-kml [OPTIONS] --alt <ALT> <KML>
 
 Arguments:
-  <KML>  The KML file
+  <KML>
+          The KML file
 
 Options:
-      --alt <ALT>        Altitude above home, m
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --out <OUT>        Output file (.waypoints rally items, or the rally points of a .plan; default: print)
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --alt <ALT>
+          Altitude above home, m
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --out <OUT>
+          Output file (.waypoints rally items, or the rally points of a .plan; default: print)
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli mission convert`
@@ -1637,14 +3840,38 @@ Convert a mission between QGroundControl `.plan` and `.waypoints` (QGC WPL 110),
 Usage: dc-cli mission convert [OPTIONS] <INPUT> <OUTPUT>
 
 Arguments:
-  <INPUT>   Input file (.plan or .waypoints)
-  <OUTPUT>  Output file (.plan or .waypoints)
+  <INPUT>
+          Input file (.plan or .waypoints)
+
+  <OUTPUT>
+          Output file (.plan or .waypoints)
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli mission reverse`
@@ -1655,14 +3882,38 @@ Fly the route backwards (offline): home, TAKEOFF and the final RTL/LAND stay in 
 Usage: dc-cli mission reverse [OPTIONS] <FILE>
 
 Arguments:
-  <FILE>  The .waypoints file
+  <FILE>
+          The .waypoints file
 
 Options:
-      --out <OUT>        Output file (default: print)
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --out <OUT>
+          Output file (default: print)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli mission shift`
@@ -1673,17 +3924,51 @@ Move every located item by metres north/east (offline); home stays unless --home
 Usage: dc-cli mission shift [OPTIONS] <FILE>
 
 Arguments:
-  <FILE>  The .waypoints file
+  <FILE>
+          The .waypoints file
 
 Options:
-      --north <NORTH>    Metres north (negative: south) [default: 0]
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --east <EAST>      Metres east (negative: west) [default: 0]
-      --home             Move home (item 0) too
-      --tlog <TLOG>      Record everything to this .tlog file
-      --out <OUT>        Output file (default: print)
-  -h, --help             Print help
+      --north <NORTH>
+          Metres north (negative: south)
+          
+          [default: 0]
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --east <EAST>
+          Metres east (negative: west)
+          
+          [default: 0]
+
+      --home
+          Move home (item 0) too
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --out <OUT>
+          Output file (default: print)
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli mission diff`
@@ -1694,15 +3979,41 @@ Compare two mission files (offline); exits with failure on any difference
 Usage: dc-cli mission diff [OPTIONS] <A> <B>
 
 Arguments:
-  <A>  First .waypoints file
-  <B>  Second .waypoints file
+  <A>
+          First .waypoints file
+
+  <B>
+          Second .waypoints file
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --with-home        Also compare home (item 0), which the vehicle sets itself
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --with-home
+          Also compare home (item 0), which the vehicle sets itself
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli mission export`
@@ -1713,16 +4024,44 @@ The mission's flight path as GPX and/or KML (Google Earth), or its items as CSV 
 Usage: dc-cli mission export [OPTIONS] <FILE>
 
 Arguments:
-  <FILE>  The mission file (.waypoints or .plan)
+  <FILE>
+          The mission file (.waypoints or .plan)
 
 Options:
-      --gpx <GPX>        Write a GPX 1.1 track
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --kml <KML>        Write a KML 2.2 line
-      --csv <CSV>        Write the items as CSV: seq, command, frame, params, lat, lon, alt, leg and total distance (m)
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --gpx <GPX>
+          Write a GPX 1.1 track
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --kml <KML>
+          Write a KML 2.2 line
+
+      --csv <CSV>
+          Write the items as CSV: seq, command, frame, params, lat, lon, alt, leg and total distance (m)
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli mission compare`
@@ -1733,17 +4072,51 @@ Does the vehicle hold exactly this file's mission? Downloads and compares (home,
 Usage: dc-cli mission compare [OPTIONS] --connect <CONNECT> <FILE>
 
 Arguments:
-  <FILE>  The file
+  <FILE>
+          The file
 
 Options:
-      --connect <CONNECT>      Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
-      --sysid <SYSID>          Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>        Our MAVLink component id [default: 190]
-      --target <TARGET>        Target system id (default: first vehicle heard)
-      --component <COMPONENT>  Target component id [default: 1]
-      --tlog <TLOG>            Record everything to this .tlog file
-      --wait <WAIT>            Seconds to wait for a vehicle heartbeat [default: 15]
-  -h, --help                   Print help
+      --connect <CONNECT>
+          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --target <TARGET>
+          Target system id (default: first vehicle heard)
+
+      --component <COMPONENT>
+          Target component id
+          
+          [default: 1]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+      --wait <WAIT>
+          Seconds to wait for a vehicle heartbeat
+          
+          [default: 15]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### `dc-cli coord`
@@ -1754,13 +4127,35 @@ A position in every display format: decimal degrees, DMS, degrees and decimal mi
 Usage: dc-cli coord [OPTIONS] <POINT>
 
 Arguments:
-  <POINT>  "lat,lon" in decimal degrees
+  <POINT>
+          "lat,lon" in decimal degrees
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### `dc-cli terrain`
@@ -1775,10 +4170,31 @@ Commands:
   help       Print this message or the help of the given subcommand(s)
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli terrain elevation`
@@ -1789,14 +4205,38 @@ Elevation above the geoid (EGM96) at each point, bilinear between samples
 Usage: dc-cli terrain elevation [OPTIONS] --dem <DEM> <POINTS>
 
 Arguments:
-  <POINTS>  Points as "lat,lon;lat,lon;..."
+  <POINTS>
+          Points as "lat,lon;lat,lon;..."
 
 Options:
-      --dem <DEM>        Directory holding the tiles: SRTM .hgt (e.g. S36E149.hgt, 1″ or 3″) and elevation GeoTIFFs in EPSG:4326 (e.g. Copernicus GLO-30; heights above EGM2008, within a metre or so of SRTM's EGM96)
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --dem <DEM>
+          Directory holding the tiles: SRTM .hgt (e.g. S36E149.hgt, 1″ or 3″) and elevation GeoTIFFs in EPSG:4326 (e.g. Copernicus GLO-30; heights above EGM2008, within a metre or so of SRTM's EGM96)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### `dc-cli tlog`
@@ -1823,10 +4263,31 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli tlog alerts`
@@ -1837,14 +4298,40 @@ The alerts DrorControl would have raised during the recording (position trust, g
 Usage: dc-cli tlog alerts [OPTIONS] <FILE>
 
 Arguments:
-  <FILE>  The .tlog file
+  <FILE>
+          The .tlog file
 
 Options:
-      --speed <SPEED>    Replay speed (1..=100); times are from the recording either way, within about speed × 5 ms [default: 100]
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --speed <SPEED>
+          Replay speed (1..=100); times are from the recording either way, within about speed × 5 ms
+          
+          [default: 100]
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli tlog inspect`
@@ -1855,14 +4342,38 @@ Every message stream in the recording per sender, with count and rate (from the 
 Usage: dc-cli tlog inspect [OPTIONS] <FILE>
 
 Arguments:
-  <FILE>  The .tlog file
+  <FILE>
+          The .tlog file
 
 Options:
-      --msg <MSG>        Also print the last fields of this message
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --msg <MSG>
+          Also print the last fields of this message
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli tlog signing`
@@ -1873,14 +4384,38 @@ MAVLink 2 signing in the recording, per sender: how many frames are signed, the 
 Usage: dc-cli tlog signing [OPTIONS] <FILE>
 
 Arguments:
-  <FILE>  The .tlog file
+  <FILE>
+          The .tlog file
 
 Options:
-      --key-file <KEY_FILE>  The signing key: 64 hex digits, or a passphrase (hashed with SHA-256, as QGroundControl does)
-      --sysid <SYSID>        Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>      Our MAVLink component id [default: 190]
-      --tlog <TLOG>          Record everything to this .tlog file
-  -h, --help                 Print help
+      --key-file <KEY_FILE>
+          The signing key: 64 hex digits, or a passphrase (hashed with SHA-256, as QGroundControl does)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli tlog link`
@@ -1891,15 +4426,43 @@ Link quality over time (range tests): frames received and lost per window, the r
 Usage: dc-cli tlog link [OPTIONS] <FILE>
 
 Arguments:
-  <FILE>  The .tlog file
+  <FILE>
+          The .tlog file
 
 Options:
-      --sysid <SYSID>      Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --window <WINDOW>    Window length, s [default: 10]
-      --compid <COMPID>    Our MAVLink component id [default: 190]
-      --vehicle <VEHICLE>  Vehicle system id (default: the first autopilot heard)
-      --tlog <TLOG>        Record everything to this .tlog file
-  -h, --help               Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --window <WINDOW>
+          Window length, s
+          
+          [default: 10]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --vehicle <VEHICLE>
+          Vehicle system id (default: the first autopilot heard)
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli tlog index`
@@ -1910,14 +4473,38 @@ Index the recording for playback: checkpoints, key events, and what a seek to a 
 Usage: dc-cli tlog index [OPTIONS] <FILE>
 
 Arguments:
-  <FILE>  The .tlog file
+  <FILE>
+          The .tlog file
 
 Options:
-      --at <AT>          Show the state a seek to this many seconds after the start restores
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --at <AT>
+          Show the state a seek to this many seconds after the start restores
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli tlog health`
@@ -1928,15 +4515,43 @@ Health checks from the telemetry (vibration, battery, EKF, GPS, errors), for whe
 Usage: dc-cli tlog health [OPTIONS] <FILE>
 
 Arguments:
-  <FILE>  The .tlog file
+  <FILE>
+          The .tlog file
 
 Options:
-      --json               Print the findings as JSON (schema `dc.health/1`)
-      --sysid <SYSID>      Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>    Our MAVLink component id [default: 190]
-      --fail-on <FAIL_ON>  Exit with an error when any finding is at this level or worse [possible values: caution, warning]
-      --tlog <TLOG>        Record everything to this .tlog file
-  -h, --help               Print help
+      --json
+          Print the findings as JSON (schema `dc.health/1`)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --fail-on <FAIL_ON>
+          Exit with an error when any finding is at this level or worse
+          
+          [possible values: caution, warning]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli tlog sanitize`
@@ -1947,15 +4562,43 @@ Write a copy with every position moved to a stand-in location (shapes and distan
 Usage: dc-cli tlog sanitize [OPTIONS] --out <OUT> <FILE>
 
 Arguments:
-  <FILE>  The .tlog file
+  <FILE>
+          The .tlog file
 
 Options:
-      --out <OUT>        Output .tlog file
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --to <TO>          Stand-in location "lat,lon" (default: ArduPilot's SITL home, Canberra) [default: -35.363261,149.165230]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --out <OUT>
+          Output .tlog file
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --to <TO>
+          Stand-in location "lat,lon" (default: ArduPilot's SITL home, Canberra)
+          
+          [default: -35.363261,149.165230]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli tlog info`
@@ -1966,13 +4609,35 @@ Time span, systems, message counts, maximum altitude, and a timeline of mode cha
 Usage: dc-cli tlog info [OPTIONS] <FILE>
 
 Arguments:
-  <FILE>  The .tlog file
+  <FILE>
+          The .tlog file
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli tlog params`
@@ -1983,15 +4648,41 @@ Parameters the recording saw (PARAM_VALUE, last value per name) as a .param file
 Usage: dc-cli tlog params [OPTIONS] <FILE>
 
 Arguments:
-  <FILE>  The .tlog file
+  <FILE>
+          The .tlog file
 
 Options:
-      --out <OUT>          Output .param file (default: print)
-      --sysid <SYSID>      Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>    Our MAVLink component id [default: 190]
-      --vehicle <VEHICLE>  Vehicle system id (default: the first that sent parameters)
-      --tlog <TLOG>        Record everything to this .tlog file
-  -h, --help               Print help
+      --out <OUT>
+          Output .param file (default: print)
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --vehicle <VEHICLE>
+          Vehicle system id (default: the first that sent parameters)
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli tlog changes`
@@ -2002,14 +4693,38 @@ Parameters whose value changed during the recording (PARAM_VALUE reports)
 Usage: dc-cli tlog changes [OPTIONS] <FILE>
 
 Arguments:
-  <FILE>  The .tlog file
+  <FILE>
+          The .tlog file
 
 Options:
-      --sysid <SYSID>      Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --vehicle <VEHICLE>  Vehicle system id (default: the first that sent parameters)
-      --compid <COMPID>    Our MAVLink component id [default: 190]
-      --tlog <TLOG>        Record everything to this .tlog file
-  -h, --help               Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --vehicle <VEHICLE>
+          Vehicle system id (default: the first that sent parameters)
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli tlog mission`
@@ -2020,15 +4735,44 @@ The last complete mission, fence or rally list in the recording (a download or a
 Usage: dc-cli tlog mission [OPTIONS] <FILE>
 
 Arguments:
-  <FILE>  The .tlog file
+  <FILE>
+          The .tlog file
 
 Options:
-      --sysid <SYSID>    Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --type <KIND>      Which list [default: mission] [possible values: mission, fence, rally]
-      --compid <COMPID>  Our MAVLink component id [default: 190]
-      --out <OUT>        Output .waypoints file (default: print)
-      --tlog <TLOG>      Record everything to this .tlog file
-  -h, --help             Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --type <KIND>
+          Which list
+          
+          [default: mission]
+          [possible values: mission, fence, rally]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --out <OUT>
+          Output .waypoints file (default: print)
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli tlog csv`
@@ -2039,16 +4783,44 @@ Every message of one type (e.g. ATTITUDE) as CSV, with receive time and sender
 Usage: dc-cli tlog csv [OPTIONS] <FILE> <MSG>
 
 Arguments:
-  <FILE>  The .tlog file
-  <MSG>   Message name, e.g. GLOBAL_POSITION_INT
+  <FILE>
+          The .tlog file
+
+  <MSG>
+          Message name, e.g. GLOBAL_POSITION_INT
 
 Options:
-      --sysid <SYSID>      Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --vehicle <VEHICLE>  Only this system id (not `--sysid`, which is our own MAVLink id)
-      --compid <COMPID>    Our MAVLink component id [default: 190]
-      --out <OUT>          Output file (default: print)
-      --tlog <TLOG>        Record everything to this .tlog file
-  -h, --help               Print help
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --vehicle <VEHICLE>
+          Only this system id (not `--sysid`, which is our own MAVLink id)
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --out <OUT>
+          Output file (default: print)
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 #### `dc-cli tlog export`
@@ -2059,16 +4831,44 @@ Export the flight track (GLOBAL_POSITION_INT) as GPX and/or KML
 Usage: dc-cli tlog export [OPTIONS] <FILE>
 
 Arguments:
-  <FILE>  The .tlog file
+  <FILE>
+          The .tlog file
 
 Options:
-      --gpx <GPX>          Write a GPX 1.1 track
-      --sysid <SYSID>      Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>    Our MAVLink component id [default: 190]
-      --kml <KML>          Write a KML 2.2 line (Google Earth), altitude above MSL
-      --tlog <TLOG>        Record everything to this .tlog file
-      --vehicle <VEHICLE>  Vehicle system id (default: the first with a position). Not `--sysid`, which is our own MAVLink id
-  -h, --help               Print help
+      --gpx <GPX>
+          Write a GPX 1.1 track
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --kml <KML>
+          Write a KML 2.2 line (Google Earth), altitude above MSL
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --vehicle <VEHICLE>
+          Vehicle system id (default: the first with a position). Not `--sysid`, which is our own MAVLink id
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### `dc-cli cot`
@@ -2079,14 +4879,47 @@ Cursor-on-Target position events for every vehicle (ATAK/WinTAK/TAK), printed or
 Usage: dc-cli cot [OPTIONS] --connect <CONNECT>
 
 Options:
-      --connect <CONNECT>  Link to open
-      --sysid <SYSID>      Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>    Our MAVLink component id [default: 190]
-      --udp <UDP>          Send each event as one UDP datagram to this address instead of printing it
-      --rate <RATE>        Events per second per vehicle [default: 1]
-      --tlog <TLOG>        Record everything to this .tlog file
-      --seconds <SECONDS>  Stop after this many seconds (0: until interrupted) [default: 0]
-  -h, --help               Print help
+      --connect <CONNECT>
+          Link to open
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --udp <UDP>
+          Send each event as one UDP datagram to this address instead of printing it
+
+      --rate <RATE>
+          Events per second per vehicle
+          
+          [default: 1]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --seconds <SECONDS>
+          Stop after this many seconds (0: until interrupted)
+          
+          [default: 0]
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### `dc-cli telemetry`
@@ -2097,13 +4930,46 @@ Print a telemetry summary once per second
 Usage: dc-cli telemetry [OPTIONS] --connect <CONNECT>
 
 Options:
-      --connect <CONNECT>  Link to open
-      --sysid <SYSID>      Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
-      --compid <COMPID>    Our MAVLink component id [default: 190]
-      --seconds <SECONDS>  Stop after this many seconds [default: 10]
-      --fence <FENCE>      Also show each vehicle's margin to this geofence (a .plan's, or QGC WPL fence items): inside or not, the nearest boundary, the height left below FENCE_ALT_MAX
-      --tlog <TLOG>        Record everything to this .tlog file
-      --params <PARAMS>    The vehicle's parameters, for FENCE_TYPE's circle and altitude
-      --terrain <TERRAIN>  Answer the vehicle's terrain requests from every SRTM .hgt and elevation GeoTIFF in this directory (off without it)
-  -h, --help               Print help
+      --connect <CONNECT>
+          Link to open
+
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --seconds <SECONDS>
+          Stop after this many seconds
+          
+          [default: 10]
+
+      --fence <FENCE>
+          Also show each vehicle's margin to this geofence (a .plan's, or QGC WPL fence items): inside or not, the nearest boundary, the height left below FENCE_ALT_MAX
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --params <PARAMS>
+          The vehicle's parameters, for FENCE_TYPE's circle and altitude
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+      --terrain <TERRAIN>
+          Answer the vehicle's terrain requests from every SRTM .hgt and elevation GeoTIFF in this directory (off without it)
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```

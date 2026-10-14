@@ -101,3 +101,26 @@ fn edit_applies_operations_in_order_and_renumbers_jumps() {
     assert!(!dir.join("x.waypoints").exists());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn units_change_the_rtl_distances() {
+    let p = plan();
+    let nm = dc(&[
+        "--units",
+        "nautical",
+        "mission",
+        "rtl-target",
+        &p,
+        "--from=-35.3646,149.1666",
+    ]);
+    assert!(nm.contains("0.01 NM away (home is 0.11 NM)"), "{nm}");
+    let ft = dc(&[
+        "--units",
+        "imperial",
+        "mission",
+        "rtl-target",
+        &p,
+        "--from=-35.3646,149.1666",
+    ]);
+    assert!(ft.contains("47 ft away (home is 659 ft)"), "{ft}");
+}

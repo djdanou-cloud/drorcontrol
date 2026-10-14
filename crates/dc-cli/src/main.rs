@@ -51,8 +51,47 @@ struct Cli {
     /// Record everything to this .tlog file.
     #[arg(long, global = true)]
     tlog: Option<std::path::PathBuf>,
+    /// Units for heights, distances and speeds in telemetry, fence margins and RTL targets.
+    #[arg(long, global = true, value_enum, default_value_t = Units::Metric)]
+    units: Units,
     #[command(subcommand)]
     cmd: Cmd,
+}
+
+/// `--units`.
+#[derive(Clone, Copy, PartialEq, clap::ValueEnum)]
+enum Units {
+    /// m, km, m/s.
+    Metric,
+    /// ft, mi, mph.
+    Imperial,
+    /// ft, NM, kn.
+    Nautical,
+}
+
+impl Units {
+    fn system(self) -> protocols::units::UnitSystem {
+        match self {
+            Units::Metric => protocols::units::UnitSystem::Metric,
+            Units::Imperial => protocols::units::UnitSystem::Imperial,
+            Units::Nautical => protocols::units::UnitSystem::Nautical,
+        }
+    }
+
+    /// A height: metric keeps one decimal (as before), the others whole feet.
+    fn alt(self, m: f64) -> String {
+        match self {
+            Units::Metric => format!("{m:.1} m"),
+            _ => protocols::units::altitude(m, self.system()),
+        }
+    }
+
+    fn dist(self, m: f64) -> String {
+        match self {
+            Units::Metric => format!("{m:.0} m"),
+            _ => protocols::units::distance(m, self.system()),
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -1443,6 +1482,7 @@ fn print_fence_margin(
     core: &Core,
     fence: &protocols::fence::Fence,
     params: &protocols::fence::FenceParams,
+    units: Units,
 ) {
     for v in core.fleet().vehicles() {
         let (Some(pos), Some(home)) = (&v.position, &v.home) else {
@@ -1461,10 +1501,14 @@ fn print_fence_margin(
             None => "inside".to_string(),
         }];
         if let Some((d, what)) = &m.nearest {
-            parts.push(format!("{d:.0} m to {what}"));
+            parts.push(format!("{} to {what}", units.dist(*d)));
         }
         if let Some(a) = m.below_alt_max_m {
-            parts.push(format!("{a:.0} m below FENCE_ALT_MAX"));
+            let a = match units {
+                Units::Metric => format!("{a:.0} m"),
+                _ => protocols::units::altitude(a, units.system()),
+            };
+            parts.push(format!("{a} below FENCE_ALT_MAX"));
         }
         println!("[{}] fence margin: {}", v.sysid, parts.join(", "));
     }
@@ -2629,9 +2673,9 @@ async fn run(cli: Cli) -> Result<(), String> {
             while Instant::now() < end {
                 tokio::select! {
                     _ = tick.tick() => {
-                        print_fleet(&core);
+                        print_fleet(&core, cli.units);
                         if let Some((f, p)) = &fence {
-                            print_fence_margin(&core, f, p);
+                            print_fence_margin(&core, f, p, cli.units);
                         }
                     }
                     ev = events.recv() => match ev {
@@ -4770,13 +4814,15 @@ async fn mission_cmd(cli: &Cli, what: &MissionCmd) -> Result<(), String> {
                 fence_on.then_some((&fence, &fp)),
             ) {
                 protocols::rally::RtlTarget::Home { why } => {
-                    println!("RTL goes home, {d_home:.0} m away: {why}");
+                    println!("RTL goes home, {} away: {why}", cli.units.dist(d_home));
                 }
                 protocols::rally::RtlTarget::Rally { index, distance_m } => println!(
-                    "RTL goes to rally point {} at {:.7},{:.7}, {distance_m:.0} m away (home is {d_home:.0} m)",
+                    "RTL goes to rally point {} at {:.7},{:.7}, {} away (home is {})",
                     index + 1,
                     rally[index].0,
-                    rally[index].1
+                    rally[index].1,
+                    cli.units.dist(distance_m),
+                    cli.units.dist(d_home)
                 ),
             }
             Ok(())
@@ -6511,7 +6557,7 @@ async fn remote(
     Ok(())
 }
 
-fn print_fleet(core: &Core) {
+fn print_fleet(core: &Core, units: Units) {
     let fleet = core.fleet();
     let now = Instant::now();
     for v in fleet.vehicles() {
@@ -6535,8 +6581,14 @@ fn print_fleet(core: &Core) {
         });
         let pos = v.position.as_ref().map(|p| {
             format!(
-                "{:.7},{:.7} alt {:.1} m",
-                p.value.lat_deg, p.value.lon_deg, p.value.alt_rel_m
+                "{:.7},{:.7} alt {}{}",
+                p.value.lat_deg,
+                p.value.lon_deg,
+                units.alt(f64::from(p.value.alt_rel_m)),
+                v.hud.as_ref().map_or(String::new(), |h| format!(
+                    " gs {}",
+                    protocols::units::speed(f64::from(h.value.groundspeed), units.system())
+                ))
             )
         });
         let bat = v
