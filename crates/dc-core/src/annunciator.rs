@@ -35,6 +35,13 @@ pub fn classify(text: &str) -> Effect {
         "Position good again" => return Effect::Clear("POSITION".into()),
         _ => {}
     }
+    if let Some(rest) = text.strip_prefix("Traffic clear: ") {
+        return Effect::Clear(format!("TRAFFIC {rest}"));
+    }
+    if let Some(rest) = text.strip_prefix("TRAFFIC ") {
+        let who = rest.split(':').next().unwrap_or(rest).trim();
+        return Effect::Condition(format!("TRAFFIC {who}"));
+    }
     if text.starts_with("FENCE BREACH") {
         return Effect::Condition("FENCE".into());
     }
@@ -330,6 +337,14 @@ mod tests {
         assert_eq!(
             classify("MODE 4 engaged"),
             Effect::Event("MODE 4 engaged".into())
+        );
+        assert_eq!(
+            classify("TRAFFIC QFA12: 900 m N, closest 0 m in 18 s"),
+            Effect::Condition("TRAFFIC QFA12".into())
+        );
+        assert_eq!(
+            classify("Traffic clear: QFA12"),
+            Effect::Clear("TRAFFIC QFA12".into())
         );
     }
 }

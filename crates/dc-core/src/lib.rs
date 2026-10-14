@@ -580,6 +580,9 @@ pub enum CoreEvent {
     },
 }
 
+/// Per aircraft (ICAO): the last threat level and its name, to alert on changes.
+type TrafficSeen = HashMap<u32, (vehicle::Threat, String)>;
+
 /// Outcome of [`Core::upload_mission`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct MissionReport {
@@ -704,6 +707,8 @@ pub struct Core {
     nav_trust: Arc<std::sync::Mutex<HashMap<u8, PositionTrust>>>,
     /// Annunciator per vehicle, fed by every [`CoreEvent::Alert`].
     annunciators: Arc<std::sync::Mutex<HashMap<u8, annunciator::Annunciator>>>,
+    /// Last traffic threat per vehicle and aircraft (ICAO), with its name for "clear".
+    traffic_seen: Arc<std::sync::Mutex<HashMap<u8, TrafficSeen>>>,
     /// Last fence state per vehicle (outside, breach count), to alert on breaches.
     fence_seen: Arc<std::sync::Mutex<HashMap<u8, (bool, u16)>>>,
     /// Recent STATUSTEXT per vehicle (kept outside the fleet, which is cloned per message).
@@ -752,6 +757,7 @@ impl Core {
             audit,
             nav_trust: Arc::default(),
             fence_seen: Arc::default(),
+            traffic_seen: Arc::default(),
             annunciators: Arc::default(),
             messages: Arc::default(),
             geotags: Arc::default(),
@@ -954,6 +960,9 @@ impl Core {
         };
         if !changed.is_empty() {
             self.deliver(Vec::new(), changed).await;
+        }
+        if matches!(msg, Message::AdsbVehicle(_)) {
+            self.check_traffic(sysid);
         }
         if compid == vehicle::AUTOPILOT_COMPID && matches!(msg, Message::FenceStatus(_)) {
             self.check_fence(sysid);
@@ -1379,6 +1388,74 @@ impl Core {
                 trust: PositionTrust::Unknown,
                 reasons: vec!["vehicle not seen"],
             },
+        }
+    }
+
+    /// Alert on traffic conflicts (closest approach within the look-ahead, see
+    /// [`vehicle::Traffic::approach`]): a Low threat is a Caution, High a Warning, each time an
+    /// aircraft's threat rises; "Traffic clear" when it is no longer one or is forgotten.
+    fn check_traffic(&self, sysid: u8) {
+        let Some(v) = self.fleet().get(sysid).cloned() else {
+            return;
+        };
+        let Some(own) = v.position.as_ref().map(|p| p.value) else {
+            return;
+        };
+        let now: HashMap<u32, (vehicle::Threat, String, String)> = v
+            .traffic
+            .values()
+            .map(|t| {
+                let t = &t.value;
+                let a = t.approach(&own);
+                let rel = t.relative_to(&own);
+                let who = t
+                    .callsign
+                    .clone()
+                    .unwrap_or_else(|| format!("{:06X}", t.icao));
+                let dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+                let dir = dirs[((rel.bearing_deg + 22.5) / 45.0) as usize % 8];
+                let text = format!(
+                    "TRAFFIC {who}: {:.0} m {dir}{}, closest {:.0} m in {:.0} s{}",
+                    rel.distance_m,
+                    rel.above_m.map_or(String::new(), |h| format!(" {h:+.0} m")),
+                    a.miss_xy_m,
+                    a.time_s,
+                    if t.simulated { " (simulated)" } else { "" }
+                );
+                (t.icao, (a.threat, who, text))
+            })
+            .collect();
+        let mut alerts = Vec::new();
+        {
+            let mut seen = self.traffic_seen.lock().unwrap_or_else(|e| e.into_inner());
+            let before = seen.entry(sysid).or_default();
+            for (icao, (threat, who, text)) in &now {
+                let was = before.get(icao).map(|(t, _)| *t);
+                match threat {
+                    vehicle::Threat::High if was < Some(vehicle::Threat::High) => {
+                        alerts.push((AlertLevel::Warning, text.clone()));
+                    }
+                    vehicle::Threat::Low if was < Some(vehicle::Threat::Low) => {
+                        alerts.push((AlertLevel::Caution, text.clone()));
+                    }
+                    vehicle::Threat::None if was.is_some_and(|w| w > vehicle::Threat::None) => {
+                        alerts.push((AlertLevel::Advisory, format!("Traffic clear: {who}")));
+                    }
+                    _ => {}
+                }
+            }
+            for (icao, (was, who)) in before.iter() {
+                if *was > vehicle::Threat::None && !now.contains_key(icao) {
+                    alerts.push((AlertLevel::Advisory, format!("Traffic clear: {who}")));
+                }
+            }
+            *before = now
+                .into_iter()
+                .map(|(icao, (t, who, _))| (icao, (t, who)))
+                .collect();
+        }
+        for (level, text) in alerts {
+            self.alert(sysid, level, text);
         }
     }
 
