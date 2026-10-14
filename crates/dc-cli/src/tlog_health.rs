@@ -191,7 +191,15 @@ pub fn assess(input: impl Read) -> io::Result<Vec<Finding>> {
             at_us: at(t),
         });
     }
-    for (t, sev, text) in s.texts.iter().filter(|(_, sev, _)| *sev <= 3) {
+    // ArduPilot sends arming-check failures at severity 2 (CRITICAL); they are reported once,
+    // above, as arming-check findings (bench, 4.6.3: a disarmed recording listed each PreArm
+    // message as both).
+    let is_arming = |x: &str| x.starts_with("PreArm: ") || x.starts_with("Arm: ");
+    for (t, sev, text) in s
+        .texts
+        .iter()
+        .filter(|(_, sev, x)| *sev <= 3 && !is_arming(x))
+    {
         out.push(Finding {
             check: "error",
             level: Level::Warning,
@@ -240,6 +248,8 @@ mod tests {
         id[..13].copy_from_slice(b"BATT_LOW_VOLT");
         let mut txt = [0u8; 50];
         txt[..17].copy_from_slice(b"PreArm: Throttle!");
+        let mut crash = [0u8; 50];
+        crash[..13].copy_from_slice(b"Crash: Disarm");
         let input = tlog(&[
             hb(false),
             Message::ParamValue(ParamValue {
@@ -250,6 +260,11 @@ mod tests {
             Message::Statustext(Statustext {
                 severity: 2,
                 text: txt,
+                ..Default::default()
+            }),
+            Message::Statustext(Statustext {
+                severity: 2,
+                text: crash,
                 ..Default::default()
             }),
             Message::SysStatus(SysStatus {
@@ -296,6 +311,10 @@ mod tests {
         assert_eq!(get("ekf").level, Level::Caution);
         assert_eq!(get("gps").level, Level::Warning, "a fix loss");
         assert_eq!(get("arming").text, "PreArm: Throttle!");
-        assert_eq!(get("error").level, Level::Warning);
+        // The PreArm message is an arming finding only; other critical messages are errors.
+        let errors: Vec<_> = f.iter().filter(|x| x.check == "error").collect();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].level, Level::Warning);
+        assert!(errors[0].text.ends_with("Crash: Disarm"), "{errors:?}");
     }
 }
