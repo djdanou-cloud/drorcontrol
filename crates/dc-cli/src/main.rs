@@ -2861,6 +2861,10 @@ fn print_log_notch(
         n.span_s, n.samples
     );
     print_aliasing(log, n.sample_rate_hz);
+    let max_alt = logs::flight::summary(log).max_alt_rel_m;
+    for c in notch_caveats(n.span_s, max_alt) {
+        println!("CAUTION: {c}");
+    }
     println!("suggested throttle-based harmonic notch (review before use; nothing is written):");
     println!("  INS_HNTCH_ENABLE 1");
     println!("  INS_HNTCH_MODE   1  (throttle)");
@@ -2923,6 +2927,29 @@ fn print_log_notch(
         eprintln!("wrote {}", out.display());
     }
     Ok(())
+}
+
+/// Steady flight shorter than this gives a notch suggestion too few averages to trust, s.
+const NOTCH_MIN_SPAN_S: f64 = 30.0;
+
+/// Why a notch suggestion may not be worth using (bench, 2026-10-13: 23 Hz suggested from 19 s
+/// of a props-off bench session, against a configured 120 Hz).
+fn notch_caveats(span_s: f64, max_alt_rel_m: Option<f64>) -> Vec<String> {
+    let mut out = Vec::new();
+    if max_alt_rel_m.is_some_and(|a| a < 1.0) {
+        out.push(format!(
+            "the vehicle never climbed above 1 m ({:.1} m): a bench or ground run, where the \
+             noise is not the noise in flight; do not use this suggestion",
+            max_alt_rel_m.unwrap_or(0.0)
+        ));
+    }
+    if span_s < NOTCH_MIN_SPAN_S {
+        out.push(format!(
+            "only {span_s:.0} s of steady flight (want {NOTCH_MIN_SPAN_S:.0} s or more): the \
+             peak may not be the motors' noise; analyse a longer hover"
+        ));
+    }
+    out
 }
 
 fn print_params_review(params: &std::collections::BTreeMap<String, f64>) {
@@ -5958,6 +5985,22 @@ fn print_fleet(core: &Core) {
             parts.join(" | "),
             age
         );
+    }
+}
+
+#[cfg(test)]
+mod notch_caveat_tests {
+    use super::notch_caveats;
+
+    #[test]
+    fn short_or_ground_runs_are_flagged() {
+        assert!(notch_caveats(120.0, Some(25.0)).is_empty());
+        let bench = notch_caveats(19.0, Some(0.2));
+        assert_eq!(bench.len(), 2, "{bench:?}");
+        assert!(bench[0].contains("never climbed"));
+        assert!(bench[1].contains("only 19 s"));
+        // No altitude in the log: only the length is judged.
+        assert_eq!(notch_caveats(45.0, None).len(), 0);
     }
 }
 
