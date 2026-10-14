@@ -88,6 +88,7 @@ nav:
       - Test kit (Windows, macOS): dev/test-kit.md
       - Mac test runbook: dev/mac-test-runbook.md
       - Windows bench test: dev/windows-bench-test.md
+      - Windows bench results 2026-10-13: dev/bench/results-2026-10-13-windows-micoair743v2.md
       - Parity inventory: parity/README.md
       - Test corpus: corpus/README.md
       - Audit 2026-10-11: audit/2026-10-11-external-audit.md
