@@ -76,6 +76,27 @@ through all of it, with a backup and restore of your own mission, fence and rall
 * With a setting off, each of these says which setting to turn on and sends nothing.
 * Everything is recorded in `dc-audit.log` (`dc-cli audit-verify --print`).
 
+## Also new: 2026-10-14
+
+Nothing here changes the vehicle unless said so; the bench sheet's steps still apply.
+
+* **Pre-flight:** `dc-cli preflight --connect …` lists link, firmware, the autopilot's own
+  pre-arm result, unhealthy sensors, RC, GPS, EKF, home, battery, vibration, mission,
+  fence and traffic, PASS/FAIL (advice only). Worth running on the bench: note any item
+  that looks wrong.
+* **Inspector:** `dc-cli inspect --connect … --seconds 20 [--msg SYS_STATUS]`: every
+  message the board sends with its rate (compare with Mission Planner's MAVLink Inspector).
+* **Recordings:** `tlog alerts`, `tlog signing [--key-file]`, `tlog inspect`.
+* **Fence and RTL:** `telemetry --fence X.plan` shows the margin to the fence;
+  `mission rtl-target X.plan --from LAT,LON` says where RTL would go.
+* **Terrain:** GeoTIFF tiles (Copernicus GLO-30) work wherever `--dem` does; `telemetry
+  --terrain DIR` answers the board's terrain requests (it then loads that terrain:
+  only with `TERRAIN_ENABLE` 1 and tiles for your field).
+* **Editing:** `mission edit X.plan --out Y.plan insert:… delete:… move:… alt:…`.
+* **Units:** `--units imperial` or `nautical` on any command.
+* **Over the API:** `daemon` reads the same settings; `remote vehicle-changes`,
+  `remote upload`, `remote erase-logs`.
+
 ## Also new: mission planning (offline, 2026-10-13)
 
 None of these talk to the vehicle; they make and check files to load as usual.

@@ -254,7 +254,7 @@ vehicle is involved, and the audit log:
 
 1. **CI — done 2026-10-12:** pushes/PRs run Linux only (checks, tests, docs, SITL); Windows,
    macOS builds and packaging run nightly (02:17 UTC), on releases and on dispatch. The `sitl`
-   job runs all scenarios (17 then, 18 now) on ArduCopter 4.7.1 **and 4.6.3** (both green locally);
+   job runs all scenarios (17 then, 21 now) on ArduCopter 4.7.1 **and 4.6.3** (both green locally);
    `TESTED_FIRMWARE` covers Copter 4.6 and 4.7.
 **Item 2 — done 2026-10-13** (the owner confirmed in-session, adding: also while armed and
 flying, behind a warning pop-up): no dangerous-parameter refusal; `ArmedWarningRequired` /
@@ -298,8 +298,21 @@ upload and erase (the API has none yet).
     additions, the mission edit model (undo/redo, DO_JUMP renumbering), units and
     coordinate formats (UTM/MGRS checked against PROJ), and the annunciator state model.
     Rows in §5. Next for these: bridge `MissionEditor`, `units` and `Annunciator` to QML in
-    Phase 1; feed the annunciator from vehicle state; GeoTIFF/Copernicus DEMs and the
-    TERRAIN_DATA service (plan 01 §5.3).
+    Phase 1.
+
+12. **Batch 9 (2026-10-14, local commits, not yet pushed):** the bench findings of
+    2026-10-13 fixed (erase result, fft fallback, landings, tlog health, parameter text,
+    notch caveats, takeoff note, the 4.6.3 build labelled beta); then: FENCE_STATUS and
+    breach alerts; the annunciator fed by every core alert (per vehicle, sound events,
+    acknowledge; `tlog alerts`); ADS-B closest approach and traffic alerts (Copter AVD_*
+    defaults); where RTL goes (`mission rtl-target`, Copter's rally rules, SITL-checked);
+    pre-flight checklist (`dc-cli preflight`); `tlog signing`; fence margin in telemetry;
+    elevation GeoTIFFs (Copernicus GLO-30) next to `.hgt`; the TERRAIN_DATA service
+    (`--terrain DIR`, off by default, SITL-checked); the MAVLink inspector (`inspect`,
+    `tlog inspect`); `mission edit`; `--units`; gRPC UploadItems/EraseLogs/
+    GetVehicleChangeSettings behind the daemon's settings. SITL now 21 scenarios. Next:
+    Phase 1 bridges (annunciator, preflight, settings screen, warning pop-ups); MAVLink 2
+    signing on links needs an owner decision (SETUP_SIGNING writes the vehicle's key).
 
 ## 8. Where things are (code map)
 

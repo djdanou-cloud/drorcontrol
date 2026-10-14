@@ -2,9 +2,9 @@
 agent: core-1
 role: workstream-agent
 workstream: WS-CORE
-state: active
-task: batch 9: 20 tasks, local commits
-updated: 2026-10-14T07:19:39Z
+state: idle
+task: idle: batch 9 committed locally, not pushed
+updated: 2026-10-14T08:41:24Z
 ---
 
 ## Current focus

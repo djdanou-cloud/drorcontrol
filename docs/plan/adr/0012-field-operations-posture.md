@@ -67,7 +67,10 @@ a setting on or off and every action written to the audit log. Mission upload to
 vehicle needs no setting (T0-19, unchanged). The core holds the settings
 (`CoreConfig::vehicle_changes`, `Core::set_vehicle_change`) and refuses with
 `VehicleChangeError::SettingOff` before sending anything, so every client (CLI, gRPC, the
-Qt app) gets the same rule. The CLI keeps them in a settings file (`dc-cli settings`).
+Qt app) gets the same rule. The CLI keeps them in a settings file (`dc-cli settings`). The
+gRPC daemon reads that file at start; the API can read the settings
+(`GetVehicleChangeSettings`) but not change them, so a remote client cannot turn on what
+the operator at the daemon's host left off (2026-10-14).
 
 ## What stays unchanged
 Not part of these decisions, so ADR-0011 and the core keep them:
