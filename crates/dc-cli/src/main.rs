@@ -403,6 +403,17 @@ enum TlogCmd {
         #[arg(long, default_value_t = 100)]
         speed: u32,
     },
+    /// MAVLink 2 signing in the recording, per sender: how many frames are signed, the link
+    /// ids, timestamps that did not increase, and with --key-file whether the signatures
+    /// match (to check a vehicle's signing set-up). Reads only.
+    Signing {
+        /// The .tlog file.
+        file: std::path::PathBuf,
+        /// The signing key: 64 hex digits, or a passphrase (hashed with SHA-256, as
+        /// QGroundControl does).
+        #[arg(long)]
+        key_file: Option<std::path::PathBuf>,
+    },
     /// Link quality over time (range tests): frames received and lost per window, the
     /// radio's signal, and the longest heartbeat gap.
     Link {
@@ -3471,6 +3482,49 @@ fn tlog_cmd(what: &TlogCmd) -> Result<(), String> {
     let file = match what {
         // Handled by tlog_alerts (it runs the core).
         TlogCmd::Alerts { .. } => return Ok(()),
+        TlogCmd::Signing { file, key_file } => {
+            let key = match key_file {
+                Some(k) => Some(tlog::signing_key(
+                    &std::fs::read_to_string(k).map_err(|e| format!("{}: {e}", k.display()))?,
+                )),
+                None => None,
+            };
+            let f = std::fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()))?;
+            let r = tlog::signing(std::io::BufReader::new(f), key.as_ref())
+                .map_err(|e| format!("{}: {e}", file.display()))?;
+            let mut bad = 0;
+            for ((sysid, compid), s) in &r {
+                let links: Vec<String> = s.link_ids.iter().map(u8::to_string).collect();
+                println!(
+                    "{sysid}/{compid}: {} of {} MAVLink 2 frames signed{}{}{}",
+                    s.signed,
+                    s.frames,
+                    if links.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", link ids {}", links.join(","))
+                    },
+                    if key.is_some() && s.signed > 0 {
+                        format!(", {} verified, {} NOT matching the key", s.verified, s.bad)
+                    } else {
+                        String::new()
+                    },
+                    if s.not_increasing > 0 {
+                        format!(
+                            ", {} with a timestamp that did not increase",
+                            s.not_increasing
+                        )
+                    } else {
+                        String::new()
+                    }
+                );
+                bad += s.bad;
+            }
+            if bad > 0 {
+                return Err(format!("{bad} signed frames do not match the key"));
+            }
+            return Ok(());
+        }
         TlogCmd::Info { file } => file,
         TlogCmd::Link {
             file,

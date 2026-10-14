@@ -540,6 +540,76 @@ pub fn utc(unix_us: u64) -> String {
     )
 }
 
+/// Signing seen in a recording, per sender (`sysid`, `compid`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SigningStats {
+    /// MAVLink 2 frames.
+    pub frames: u64,
+    /// Of which signed.
+    pub signed: u64,
+    /// Link ids used in signatures.
+    pub link_ids: std::collections::BTreeSet<u8>,
+    /// Signed frames whose signature matches the key (with a key).
+    pub verified: u64,
+    /// Signed frames whose signature does not match the key (with a key).
+    pub bad: u64,
+    /// Signed frames whose timestamp did not increase on their stream (sysid, compid,
+    /// link id): a replay, or a clock that went back.
+    pub not_increasing: u64,
+}
+
+/// MAVLink 2 signing in a recording, per sender; with `key`, each signature is checked.
+pub fn signing<R: Read>(
+    input: R,
+    key: Option<&mavlink_codec::signing::SecretKey>,
+) -> io::Result<BTreeMap<(u8, u8), SigningStats>> {
+    use mavlink_codec::Version;
+    use mavlink_codec::signing::{signature_fields, verify};
+    let mut r = TlogReader::new(input);
+    let mut out: BTreeMap<(u8, u8), SigningStats> = BTreeMap::new();
+    let mut last: BTreeMap<(u8, u8, u8), u64> = BTreeMap::new();
+    while let Some(rec) = r.next_record()? {
+        let f = &rec.frame;
+        if f.version() != Version::V2 {
+            continue;
+        }
+        let s = out.entry((f.sysid(), f.compid())).or_default();
+        s.frames += 1;
+        let Some((link, ts)) = signature_fields(f) else {
+            continue;
+        };
+        s.signed += 1;
+        s.link_ids.insert(link);
+        if let Some(k) = key {
+            if verify(f, k).is_ok() {
+                s.verified += 1;
+            } else {
+                s.bad += 1;
+            }
+        }
+        let prev = last.insert((f.sysid(), f.compid(), link), ts);
+        if prev.is_some_and(|p| ts <= p) {
+            s.not_increasing += 1;
+        }
+    }
+    Ok(out)
+}
+
+/// A signing key from a key file: 64 hex digits are the 32-byte key itself; anything else
+/// is a passphrase, hashed with SHA-256 as QGroundControl does.
+pub fn signing_key(text: &str) -> mavlink_codec::signing::SecretKey {
+    use sha2::{Digest, Sha256};
+    let t = text.trim();
+    if t.len() == 64 && t.bytes().all(|b| b.is_ascii_hexdigit()) {
+        let mut k = [0u8; 32];
+        for (i, b) in k.iter_mut().enumerate() {
+            *b = u8::from_str_radix(&t[2 * i..2 * i + 2], 16).unwrap_or(0);
+        }
+        return mavlink_codec::signing::SecretKey(k);
+    }
+    mavlink_codec::signing::SecretKey(Sha256::digest(t.as_bytes()).into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -879,5 +949,54 @@ mod tests {
         let s = summarise(&bytes[..]).unwrap();
         assert_eq!(s.records, 1);
         assert!(s.stopped.is_some());
+    }
+
+    #[test]
+    fn signing_report_counts_and_verifies() {
+        use mavlink_codec::signing::sign;
+        let key = signing_key("correct horse");
+        let other = signing_key("battery staple");
+        assert_eq!(
+            signing_key(&"ab".repeat(32)).0,
+            [0xab; 32],
+            "64 hex digits are the key itself"
+        );
+        let hb = Message::Heartbeat(Default::default());
+        let frame = |sysid, signed_with: Option<(&mavlink_codec::signing::SecretKey, u64)>| {
+            let mut f = encode(
+                Version::V2,
+                Header {
+                    seq: 0,
+                    sysid,
+                    compid: 1,
+                },
+                &hb,
+            )
+            .unwrap();
+            if let Some((k, ts)) = signed_with {
+                sign(&mut f, k, 2, ts).unwrap();
+            }
+            f
+        };
+        let mut w = TlogWriter::new(Vec::new());
+        for (i, f) in [
+            frame(1, Some((&key, 100))),
+            frame(1, Some((&key, 200))),
+            frame(1, Some((&key, 150))),   // timestamp went back
+            frame(1, Some((&other, 300))), // another key
+            frame(2, None),
+        ]
+        .iter()
+        .enumerate()
+        {
+            w.write_raw(i as u64, f.as_bytes()).unwrap();
+        }
+        let bytes = w.into_inner().unwrap();
+        let r = signing(&bytes[..], Some(&key)).unwrap();
+        let v = &r[&(1, 1)];
+        assert_eq!((v.frames, v.signed, v.verified, v.bad), (4, 4, 3, 1));
+        assert_eq!(v.not_increasing, 1);
+        assert_eq!(v.link_ids.iter().copied().collect::<Vec<_>>(), [2]);
+        assert_eq!((r[&(2, 1)].frames, r[&(2, 1)].signed), (1, 0));
     }
 }

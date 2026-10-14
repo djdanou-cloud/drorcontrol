@@ -1769,6 +1769,7 @@ Usage: dc-cli tlog [OPTIONS] <COMMAND>
 
 Commands:
   alerts    The alerts DrorControl would have raised during the recording (position trust, geofence breaches, traffic), replayed through the core, with their time, and what the annunciator still shows at the end
+  signing   MAVLink 2 signing in the recording, per sender: how many frames are signed, the link ids, timestamps that did not increase, and with --key-file whether the signatures match (to check a vehicle's signing set-up). Reads only
   link      Link quality over time (range tests): frames received and lost per window, the radio's signal, and the longest heartbeat gap
   index     Index the recording for playback: checkpoints, key events, and what a seek to a time would restore (the latest message of each stream)
   health    Health checks from the telemetry (vibration, battery, EKF, GPS, errors), for when there is no dataflash log: the same thresholds as `log health`
@@ -1804,6 +1805,24 @@ Options:
       --compid <COMPID>  Our MAVLink component id [default: 190]
       --tlog <TLOG>      Record everything to this .tlog file
   -h, --help             Print help
+```
+
+#### `dc-cli tlog signing`
+
+```text
+MAVLink 2 signing in the recording, per sender: how many frames are signed, the link ids, timestamps that did not increase, and with --key-file whether the signatures match (to check a vehicle's signing set-up). Reads only
+
+Usage: dc-cli tlog signing [OPTIONS] <FILE>
+
+Arguments:
+  <FILE>  The .tlog file
+
+Options:
+      --key-file <KEY_FILE>  The signing key: 64 hex digits, or a passphrase (hashed with SHA-256, as QGroundControl does)
+      --sysid <SYSID>        Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>      Our MAVLink component id [default: 190]
+      --tlog <TLOG>          Record everything to this .tlog file
+  -h, --help                 Print help
 ```
 
 #### `dc-cli tlog link`

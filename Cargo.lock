@@ -332,6 +332,7 @@ dependencies = [
  "recorder",
  "serde_json",
  "serialport",
+ "sha2",
  "tokio",
  "tonic",
 ]
