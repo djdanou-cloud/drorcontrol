@@ -249,6 +249,17 @@ enum Cmd {
         #[command(subcommand)]
         what: LogCmd,
     },
+    /// Pre-flight checklist from what the vehicle reports: link, firmware, the autopilot's
+    /// pre-arm checks, sensor health, RC, GPS, position (EKF), home, battery, vibration,
+    /// mission, fence and traffic. Advice only: nothing is sent but telemetry requests.
+    /// Exit status 1 when an item fails. Works on a recording too (--connect tlog:FILE@100).
+    Preflight {
+        #[command(flatten)]
+        vehicle: VehicleArgs,
+        /// Seconds to collect telemetry after the vehicle is found.
+        #[arg(long, default_value_t = 5.0)]
+        settle: f64,
+    },
     /// Vehicle-change settings: in-flight mission upload, geofence/rally upload and log
     /// erase. All off by default; each shows its danger when turned on. Without a
     /// subcommand: show them.
@@ -1322,6 +1333,45 @@ fn ask(question: &str) -> Option<bool> {
     Some(matches!(line.trim(), "y" | "Y" | "yes" | "YES"))
 }
 
+async fn preflight(cli: &Cli, vehicle: &VehicleArgs, settle: f64) -> Result<(), String> {
+    use dc_core::preflight::Status;
+    let core = start(cli, &vehicle.connect).await?;
+    let sysid = match vehicle.target {
+        Some(t) => t,
+        None => core
+            .wait_for_vehicle(Duration::from_secs(vehicle.wait))
+            .await
+            .ok_or_else(|| {
+                format!(
+                    "no vehicle heartbeat on {} within {} s",
+                    vehicle.connect, vehicle.wait
+                )
+            })?,
+    };
+    tokio::time::sleep(Duration::from_secs_f64(settle.max(0.0))).await;
+    let items = core.preflight(sysid);
+    for i in &items {
+        let tag = match i.status {
+            Status::Pass => "PASS",
+            Status::Info => "info",
+            Status::Unknown => "  ? ",
+            Status::Fail => "FAIL",
+        };
+        println!("{tag}  {:<15} {}", i.name, i.detail);
+    }
+    let failed: Vec<&str> = items
+        .iter()
+        .filter(|i| i.status == Status::Fail)
+        .map(|i| i.name)
+        .collect();
+    if failed.is_empty() {
+        eprintln!("vehicle {sysid}: no item failed (advice only: fly to your own checklist)");
+        Ok(())
+    } else {
+        Err(format!("vehicle {sysid}: failed: {}", failed.join(", ")))
+    }
+}
+
 async fn tlog_alerts(file: &std::path::Path, speed: u32) -> Result<(), String> {
     if !(1..=100).contains(&speed) {
         return Err("--speed is 1..=100".into());
@@ -2277,6 +2327,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 },
         } => log_erase(&cli, vehicle, *yes, audit).await,
         Cmd::Log { what } => log_cmd(what),
+        Cmd::Preflight { vehicle, settle } => preflight(&cli, vehicle, *settle).await,
         Cmd::Settings { what } => settings_cmd(what.as_ref().unwrap_or(&SettingsCmd::Show)).await,
         Cmd::Mission { what } => mission_cmd(&cli, what).await,
         Cmd::Tlog {

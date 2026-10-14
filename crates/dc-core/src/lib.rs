@@ -61,6 +61,7 @@ pub use vehicle::{
     MissionProgress, MissionState, RadioStatus, Rangefinder, RcInput, ServoOutputs, StatusText,
     TerrainReport, Traffic, VehicleState, Vibration, VtolState, Wind,
 };
+pub use vehicle::{FenceBreach, FenceStatus, Threat, preflight};
 pub use vehicle::{NavHealth, NavThresholds, PositionTrust, TESTED_FIRMWARE};
 
 pub mod annunciator;
@@ -1388,6 +1389,20 @@ impl Core {
                 trust: PositionTrust::Unknown,
                 reasons: vec!["vehicle not seen"],
             },
+        }
+    }
+
+    /// The automatic pre-flight checklist for `sysid` now (advice only; see
+    /// [`vehicle::preflight`]).
+    pub fn preflight(&self, sysid: u8) -> Vec<vehicle::preflight::Item> {
+        let now = Instant::now();
+        match self.fleet().get(sysid) {
+            Some(v) => vehicle::preflight::checklist(
+                v,
+                &vehicle::nav::assess(v, &self.nav_thresholds(sysid), now),
+                now,
+            ),
+            None => Vec::new(),
         }
     }
 

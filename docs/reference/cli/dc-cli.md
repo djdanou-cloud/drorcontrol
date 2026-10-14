@@ -45,6 +45,7 @@ Commands:
   params-review   Which safety nets a parameter set has switched off (advisory; .param or .bin)
   params-diff     Compare two parameter sets, each a .param file or the parameters recorded in a .bin log
   log             Dataflash (.bin) log tools: index statistics and downsampled plots, with timings
+  preflight       Pre-flight checklist from what the vehicle reports: link, firmware, the autopilot's pre-arm checks, sensor health, RC, GPS, position (EKF), home, battery, vibration, mission, fence and traffic. Advice only: nothing is sent but telemetry requests. Exit status 1 when an item fails. Works on a recording too (--connect tlog:FILE@100)
   settings        Vehicle-change settings: in-flight mission upload, geofence/rally upload and log erase. All off by default; each shows its danger when turned on. Without a subcommand: show them
   mission         Mission files (QGC WPL 110, Mission Planner's .waypoints, QGC .plan): download, upload, check, compare, generate
   coord           A position in every display format: decimal degrees, DMS, degrees and decimal minutes, UTM and MGRS (WGS-84)
@@ -1178,6 +1179,25 @@ Options:
       --csv <CSV>            Write the downsampled points as CSV (time_s,value)
       --tlog <TLOG>          Record everything to this .tlog file
   -h, --help                 Print help
+```
+
+### `dc-cli preflight`
+
+```text
+Pre-flight checklist from what the vehicle reports: link, firmware, the autopilot's pre-arm checks, sensor health, RC, GPS, position (EKF), home, battery, vibration, mission, fence and traffic. Advice only: nothing is sent but telemetry requests. Exit status 1 when an item fails. Works on a recording too (--connect tlog:FILE@100)
+
+Usage: dc-cli preflight [OPTIONS] --connect <CONNECT>
+
+Options:
+      --connect <CONNECT>      Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
+      --sysid <SYSID>          Our MAVLink system id (the vehicle's SYSID_MYGCS should match) [default: 255]
+      --compid <COMPID>        Our MAVLink component id [default: 190]
+      --target <TARGET>        Target system id (default: first vehicle heard)
+      --component <COMPONENT>  Target component id [default: 1]
+      --tlog <TLOG>            Record everything to this .tlog file
+      --wait <WAIT>            Seconds to wait for a vehicle heartbeat [default: 15]
+      --settle <SETTLE>        Seconds to collect telemetry after the vehicle is found [default: 5]
+  -h, --help                   Print help
 ```
 
 ### `dc-cli settings`

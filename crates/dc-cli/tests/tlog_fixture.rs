@@ -166,3 +166,19 @@ fn alerts_replayed_from_the_recording() {
         "{text}"
     );
 }
+
+#[test]
+fn preflight_from_the_recording() {
+    let link = format!("tlog:{}@20", fixture().display());
+    let (ok, text) = dc(&["preflight", "--connect", &link, "--settle", "3"]);
+    assert!(ok, "{text}");
+    for line in [
+        "PASS  firmware        4.7.1-official (covered by the tests)",
+        "PASS  pre-arm checks  the autopilot's pre-arm checks pass",
+        "PASS  GPS             fix type 6, 10 satellites",
+        "PASS  home            -35.3632610,149.1652299",
+        "info  mission         4 items on the vehicle",
+    ] {
+        assert!(text.contains(line), "{line}\n{text}");
+    }
+}

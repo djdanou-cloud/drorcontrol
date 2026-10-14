@@ -15,6 +15,7 @@ use mavlink_codec::enums::MavModeFlag;
 
 pub mod modes;
 pub mod nav;
+pub mod preflight;
 pub use modes::{Firmware, FirmwareSource};
 pub use nav::{Ekf, NavHealth, NavThresholds, PositionTrust};
 
@@ -141,6 +142,51 @@ pub struct Power {
     pub remaining_pct: Option<u8>,
     /// Communication drop rate seen by the vehicle, percent.
     pub drop_rate_pct: f32,
+}
+
+/// Sensor bits from `SYS_STATUS` (`MAV_SYS_STATUS_SENSOR`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Sensors {
+    /// Present.
+    pub present: u32,
+    /// Enabled.
+    pub enabled: u32,
+    /// Healthy.
+    pub health: u32,
+}
+
+/// `MAV_SYS_STATUS_PREARM_CHECK`.
+pub const SENSOR_PREARM_CHECK: u32 = 1 << 28;
+/// `MAV_SYS_STATUS_SENSOR_RC_RECEIVER`.
+pub const SENSOR_RC_RECEIVER: u32 = 1 << 16;
+
+impl Sensors {
+    /// The autopilot's own pre-arm checks: `Some(true)` passing (or armed), `Some(false)`
+    /// failing, `None` when it does not report them. ArduPilot (`GCS::update_sensor_status_flags`,
+    /// 4.6.3 and 4.7.1) enables the bit when any arming check is enabled and sets it healthy
+    /// when armed or the checks pass.
+    pub fn prearm_ok(&self) -> Option<bool> {
+        (self.enabled & SENSOR_PREARM_CHECK != 0).then_some(self.health & SENSOR_PREARM_CHECK != 0)
+    }
+
+    /// Names of enabled sensors reported unhealthy (the pre-arm bit excluded), e.g. `3D_MAG`.
+    pub fn unhealthy(&self) -> Vec<String> {
+        (0..31)
+            .map(|b| 1u32 << b)
+            .filter(|&bit| bit != SENSOR_PREARM_CHECK)
+            .filter(|&bit| self.present & self.enabled & bit != 0 && self.health & bit == 0)
+            .map(|bit| {
+                mavlink_codec::enums::MavSysStatusSensor(bit).name().map_or(
+                    format!("bit {}", bit.trailing_zeros()),
+                    |n| {
+                        n.trim_start_matches("MAV_SYS_STATUS_SENSOR_")
+                            .trim_start_matches("MAV_SYS_STATUS_")
+                            .to_string()
+                    },
+                )
+            })
+            .collect()
+    }
 }
 
 /// `GPS_RAW_INT`.
@@ -796,6 +842,8 @@ pub struct VehicleState {
     pub power: Option<Timed<Power>>,
     /// GPS.
     pub gps: Option<Timed<Gps>>,
+    /// Sensor presence and health (`SYS_STATUS`, autopilot component).
+    pub sensors: Option<Timed<Sensors>>,
     /// Landed and VTOL state.
     pub extended: Option<Timed<Extended>>,
     /// EKF status (see [`nav`]).
@@ -955,6 +1003,16 @@ impl Fleet {
                 );
             }
             Message::SysStatus(s) => {
+                if compid == AUTOPILOT_COMPID {
+                    v.sensors = timed(
+                        now,
+                        Sensors {
+                            present: s.onboard_control_sensors_present,
+                            enabled: s.onboard_control_sensors_enabled,
+                            health: s.onboard_control_sensors_health,
+                        },
+                    );
+                }
                 v.power = timed(
                     now,
                     Power {
