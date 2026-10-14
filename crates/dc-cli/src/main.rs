@@ -1290,6 +1290,31 @@ enum RemoteCmd {
         #[arg(long)]
         armed_ok: bool,
     },
+    /// The daemon's vehicle-change settings and their warnings (changed only on its host).
+    VehicleChanges,
+    /// Upload a mission, geofence or rally points through the daemon, then read it back;
+    /// asks once (and for the in-flight warning if armed). Needs the daemon's settings, as
+    /// `mission upload` does.
+    Upload {
+        /// The file (.plan or QGC WPL 110).
+        file: std::path::PathBuf,
+        /// Which list.
+        #[arg(long = "type", value_enum, default_value_t = ListKind::Mission)]
+        kind: ListKind,
+        /// Confirm without asking (scripts).
+        #[arg(long)]
+        yes: bool,
+        /// Acknowledge the in-flight warning without asking (scripts).
+        #[arg(long)]
+        armed_ok: bool,
+    },
+    /// Erase every dataflash log on the vehicle through the daemon (needs its log-erase
+    /// setting and a disarmed vehicle); asks once. Cannot be undone.
+    EraseLogs {
+        /// Erase without asking (scripts).
+        #[arg(long)]
+        yes: bool,
+    },
     /// Download the mission, geofence or rally points through the daemon and list them.
     Items {
         /// Which list.
@@ -2429,11 +2454,28 @@ async fn run(cli: Cli) -> Result<(), String> {
                     "listening on {listen} needs an API key: --token-file FILE or DC_API_TOKEN"
                 ));
             }
+            // The vehicle-change settings come from this host's settings file (`dc-cli
+            // settings`); the API can read them but not change them.
+            let vehicle_changes = load_settings()?;
+            let on: Vec<&str> = dc_core::VehicleChange::ALL
+                .iter()
+                .filter(|c| vehicle_changes.get(**c))
+                .map(|c| c.key())
+                .collect();
+            eprintln!(
+                "vehicle-change settings on: {}",
+                if on.is_empty() {
+                    "none".to_string()
+                } else {
+                    on.join(", ")
+                }
+            );
             let cfg = CoreConfig {
                 sysid: cli.sysid,
                 compid: cli.compid,
                 tlog: cli.tlog.clone(),
                 audit_log: Some(audit.clone()),
+                vehicle_changes,
                 ..Default::default()
             };
             let core = Core::start(cfg)
@@ -6307,6 +6349,120 @@ async fn remote(
             {
                 println!("{v:?}");
             }
+        }
+        RemoteCmd::VehicleChanges => {
+            let list = c
+                .get_vehicle_change_settings(pb::GetVehicleChangeSettingsRequest {})
+                .await
+                .map_err(err)?
+                .into_inner();
+            for s in list.settings {
+                println!(
+                    "{:<22} {:<3}  {}\n    {}",
+                    s.key,
+                    if s.on { "ON" } else { "off" },
+                    s.title,
+                    s.warning
+                );
+            }
+        }
+        RemoteCmd::Upload {
+            file,
+            kind,
+            yes,
+            armed_ok,
+        } => {
+            let (items, pk) = match kind {
+                ListKind::Mission => (read_mission(file)?, pb::ItemKind::Mission),
+                ListKind::Fence => (read_fence(file)?, pb::ItemKind::Fence),
+                ListKind::Rally => (read_rally(file)?, pb::ItemKind::Rally),
+            };
+            eprintln!("{:?}: {} items from {}", pk, items.len(), file.display());
+            if !*yes {
+                match ask("Upload them to the vehicle?") {
+                    Some(true) => {}
+                    Some(false) => return Err("not confirmed: nothing was sent".into()),
+                    None => return Err("no terminal to confirm on: pass --yes".into()),
+                }
+            }
+            let mut req = pb::UploadItemsRequest {
+                sysid: 0,
+                compid: 0,
+                kind: pk as i32,
+                items: items
+                    .iter()
+                    .map(|i| pb::Item {
+                        frame: u32::from(i.frame),
+                        command: u32::from(i.command),
+                        params: i.params.to_vec(),
+                        x: i.x,
+                        y: i.y,
+                        z: i.z,
+                        autocontinue: i.autocontinue,
+                    })
+                    .collect(),
+                acknowledge_armed_warning: *armed_ok,
+            };
+            let mut reply = c.upload_items(req.clone()).await.map_err(err)?.into_inner();
+            if !reply.armed_warning.is_empty() {
+                eprintln!("WARNING: {}", reply.armed_warning);
+                match ask("Upload anyway, to the armed vehicle?") {
+                    Some(true) => {}
+                    Some(false) => {
+                        return Err("in-flight warning not acknowledged: nothing was sent".into());
+                    }
+                    None => {
+                        return Err(
+                            "vehicle armed: pass --armed-ok to acknowledge the in-flight warning"
+                                .into(),
+                        );
+                    }
+                }
+                req.acknowledge_armed_warning = true;
+                reply = c.upload_items(req).await.map_err(err)?.into_inner();
+            }
+            for m in &reply.mismatches {
+                eprintln!("  {m}");
+            }
+            if !reply.verified {
+                return Err(format!(
+                    "NOT verified: upload {}, read-back {}",
+                    reply.upload, reply.readback
+                ));
+            }
+            println!(
+                "verified: the vehicle holds exactly these {} items (read back)",
+                items.len()
+            );
+        }
+        RemoteCmd::EraseLogs { yes } => {
+            eprintln!("WARNING: {}", dc_core::VehicleChange::LogErase.warning());
+            if !*yes {
+                match ask("Erase every log on the vehicle?") {
+                    Some(true) => {}
+                    Some(false) => return Err("not confirmed: nothing was erased".into()),
+                    None => return Err("no terminal to confirm on: pass --yes".into()),
+                }
+            }
+            let r = c
+                .erase_logs(pb::EraseLogsRequest {
+                    sysid: 0,
+                    compid: 0,
+                })
+                .await
+                .map_err(err)?
+                .into_inner();
+            if !r.verified {
+                return Err(format!(
+                    "NOT verified: {} earlier logs still listed. {}",
+                    r.still_listed,
+                    dc_core::ERASE_NOT_VERIFIED_HINT
+                ));
+            }
+            println!(
+                "erased: the {} earlier logs are gone ({} new since)",
+                r.erased, r.new_logs
+            );
         }
         RemoteCmd::SetParams {
             changes,

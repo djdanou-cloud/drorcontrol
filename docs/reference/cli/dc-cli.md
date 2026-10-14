@@ -469,17 +469,20 @@ Talk to a running daemon over gRPC
 Usage: dc-cli remote [OPTIONS] <COMMAND>
 
 Commands:
-  info        Daemon identity
-  vehicles    Vehicles and their latest telemetry
-  params      Download parameters through the daemon
-  set-params  Change parameters through the daemon (it must run with --param-dir): confirm once; if the vehicle is armed, acknowledge its in-flight warning too
-  items       Download the mission, geofence or rally points through the daemon and list them
-  messages    The vehicle's recent STATUSTEXT lines (the "Messages" view), oldest first
-  geotags     Photos the vehicle reported taking (CAMERA_FEEDBACK) as CSV, for geotagging
-  logs        List the vehicle's dataflash logs, or download one through the daemon
-  links       The daemon's router: links, routes (which link each system is heard on), counters
-  events      Print events (STATUSTEXT, links) for a while
-  help        Print this message or the help of the given subcommand(s)
+  info             Daemon identity
+  vehicles         Vehicles and their latest telemetry
+  params           Download parameters through the daemon
+  set-params       Change parameters through the daemon (it must run with --param-dir): confirm once; if the vehicle is armed, acknowledge its in-flight warning too
+  vehicle-changes  The daemon's vehicle-change settings and their warnings (changed only on its host)
+  upload           Upload a mission, geofence or rally points through the daemon, then read it back; asks once (and for the in-flight warning if armed). Needs the daemon's settings, as `mission upload` does
+  erase-logs       Erase every dataflash log on the vehicle through the daemon (needs its log-erase setting and a disarmed vehicle); asks once. Cannot be undone
+  items            Download the mission, geofence or rally points through the daemon and list them
+  messages         The vehicle's recent STATUSTEXT lines (the "Messages" view), oldest first
+  geotags          Photos the vehicle reported taking (CAMERA_FEEDBACK) as CSV, for geotagging
+  logs             List the vehicle's dataflash logs, or download one through the daemon
+  links            The daemon's router: links, routes (which link each system is heard on), counters
+  events           Print events (STATUSTEXT, links) for a while
+  help             Print this message or the help of the given subcommand(s)
 
 Options:
       --grpc <GRPC>
@@ -647,6 +650,130 @@ Options:
 
       --armed-ok
           Acknowledge the in-flight warning without asking (scripts)
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `dc-cli remote vehicle-changes`
+
+```text
+The daemon's vehicle-change settings and their warnings (changed only on its host)
+
+Usage: dc-cli remote vehicle-changes [OPTIONS]
+
+Options:
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `dc-cli remote upload`
+
+```text
+Upload a mission, geofence or rally points through the daemon, then read it back; asks once (and for the in-flight warning if armed). Needs the daemon's settings, as `mission upload` does
+
+Usage: dc-cli remote upload [OPTIONS] <FILE>
+
+Arguments:
+  <FILE>
+          The file (.plan or QGC WPL 110)
+
+Options:
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --type <KIND>
+          Which list
+          
+          [default: mission]
+          [possible values: mission, fence, rally]
+
+      --compid <COMPID>
+          Our MAVLink component id
+          
+          [default: 190]
+
+      --yes
+          Confirm without asking (scripts)
+
+      --armed-ok
+          Acknowledge the in-flight warning without asking (scripts)
+
+      --tlog <TLOG>
+          Record everything to this .tlog file
+
+      --units <UNITS>
+          Units for heights, distances and speeds in telemetry, fence margins and RTL targets
+
+          Possible values:
+          - metric:   m, km, m/s
+          - imperial: ft, mi, mph
+          - nautical: ft, NM, kn
+          
+          [default: metric]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `dc-cli remote erase-logs`
+
+```text
+Erase every dataflash log on the vehicle through the daemon (needs its log-erase setting and a disarmed vehicle); asks once. Cannot be undone
+
+Usage: dc-cli remote erase-logs [OPTIONS]
+
+Options:
+      --sysid <SYSID>
+          Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
+          
+          [default: 255]
+
+      --yes
+          Erase without asking (scripts)
 
       --compid <COMPID>
           Our MAVLink component id

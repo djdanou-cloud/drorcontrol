@@ -23,8 +23,7 @@ service Core {
   rpc StreamTelemetry(StreamTelemetryRequest) returns (stream Vehicle);
   // STATUSTEXT messages and link/vehicle events as they happen.
   rpc StreamEvents(StreamEventsRequest) returns (stream Event);
-  // Download the mission, the geofence or the rally points (read-only; there is no upload
-  // RPC yet: uploads stay behind the core's interlocks).
+  // Download the mission, the geofence or the rally points.
   rpc DownloadItems(DownloadItemsRequest) returns (ItemList);
   // The last 500 STATUSTEXT lines from a vehicle, oldest first (the "Messages" view).
   rpc GetMessages(GetMessagesRequest) returns (MessageList);
@@ -45,6 +44,61 @@ service Core {
   // acknowledge_armed_warning = true. FAILED_PRECONDITION when the daemon has no baseline
   // directory (writes off).
   rpc SetParams(SetParamsRequest) returns (SetParamsReply);
+  // Upload a mission, geofence or rally list, then read it back (ADR-0012 amendment). The
+  // client shows the list and asks the operator once before calling. Behind the daemon's
+  // vehicle-change settings (its settings file; off by default, not changeable over this
+  // API): a fence or rally upload needs fence-rally-upload, a mission to a vehicle not known
+  // to be disarmed needs armed-mission-upload; FAILED_PRECONDITION names the setting and
+  // nothing is sent. To an armed vehicle, as SetParams: armed_warning back until
+  // acknowledge_armed_warning is set. An empty list clears it on the vehicle.
+  rpc UploadItems(UploadItemsRequest) returns (UploadItemsReply);
+  // Erase every dataflash log on the vehicle (LOG_ERASE), then list them to check. Needs the
+  // log-erase setting and a disarmed vehicle; cannot be undone. The client asks first.
+  rpc EraseLogs(EraseLogsRequest) returns (EraseLogsReply);
+  // The daemon's vehicle-change settings, with each one's warning (read-only).
+  rpc GetVehicleChangeSettings(GetVehicleChangeSettingsRequest) returns (VehicleChangeSettingList);
+}
+
+message UploadItemsRequest {
+  uint32 sysid = 1;          // 0 = first vehicle heard
+  uint32 compid = 2;         // 0 = autopilot (1)
+  ItemKind kind = 3;
+  repeated Item items = 4;   // a mission's item 0 is home
+  bool acknowledge_armed_warning = 5;
+}
+
+message UploadItemsReply {
+  // Set when nothing was sent because the vehicle is armed: the text to show.
+  string armed_warning = 1;
+  bool verified = 2;         // the vehicle holds exactly these items (read back)
+  string upload = 3;         // the transfer's own outcome
+  string readback = 4;       // the read-back's outcome
+  repeated string mismatches = 5;  // "item N field: sent X vehicle Y"
+}
+
+message EraseLogsRequest {
+  uint32 sysid = 1;
+  uint32 compid = 2;
+}
+
+message EraseLogsReply {
+  bool verified = 1;         // none of the earlier logs is listed any more
+  uint32 erased = 2;         // logs listed before the erase
+  uint32 new_logs = 3;       // logs the vehicle started after it
+  uint32 still_listed = 4;   // earlier logs still listed (not verified)
+}
+
+message GetVehicleChangeSettingsRequest {}
+
+message VehicleChangeSetting {
+  string key = 1;            // e.g. fence-rally-upload
+  string title = 2;
+  string warning = 3;        // the danger, to show next to it
+  bool on = 4;
+}
+
+message VehicleChangeSettingList {
+  repeated VehicleChangeSetting settings = 1;
 }
 
 message GetInfoRequest {}

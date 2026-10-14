@@ -537,6 +537,126 @@ impl CoreApi for CoreService {
         }))
     }
 
+    async fn upload_items(
+        &self,
+        req: Request<pb::UploadItemsRequest>,
+    ) -> Result<Response<pb::UploadItemsReply>, Status> {
+        let r = req.into_inner();
+        let sysid = self.pick_vehicle(r.sysid)?;
+        let compid = Self::pick_component(r.compid)?;
+        let kind = pb::ItemKind::try_from(r.kind)
+            .map_err(|_| Status::invalid_argument(format!("unknown kind {}", r.kind)))?;
+        let mt = match kind {
+            pb::ItemKind::Mission => dc_core::MissionType::Mission,
+            pb::ItemKind::Fence => dc_core::MissionType::Fence,
+            pb::ItemKind::Rally => dc_core::MissionType::Rally,
+        };
+        let mut items = Vec::with_capacity(r.items.len());
+        for (n, i) in r.items.iter().enumerate() {
+            let (Ok(frame), Ok(command)) = (u8::try_from(i.frame), u16::try_from(i.command)) else {
+                return Err(Status::invalid_argument(format!(
+                    "item {n}: frame or command out of range"
+                )));
+            };
+            if i.params.len() > 4 || !i.z.is_finite() {
+                return Err(Status::invalid_argument(format!(
+                    "item {n}: bad params or z"
+                )));
+            }
+            let mut params = [0.0f32; 4];
+            params[..i.params.len()].copy_from_slice(&i.params);
+            items.push(dc_core::MissionItem {
+                frame,
+                command,
+                params,
+                x: i.x,
+                y: i.y,
+                z: i.z,
+                autocontinue: i.autocontinue,
+            });
+        }
+        let mode = if r.acknowledge_armed_warning {
+            dc_core::ArmedWrite::Acknowledged
+        } else {
+            dc_core::ArmedWrite::DisarmedOnly
+        };
+        let report = match self
+            .core
+            .upload_items((sysid, compid), mt, items, mode)
+            .await
+        {
+            Ok(report) => report,
+            Err(dc_core::VehicleChangeError::ArmedWarningRequired(w)) => {
+                return Ok(Response::new(pb::UploadItemsReply {
+                    armed_warning: w.to_string(),
+                    ..Default::default()
+                }));
+            }
+            Err(e) => {
+                return Err(Status::failed_precondition(format!(
+                    "{e}: nothing was sent"
+                )));
+            }
+        };
+        Ok(Response::new(pb::UploadItemsReply {
+            armed_warning: String::new(),
+            verified: report.verified(),
+            upload: format!("{:?}", report.upload),
+            readback: format!("{:?}", report.readback),
+            mismatches: report
+                .mismatches
+                .iter()
+                .map(|m| {
+                    format!(
+                        "item {} {}: sent {} vehicle {}",
+                        m.seq.map_or("-".into(), |s| s.to_string()),
+                        m.field,
+                        m.draft,
+                        m.vehicle
+                    )
+                })
+                .collect(),
+        }))
+    }
+
+    async fn erase_logs(
+        &self,
+        req: Request<pb::EraseLogsRequest>,
+    ) -> Result<Response<pb::EraseLogsReply>, Status> {
+        let r = req.into_inner();
+        let sysid = self.pick_vehicle(r.sysid)?;
+        let compid = Self::pick_component(r.compid)?;
+        let report = self
+            .core
+            .erase_logs((sysid, compid))
+            .await
+            .map_err(|e| Status::failed_precondition(format!("{e}: nothing was erased")))?;
+        Ok(Response::new(pb::EraseLogsReply {
+            verified: report.verified(),
+            erased: report.before.len() as u32,
+            new_logs: report.new_logs().len() as u32,
+            still_listed: report.still_listed().len() as u32,
+        }))
+    }
+
+    async fn get_vehicle_change_settings(
+        &self,
+        _req: Request<pb::GetVehicleChangeSettingsRequest>,
+    ) -> Result<Response<pb::VehicleChangeSettingList>, Status> {
+        let s = self.core.vehicle_changes();
+        Ok(Response::new(pb::VehicleChangeSettingList {
+            settings: dc_core::VehicleChange::ALL
+                .iter()
+                .map(|c| pb::VehicleChangeSetting {
+                    key: c.key().into(),
+                    title: c.title().into(),
+                    warning: c.warning().into(),
+                    on: s.get(*c),
+                })
+                .collect(),
+        }))
+    }
+
     async fn get_link_stats(
         &self,
         _req: Request<pb::GetLinkStatsRequest>,
