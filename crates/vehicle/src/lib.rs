@@ -16,6 +16,7 @@ use mavlink_codec::enums::MavModeFlag;
 pub mod modes;
 pub mod nav;
 pub mod preflight;
+pub mod rc_link;
 pub use modes::{Firmware, FirmwareSource};
 pub use nav::{Ekf, NavHealth, NavThresholds, PositionTrust};
 
@@ -864,6 +865,8 @@ pub struct VehicleState {
     pub radio: Option<Timed<RadioStatus>>,
     /// RC input.
     pub rc: Option<Timed<RcInput>>,
+    /// What the autopilot said about its CRSF/ELRS receiver ([`rc_link`]).
+    pub rc_link: Option<Timed<rc_link::RcLinkInfo>>,
     /// Servo/motor outputs by port (0 = MAIN).
     pub servos: BTreeMap<u8, Timed<ServoOutputs>>,
     /// Batteries from `BATTERY_STATUS`, by id.
@@ -1275,6 +1278,16 @@ impl Fleet {
                     && let Some(f) = Firmware::from_banner(&String::from_utf8_lossy(&s.text[..end]))
                 {
                     v.firmware = Some((f, FirmwareSource::Banner));
+                }
+                if compid == AUTOPILOT_COMPID
+                    && let Some(t) = rc_link::parse(&String::from_utf8_lossy(&s.text[..end]))
+                {
+                    let mut info = v.rc_link.take().map(|r| r.value).unwrap_or_default();
+                    info.apply(t);
+                    v.rc_link = Some(Timed {
+                        value: info,
+                        at: now,
+                    });
                 }
                 return Some(StatusText {
                     severity: s.severity,

@@ -142,6 +142,22 @@ impl ParamReport {
     }
 }
 
+/// `RC_CHANNELS.rssi` with what it measures ([`Core::rc_signal`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RcSignal {
+    /// Raw value, 0–254.
+    pub value: u8,
+    /// As a percentage of RSSI or link quality, per `kind`.
+    pub pct: f32,
+    /// RSSI, link quality, or not known yet.
+    pub kind: vehicle::rc_link::SignalKind,
+    /// What the vehicle said about its CRSF/ELRS receiver, if anything.
+    pub link: Option<vehicle::rc_link::RcLinkInfo>,
+}
+
+/// `RSSI_TYPE` and `RC_OPTIONS` of one vehicle, when reported.
+type RcSignalParams = (Option<u8>, Option<u32>);
+
 /// Counts of armed reports and heartbeat gaps; a write compares them before every step.
 type Epoch = (u64, u64);
 
@@ -153,6 +169,9 @@ pub(super) struct ParameterState {
     /// (armed reports, heartbeat gaps) per vehicle.
     epochs: Mutex<HashMap<u8, Epoch>>,
     nav: Mutex<HashMap<u8, f32>>,
+    /// `RSSI_TYPE` and `RC_OPTIONS` per vehicle, as last reported (what `RC_CHANNELS.rssi`
+    /// measures).
+    rc_signal: Mutex<HashMap<u8, RcSignalParams>>,
 }
 
 impl Core {
@@ -188,6 +207,25 @@ impl Core {
             }
         }
         if let Message::ParamValue(p) = msg
+            && p.param_value.is_finite()
+            && p.param_value >= 0.0
+        {
+            let name = decode_id(&p.param_id);
+            if name == "RSSI_TYPE" || name == "RC_OPTIONS" {
+                let mut m = self
+                    .parameters
+                    .rc_signal
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                let e = m.entry(sysid).or_default();
+                if name == "RSSI_TYPE" {
+                    e.0 = Some(p.param_value as u8);
+                } else {
+                    e.1 = Some(p.param_value as u32);
+                }
+            }
+        }
+        if let Message::ParamValue(p) = msg
             && decode_id(&p.param_id) == "FS_EKF_THRESH"
             && p.param_type == MavParamType::REAL32.0
             && p.param_value.is_finite()
@@ -215,6 +253,38 @@ impl Core {
             thresholds.ekf_fail = *value;
         }
         thresholds
+    }
+
+    /// What `RC_CHANNELS.rssi` from `sysid` means now, with its value as a percentage
+    /// (plan 09 Step 2). `None` without RC input or with RSSI disabled on the vehicle. The
+    /// kind comes from the autopilot's CRSF/ELRS message, else from `RSSI_TYPE` and
+    /// `RC_OPTIONS` as they pass in parameter traffic (a download or a read); nothing is
+    /// requested for it, so it can stay [`SignalKind::Unknown`](vehicle::rc_link::SignalKind)
+    /// until one of them is seen.
+    pub fn rc_signal(&self, sysid: u8) -> Option<RcSignal> {
+        let fleet = self.fleet();
+        let v = fleet.get(sysid)?;
+        let value = v.rc.as_ref()?.value.rssi?;
+        let link = v.rc_link.as_ref().map(|l| l.value.clone());
+        let (rssi_type, rc_options) = self
+            .parameters
+            .rc_signal
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&sysid)
+            .copied()
+            .unwrap_or_default();
+        let kind = vehicle::rc_link::signal_kind(
+            link.as_ref().and_then(|l| l.rssi_as_lq),
+            rssi_type,
+            rc_options,
+        );
+        Some(RcSignal {
+            value,
+            pct: vehicle::rc_link::signal_pct(value, kind),
+            kind,
+            link,
+        })
     }
 
     fn parameter_epoch(&self, sysid: u8) -> Epoch {

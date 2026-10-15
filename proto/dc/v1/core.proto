@@ -224,6 +224,20 @@ message RcState {
   repeated uint32 channels_us = 2;  // the channels received (at most 18)
   uint32 count = 3;                 // channels the receiver reports
   optional uint32 rssi = 4;         // 0-254, receiver's own scale
+  // What rssi measures (RSSI_TYPE, RC_OPTIONS bit 11, or the autopilot's CRSF message) and
+  // rssi as a percentage of it.
+  SignalKind kind = 5;
+  optional float signal_pct = 6;
+  // From the autopilot's CRSF/ELRS messages: "ELRS", "CRSFv3" or "CRSFv2", and its rates.
+  string protocol = 7;
+  optional uint32 link_rate_hz = 8;
+  optional uint32 telemetry_rate_hz = 9;
+
+  enum SignalKind {
+    SIGNAL_KIND_UNKNOWN = 0;
+    SIGNAL_KIND_RSSI = 1;
+    SIGNAL_KIND_LINK_QUALITY = 2;
+  }
 }
 
 // From SERVO_OUTPUT_RAW: outputs 1-16 of one port, us (0 = not driven).

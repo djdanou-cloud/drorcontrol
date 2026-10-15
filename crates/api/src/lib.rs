@@ -154,6 +154,20 @@ pub fn vehicle_with_health(core: &Core, v: &VehicleState, now: Instant) -> pb::V
     if let Some(l) = core.vehicle_link(v.sysid) {
         pb.link = link_to_pb(l) as i32;
     }
+    if let (Some(rc), Some(sig)) = (pb.rc.as_mut(), core.rc_signal(v.sysid)) {
+        use pb::rc_state::SignalKind as K;
+        rc.kind = match sig.kind {
+            dc_core::SignalKind::Unknown => K::Unknown,
+            dc_core::SignalKind::Rssi => K::Rssi,
+            dc_core::SignalKind::LinkQuality => K::LinkQuality,
+        } as i32;
+        rc.signal_pct = Some(sig.pct);
+        if let Some(l) = sig.link {
+            rc.protocol = l.protocol;
+            rc.link_rate_hz = l.link_rate_hz.map(u32::from);
+            rc.telemetry_rate_hz = l.telemetry_rate_hz.map(u32::from);
+        }
+    }
     pb
 }
 
@@ -274,6 +288,7 @@ pub fn vehicle_to_pb(v: &VehicleState, now: Instant) -> pb::Vehicle {
             channels_us: t.value.channels.iter().map(|&c| u32::from(c)).collect(),
             count: u32::from(t.value.count),
             rssi: t.value.rssi.map(u32::from),
+            ..Default::default()
         }),
         servos: v
             .servos

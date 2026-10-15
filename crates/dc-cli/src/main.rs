@@ -6810,7 +6810,20 @@ fn print_fleet(core: &Core, units: Units) {
                 rx + lost
             )
         });
-        let parts: Vec<String> = [hb, att, pos, bat, fence, mission, loss, fw]
+        // RC link: RSSI or LQ as the vehicle reports it (RC_CHANNELS.rssi), labelled.
+        let rc = core.rc_signal(v.sysid).map(|s| {
+            let what = match s.kind {
+                dc_core::SignalKind::LinkQuality => "LQ",
+                dc_core::SignalKind::Rssi => "RSSI",
+                dc_core::SignalKind::Unknown => "RSSI/LQ?",
+            };
+            let link = s.link.map_or(String::new(), |l| match l.link_rate_hz {
+                Some(hz) => format!(" ({} {hz} Hz)", l.protocol),
+                None => format!(" ({})", l.protocol),
+            });
+            format!("rc {what} {:.0}%{link}", s.pct)
+        });
+        let parts: Vec<String> = [hb, att, pos, bat, fence, mission, loss, rc, fw]
             .into_iter()
             .flatten()
             .collect();

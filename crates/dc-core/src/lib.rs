@@ -72,8 +72,9 @@ mod vehicle_changes;
 pub use link_profiles::{LinkProfile, LinkTarget, RateOutcome, RateResult, StreamReport};
 pub use parameters::{
     ARMED_WRITE_WARNING, ArmedWrite, PARAM_HEARTBEAT_MAX_AGE, ParamOperationError, ParamReport,
-    ParamRisk, ParamWriteResult, parameter_risk,
+    ParamRisk, ParamWriteResult, RcSignal, parameter_risk,
 };
+pub use vehicle::rc_link::{RcLinkInfo, SignalKind};
 pub use vehicle_changes::{
     ARMED_FENCE_RALLY_WARNING, ARMED_MISSION_UPLOAD_WARNING, ERASE_NOT_VERIFIED_HINT, EraseReport,
     VehicleChange, VehicleChangeError, VehicleChangeSettings,
