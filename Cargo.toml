@@ -2,7 +2,7 @@
 resolver = "3"
 members = ["xtask", "crates/*"]
 # Fuzz crates need nightly and are standalone workspaces.
-exclude = ["crates/mavlink-codec/fuzz"]
+exclude = ["crates/mavlink-codec/fuzz", "crates/crsf-codec/fuzz"]
 
 [workspace.package]
 version = "0.0.0"

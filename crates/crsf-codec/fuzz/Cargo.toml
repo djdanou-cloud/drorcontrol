@@ -1,0 +1,23 @@
+[package]
+name = "crsf-codec-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+crsf-codec = { path = ".." }
+
+# Standalone workspace: fuzzing needs nightly and must not join the main (stable) workspace.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "parse_stream"
+path = "fuzz_targets/parse_stream.rs"
+test = false
+doc = false
+bench = false

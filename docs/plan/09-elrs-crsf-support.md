@@ -189,6 +189,24 @@ the bench kit in [§6.3](#63-hardware-in-the-loop-checklist).
 ### Step 1: Link profiles and adaptive stream rates
 *Phase 1, with "stream-rate negotiation" (M1). Track 1.*
 
+> **Built 2026-10-15 (core, CLI, gRPC):**
+> * the three profiles (`protocols::streams::LinkProfile`), chosen per link with
+>   `?profile=` on any link string (`dc_core::LinkTarget`, `dc-cli --connect`, gRPC
+>   `OpenLink`);
+> * the per-link request, sent on that link only (`HubHandle::send_on`):
+>   `protocols::streams::StreamRequest` sets each rate with an ACK and retries, then reads
+>   it back. It is repeated after the vehicle was silent on the link for the LOST time, and
+>   reported (`CoreEvent::LinkStreams`, gRPC `LinkStreamsEvent`, `Core::stream_reports`);
+> * terrain answers paced per profile, with repeats of an in-flight request ignored.
+>
+> **SITL** (`constrained_elrs_profile_fits_the_simulated_elrs_link`, ArduCopter 4.7.1 and
+> 4.6.3, `SIM_ELRS` at 500 B/s): every Constrained rate was set and read back, and the
+> downlink measured **302 B/s** (both versions). A mode change was verified over the link.
+> The Full profile on the same link saturates it (**501–502 B/s**).
+>
+> **Not built yet:** the adaptive step-down, the profile suggestion (`suggest-link-profile`),
+> the transfer-time estimates and the identity warning.
+
 * **Profiles.** Budgets are worst-case sizes from the dialect XML, MAVLink 2, unsigned,
   heartbeat included. Each one is checked against the measured byte rate in SITL.
 
@@ -268,6 +286,12 @@ the bench kit in [§6.3](#63-hardware-in-the-loop-checklist).
 
 ### Step 3: CRSF codec
 *Phase 3, next to "SiK radio config" (M3). Track 2. No hardware needed.*
+
+> **Codec built 2026-10-15, ahead of Phase 3:** `crates/crsf-codec`. It has the parser,
+> encoder, CRC-8/DVB-S2, the 0xBA inner CRC, typed payloads with SI helpers, and
+> exhaustive 11-bit RC packing tests (every value in every slot). There is a seeded
+> random-stream test and a `cargo-fuzz` target (`crates/crsf-codec/fuzz`, nightly). The
+> `Framer` seam and folding CRSF telemetry into the vehicle state are still to do.
 
 * `crates/crsf-codec` as in [§4](#4-architecture-and-crate-boundaries):
   * parser and encoder;

@@ -1,0 +1,12 @@
+[package]
+name = "crsf-codec"
+description = "CRSF (TBS Crossfire / ExpressLRS) frames for DrorControl: parser, encoder, CRC-8/DVB-S2, telemetry payloads and RC channel packing (plan 09 Step 3)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true
