@@ -156,7 +156,7 @@ do not count them.
 | EXT-001 | Link profiles for constrained links (ELRS MAVLink mode / Airport, Crossfire MAVLink) | `SET_MESSAGE_INTERVAL`(511 command), `GET_MESSAGE_INTERVAL`/`MESSAGE_INTERVAL`(244), `REQUEST_DATA_STREAM`(66) | Full-rate streams overrun a ~0.1–1.25 kB/s link | Full / High / Constrained-ELRS profiles per link, read back, adaptive step-down ([09](09-elrs-crsf-support.md) Step 1) | 1 |
 | EXT-002 | Link quality from radio sources (LQ, RSSI, SNR) | `RC_CHANNELS`(65) rssi per `RSSI_TYPE`/`RC_OPTIONS`, `RADIO_STATUS`(109), CRSF link statistics 0x14 | RSSI and LQ mixed up; no source shown | Link widget with the value's source; DEGRADED state ([09](09-elrs-crsf-support.md) Step 2) | 1 |
 | EXT-003 | CRSF TX-module connection and native CRSF telemetry | CRSF frames (GPS 0x02, battery 0x08, link statistics 0x14, attitude 0x1E, flight mode 0x21) | — | `crsf:` serial link and `crsf-codec` ([09](09-elrs-crsf-support.md) Steps 3–4a) | 3–4 |
-| EXT-004 | Gamepad / joystick to CRSF RC channels (GCS as the transmitter) | CRSF `RC_CHANNELS_PACKED` 0x16 | — | `input` crate → CRSF RC output with deadman and failsafe rules; safety-gated ([09](09-elrs-crsf-support.md) Step 4b) | 4 |
+| EXT-004 | Gamepad / joystick to CRSF RC channels (GCS as the transmitter) | CRSF `RC_CHANNELS_PACKED` 0x16 | — | `input` crate → CRSF RC output with deadman and failsafe rules; safety-gated ([09](09-elrs-crsf-support.md) Step 4b, owner 2026-10-15: later) | *later* |
 
 ## Coverage accounting
 Total rows: ~125 (grows as D0-7 audit completes). CI computes `% implemented`, `% tested`, `% documented` per ID and blocks GA unless all three = 100 % for every *must* row; rows marked *won't* require a signed waiver recorded in an ADR.

@@ -329,9 +329,10 @@ upload and erase (the API has none yet).
     `dc-cli` has no force-arm or reset command yet: the Phase 1 UI uses these fields.
 14. **ExpressLRS / Crossfire plan (2026-10-15, docs only):** [`docs/plan/09-elrs-crsf-support.md`](../plan/09-elrs-crsf-support.md).
     Steps 1–2 (link profiles, adaptive stream rates, link-quality HUD) in P1; Step 3 (CRSF
-    codec) in P3; Step 4 (TX-module link, gamepad-to-CRSF) in P4, with 4b safety-gated.
+    codec) in P3; Step 4a (TX-module link, receive only) in P4. Owner decisions 2026-10-15
+    (plan §8): gamepad-to-CRSF (4b) wanted but after 1.0; Crossfire bench later; profile
+    suggestion behind the setting `suggest-link-profile`, off by default.
     Facts pinned to ArduPilot 4.6.3/4.7.1 and ExpressLRS 3.6.4/4.1.0; Crossfire unverified.
-    Owner decisions open: §8 of the plan.
 
 ## 8. Where things are (code map)
 

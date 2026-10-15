@@ -84,7 +84,7 @@ Exit: new-vehicle-to-first-flight workflow completed unaided by 5 of 5 novices i
 * Video: GStreamer pipeline, HW decode on all OS, overlay sync, recording, MAVLink camera/gimbal protocol; PiP and multi-stream.
 * NTRIP/RTK, ADS-B, antenna tracker routing, joystick/gamepad (`GameController`/XInput/SDL), Bluetooth, follow-me, plugin/scripting API, airspace layers.
 * Docs: complete protocol/hardware guide with verified-hardware tables; handbook all parts drafted.
-* Radio link track, Step 4: CRSF TX-module serial link (4a, receive only) and gamepad-to-CRSF RC output (4b, only after the owner's and safety lead's sign-off).
+* Radio link track, Step 4a: CRSF TX-module serial link, receive only (telemetry and link statistics). Gamepad-to-CRSF RC output (4b) is *later*, after 1.0 (owner 2026-10-15).
 Exit: **100 % parity rows implemented** (verified by `parity.yaml` dashboard); 4 GB log budgets met; 1080p video budget met; public beta channel open.
 
 ## Phase 5 — Hardening, Automated SITL Flight Testing, Field Beta & Production Release (S37–S46) → **M5 GA**
@@ -107,11 +107,12 @@ parity gate does not count.
 | 1 Link profiles (Full / High / Constrained-ELRS) and adaptive stream rates | 1 Constrained-bandwidth MAVLink | P1 → M1 | SITL `sim:ELRS` |
 | 2 Link-quality HUD and signal telemetry | 1 (and 2 once Step 3 lands) | P1 → M1 | SITL; UI shell |
 | 3 CRSF codec with unit, property and fuzz tests | 2 Native CRSF | P3 → M3 | none |
-| 4 TX-module serial driver (4a) and gamepad-to-CRSF channels (4b) | 2 | P4 → M4 | HIL bench with ELRS (and Crossfire) modules; 4b: owner and safety-lead sign-off |
+| 4a TX-module serial driver, receive only | 2 | P4 → M4 | HIL bench with ELRS modules (Crossfire later) |
+| 4b Gamepad-to-CRSF channels (DrorControl as the transmitter) | 2 | *later*, after 1.0 | owner and safety-lead sign-off, ADR |
 
-Estimate: about 4 person-weeks in P1 (core and HUD), 3 in P3, and 5 in P4 including the bench.
+Estimate: about 4 person-weeks in P1 (core and HUD), 3 in P3, and 3 in P4 including the bench (4b is not counted).
 That is inside each phase's contingency, so no re-baseline is needed. Owner: WS-MAVLINK, with
-WS-UI (HUD), WS-MACOS/WS-PLAT (input, serial) and WS-SAFETY (Step 4b).
+WS-UI (HUD), WS-MACOS/WS-PLAT (serial) and, for the later Step 4b, WS-SAFETY.
 
 ## Team topology & resource allocation
 

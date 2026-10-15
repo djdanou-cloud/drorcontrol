@@ -145,6 +145,6 @@ Columns:
 
 * (Closed 2026-10-12, §6: hazard-log review approved, I1–I3 signed off, H14 accepted.)
 * Open hazards still need controls built and tested: H4, H6, H9, H16, and signing for H10.
-* Proposed, not yet assessed (2026-10-15): four draft hazards for ExpressLRS / Crossfire support, mainly DrorControl acting as the RC transmitter ([plan 09 §7](../plan/09-elrs-crsf-support.md#7-safety)). They need the owner's review before they get IDs here.
+* Proposed, not yet assessed (2026-10-15): four draft hazards for ExpressLRS / Crossfire support, mainly DrorControl acting as the RC transmitter ([plan 09 §7](../plan/09-elrs-crsf-support.md#7-safety)). They need the owner's review before they get IDs here; the owner moved that feature to after 1.0 (2026-10-15), so the review comes with it.
 * UI-phase evidence: time-to-command for each class B path; the alert on mode-change expiry;
   hotkey focus rules.

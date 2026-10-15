@@ -68,7 +68,7 @@ trait SerialBackend { fn list() -> Vec<PortInfo>; fn open(&PortInfo, &Config) ->
 * **Foreground rule:** by default controllers deliver input only to the frontmost app. A GCS must keep control when other windows are in front (e.g. video on a second display): set `GCController.shouldMonitorBackgroundEvents = true` (macOS 11.3+), and expose a visible "controller active" indicator + deadman requirement.
 * Mapping layer is cross-platform (`input` crate): axes → `MANUAL_CONTROL` (69) x/y/z/r, buttons → actions (arm, mode, RTL …) **never** mapped by default to hazardous actions; calibration, deadzone, expo, inversion, per-vehicle profiles stored as JSON.
 * Send rate 20–50 Hz, immediate zero-stick frame on disconnect, link loss, window-close; vehicle failsafe (`FS_GCS_ENABLE`) documented in handbook.
-* Second output (safety-gated): 16 RC channels in µs to a CRSF TX module, so DrorControl acts as the transmitter ([09](09-elrs-crsf-support.md) Step 4b); same deadman and neutral-on-start rules; RC failsafe on the vehicle instead of the GCS failsafe.
+* Second output (safety-gated, *later* after 1.0): 16 RC channels in µs to a CRSF TX module, so DrorControl acts as the transmitter ([09](09-elrs-crsf-support.md) Step 4b); same deadman and neutral-on-start rules; RC failsafe on the vehicle instead of the GCS failsafe.
 * Windows uses XInput/RawInput/SDL; Linux evdev/SDL. A thin SDL3 backend unifies all if framework gaps appear.
 
 ## 4. Permissions, entitlements & sandboxing

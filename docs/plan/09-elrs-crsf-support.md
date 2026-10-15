@@ -1,8 +1,8 @@
 # 09 — ExpressLRS and Crossfire (CRSF) link support
 
-> Status: **plan, for owner review.** Written 2026-10-15. Nothing here is built yet.
-> The safety parts of Step 4 (GCS sending RC channels) need the owner and the safety lead
-> before any code is written ([§7](#7-safety)).
+> Status: **plan; owner decisions of 2026-10-15 recorded in [§8](#8-decisions-owner-2026-10-15).**
+> Nothing here is built yet. DrorControl as the RC transmitter (Step 4b) is wanted but moved to
+> a much later stage (after 1.0); it still needs the safety review in [§7](#7-safety) first.
 >
 > Where it sits: a feature track across Phases 1, 3 and 4 of the
 > [roadmap](07-roadmap-team.md#radio-link-track-expresslrs-and-crossfire). It adds work inside
@@ -207,6 +207,10 @@ the bench kit in [§6.3](#63-hardware-in-the-loop-checklist).
   * A refusal or a "stream rate ignored" link option (4.6.3 `SERIALx_OPTIONS` bit 12, 4.7.1
     `MAVn_OPTIONS` bit 2) is shown, not hidden.
   * The request is repeated after a vehicle reboot (first heartbeat after loss).
+* **Profile suggestion** (owner decision 3): with the setting `suggest-link-profile` on (off by
+  default), DrorControl suggests Constrained-ELRS when it sees the ELRS/CRSF "Link rate"
+  STATUSTEXT or measures a link slower than the current profile needs. The operator accepts or
+  dismisses it; the suggestion and the answer are logged.
 * **Adaptive step-down** (GCS side; ArduPilot's own `RADIO_STATUS` slow-down on the air side
   stays in charge of the uplink buffer):
   * Measure received bytes/s and sequence loss per link.
@@ -280,7 +284,8 @@ the bench kit in [§6.3](#63-hardware-in-the-loop-checklist).
   * decoding a CRSF capture from the corpus (recorded in Step 4's bench work) with 0 CRC errors.
 
 ### Step 4: TX-module driver and gamepad-to-CRSF mapping
-*Phase 4, next to "joystick/gamepad" (M4). Track 2. **Safety-gated** ([§7](#7-safety)).*
+*4a: Phase 4, next to "joystick/gamepad" (M4). 4b: **later** (after 1.0, owner 2026-10-15) and
+**safety-gated** ([§7](#7-safety)). Track 2.*
 
 * **4a, receive only.**
   * A `crsf:` serial link to the module's CRSF pin through a USB–UART adapter, at a baud the
@@ -288,7 +293,9 @@ the bench kit in [§6.3](#63-hardware-in-the-loop-checklist).
   * Hotplug and reopen work like serial links today. The macOS high rates go through
     `IOSSIOSPEED` ([03 §2.3](03-macos-platform.md#23-baud-rates-57-600-921-600-2-000-000)).
   * DrorControl reads telemetry and link statistics. It sends nothing that moves the aircraft.
-* **4b, RC output.** Only after the owner and the safety lead sign off on H20–H23:
+* **4b, RC output. Later (after 1.0).** The owner wants the option but not now. Before it is
+  built, the owner and the safety lead review the draft hazards H20–H23, and an ADR records the
+  decision. The intended design:
   * the `input` crate's `RcFrame` → `RC_CHANNELS_PACKED` at the module's packet interval;
   * channel map, endpoints, reversal and expo per vehicle profile;
   * neutral-on-start, deadman, controller-loss behaviour
@@ -402,15 +409,13 @@ Draft requirements, for numbering at review:
 * Stream profiles never write persistent vehicle parameters.
 * Every link profile change and every RC-output start and stop is written to the audit log.
 
-## 8. Decisions needed
+## 8. Decisions (owner, 2026-10-15)
 
-1. **Step 4b.** May the GCS act as the RC transmitter at all? If yes, the hazards and
-   requirements above go into the log, and ADR-0014 is written.
-2. **Crossfire hardware.** Is a TBS Crossfire module available for the bench? Without one,
-   Crossfire support stays "CRSF-compatible, not hardware-verified".
-3. **Profile default.** Should DrorControl suggest Constrained-ELRS on its own when it sees
-   the ELRS STATUSTEXT, or only when the operator picks it? Suggested answer: suggest, and
-   never switch silently.
+| # | Question | Decision | Consequence |
+|---|----------|----------|-------------|
+| 1 | May DrorControl act as the RC transmitter (Step 4b)? | **Yes, as an option, at a much later stage** | 4b leaves Phase 4 and moves to *later* (after 1.0; parity row EXT-004). The draft hazards in [§7](#7-safety) stay drafts until then; the safety review and an ADR come before any code. Step 4a (receive only) stays in Phase 4. |
+| 2 | Crossfire hardware on the bench | **Later** | Crossfire stays "CRSF-compatible, not hardware-verified": the codec and profiles follow the CRSF format, and bench checks 8–12 run on ELRS only until a Crossfire module is available. |
+| 3 | Suggest Constrained-ELRS when an ELRS link is detected | **Yes, behind a setting** | A setting `suggest-link-profile` in the settings file (`dc-cli settings`), **off by default** like the other opt-in settings. On, DrorControl suggests the profile when it sees the ELRS/CRSF "Link rate" STATUSTEXT or a link slower than the current profile needs; it never switches without the operator. Built in Step 1. |
 
 ## 9. References
 
