@@ -25,10 +25,11 @@ for 14 days, the macOS package for 30.
 Check that the build is the one you meant: `dc-cli about` prints the commit it was built
 from.
 
-**Build for the next Windows bench test (2026-10-13):** full `ci` run 68 on `main`, commit
-`449da35`, every job green (Windows checks and tests included). Actions → `ci` → run #68 →
-artifact `dc-cli-windows-x86_64` (kept until 2026-10-27; after that, start a new full run).
-`dc-cli.exe about` must name `449da35`.
+**Build for the next Windows bench test (2026-10-15):** full `ci` run 74 on `main`, commit
+`bfbe442`, every job green (Windows checks and tests, both SITL suites). Actions → `ci` →
+run #74 → artifact `dc-cli-windows-x86_64` (kept until 2026-10-29; after that, start a new
+full run). `dc-cli.exe about` must name `bfbe442`. It has the fixes for the 2026-10-13
+bench findings and everything under "Also new: 2026-10-14".
 
 ## Before you start
 
