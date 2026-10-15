@@ -2417,3 +2417,60 @@ async fn constrained_elrs_profile_fits_the_simulated_elrs_link() {
     drop(sitl);
     drop(elrs);
 }
+
+/// Plan 08 §4.3 / plan 09 Step 2: 15 % frame loss on the link raises a LINK DEGRADED caution
+/// (heartbeat still CONNECTED); with the loss gone it clears.
+#[tokio::test(flavor = "multi_thread")]
+async fn packet_loss_raises_and_clears_link_degraded() {
+    use dc_core::{AlertLevel, LinkQualityState};
+
+    let Some(cfg) = SitlConfig::copter_or_skip() else {
+        return;
+    };
+    let sitl = Sitl::start(&cfg).unwrap();
+    let chaos = ChaosProxy::start(sitl.addr(), ChaosConfig::default())
+        .await
+        .unwrap();
+    let core = core_on(chaos.addr()).await;
+    let mut events = core.events();
+    assert_eq!(
+        core.wait_for_vehicle(Duration::from_secs(60)).await,
+        Some(1)
+    );
+    let alert = |events: &mut tokio::sync::broadcast::Receiver<CoreEvent>, prefix: &'static str| {
+        let mut rx = events.resubscribe();
+        async move {
+            tokio::time::timeout(Duration::from_secs(30), async {
+                loop {
+                    if let Ok(CoreEvent::Alert { level, text, .. }) = rx.recv().await
+                        && text.starts_with(prefix)
+                    {
+                        return (level, text);
+                    }
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("no alert {prefix:?} within 30 s"))
+        }
+    };
+    // A clean link first: GOOD once the 10 s window has frames.
+    tokio::time::sleep(Duration::from_secs(12)).await;
+    assert_eq!(core.link_quality(1).state, LinkQualityState::Good);
+
+    let degraded = alert(&mut events, "LINK DEGRADED");
+    chaos.set(ChaosConfig {
+        drop: 0.15,
+        seed: 0x10_55,
+        ..Default::default()
+    });
+    let (level, text) = degraded.await;
+    assert_eq!(level, AlertLevel::Caution, "{text}");
+    assert!(text.contains("loss"), "{text}");
+    assert_eq!(core.link_quality(1).state, LinkQualityState::Degraded);
+    assert_eq!(core.vehicle_link(1), Some(VehicleLink::Connected));
+
+    let recovered = alert(&mut events, "Link quality good again");
+    chaos.set(ChaosConfig::default());
+    assert_eq!(recovered.await.0, AlertLevel::Advisory);
+    assert_eq!(core.link_quality(1).state, LinkQualityState::Good);
+}

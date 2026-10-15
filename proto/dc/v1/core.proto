@@ -157,6 +157,21 @@ message Vehicle {
   optional AutopilotVersionState autopilot_version = 21;
   // Frames received and lost per component of this system (MAVLink sequence numbers).
   repeated StreamQualityState streams = 22;
+  // Link quality (plan 08 §4.3 DEGRADED): autopilot packet loss over 10 s and RC link
+  // quality when reported. Informs only; command delivery follows `link`.
+  optional LinkQualityState link_quality = 23;
+}
+
+message LinkQualityState {
+  enum State {
+    UNKNOWN = 0;
+    GOOD = 1;
+    DEGRADED = 2;
+  }
+  State state = 1;
+  optional float loss_pct = 2;
+  optional float rc_lq_pct = 3;
+  repeated string reasons = 4;
 }
 
 message StreamQualityState {

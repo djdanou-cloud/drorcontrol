@@ -154,6 +154,17 @@ pub fn vehicle_with_health(core: &Core, v: &VehicleState, now: Instant) -> pb::V
     if let Some(l) = core.vehicle_link(v.sysid) {
         pb.link = link_to_pb(l) as i32;
     }
+    let q = core.link_quality(v.sysid);
+    pb.link_quality = Some(pb::LinkQualityState {
+        state: match q.state {
+            dc_core::LinkQualityState::Unknown => pb::link_quality_state::State::Unknown,
+            dc_core::LinkQualityState::Good => pb::link_quality_state::State::Good,
+            dc_core::LinkQualityState::Degraded => pb::link_quality_state::State::Degraded,
+        } as i32,
+        loss_pct: q.loss_pct,
+        rc_lq_pct: q.rc_lq_pct,
+        reasons: q.reasons,
+    });
     if let (Some(rc), Some(sig)) = (pb.rc.as_mut(), core.rc_signal(v.sysid)) {
         use pb::rc_state::SignalKind as K;
         rc.kind = match sig.kind {
@@ -226,6 +237,7 @@ pub fn vehicle_to_pb(v: &VehicleState, now: Instant) -> pb::Vehicle {
         nav: None,
         link: 0,
         streams: Vec::new(),
+        link_quality: None,
         traffic: v
             .traffic
             .values()

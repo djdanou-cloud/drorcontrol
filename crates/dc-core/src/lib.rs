@@ -66,10 +66,12 @@ pub use vehicle::{NavHealth, NavThresholds, PositionTrust, TESTED_FIRMWARE};
 
 pub mod annunciator;
 mod link_profiles;
+mod link_quality;
 mod parameters;
 mod replay;
 mod vehicle_changes;
 pub use link_profiles::{LinkProfile, LinkTarget, RateOutcome, RateResult, StreamReport};
+pub use link_quality::{LinkQuality, LinkQualityState, LinkQualityThresholds};
 pub use parameters::{
     ARMED_WRITE_WARNING, ArmedWrite, PARAM_HEARTBEAT_MAX_AGE, ParamOperationError, ParamReport,
     ParamRisk, ParamWriteResult, RcSignal, parameter_risk,
@@ -758,6 +760,8 @@ pub struct Core {
     link_heard: link_profiles::LinkHeard,
     /// Terrain answers being sent: (link, lat, lon, spacing, mask).
     terrain_in_flight: Arc<std::sync::Mutex<std::collections::HashSet<TerrainAnswer>>>,
+    /// Last link-quality state per vehicle, to alert on changes.
+    link_quality_seen: link_quality::LinkQualitySeen,
     /// Last stream-rate request outcome per (vehicle, link).
     stream_reports: Arc<std::sync::Mutex<HashMap<(u8, LinkId), StreamReport>>>,
 }
@@ -810,6 +814,7 @@ impl Core {
             link_heard: Arc::default(),
             stream_reports: Arc::default(),
             terrain_in_flight: Arc::default(),
+            link_quality_seen: Arc::default(),
         };
 
         // Recorder: lossless, on a blocking thread so disk latency never touches routing.
@@ -887,9 +892,14 @@ impl Core {
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(Duration::from_millis(100));
             let mut last: BTreeMap<u8, (VehicleLink, Instant)> = BTreeMap::new();
+            let mut quality_checked = Instant::now();
             loop {
                 tick.tick().await;
                 let now = Instant::now();
+                if now.duration_since(quality_checked) >= Duration::from_secs(1) {
+                    quality_checked = now;
+                    c.check_link_quality(now);
+                }
                 for v in c.fleet().vehicles() {
                     let Some(hb) = v.heartbeat.as_ref() else {
                         continue;

@@ -6823,7 +6823,10 @@ fn print_fleet(core: &Core, units: Units) {
             });
             format!("rc {what} {:.0}%{link}", s.pct)
         });
-        let parts: Vec<String> = [hb, att, pos, bat, fence, mission, loss, rc, fw]
+        let q = core.link_quality(v.sysid);
+        let degraded = (q.state == dc_core::LinkQualityState::Degraded)
+            .then(|| format!("LINK DEGRADED ({})", q.reasons.join(", ")));
+        let parts: Vec<String> = [hb, att, pos, bat, fence, mission, loss, rc, degraded, fw]
             .into_iter()
             .flatten()
             .collect();

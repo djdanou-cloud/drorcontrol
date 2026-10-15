@@ -33,6 +33,7 @@ pub fn classify(text: &str) -> Effect {
     match text {
         "Back inside the fence" => return Effect::Clear("FENCE".into()),
         "Position good again" => return Effect::Clear("POSITION".into()),
+        "Link quality good again" => return Effect::Clear("LINK QUALITY".into()),
         _ => {}
     }
     if let Some(rest) = text.strip_prefix("Traffic clear: ") {
@@ -47,6 +48,9 @@ pub fn classify(text: &str) -> Effect {
     }
     if text.starts_with("POSITION ") {
         return Effect::Condition("POSITION".into());
+    }
+    if text.starts_with("LINK DEGRADED") {
+        return Effect::Condition("LINK QUALITY".into());
     }
     let end = [text.find(" — "), text.find(':')]
         .into_iter()
