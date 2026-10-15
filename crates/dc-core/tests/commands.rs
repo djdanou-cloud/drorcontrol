@@ -532,3 +532,70 @@ async fn mission_upload_waits_for_the_vehicle_to_finish_booting() {
     );
     let _ = stop.send(true);
 }
+
+/// ADR-0013 item 6 through the core: the opt-in settings reach the command policy, a reason
+/// is still required, reset stays refused while armed, and settings and uses are audited.
+#[tokio::test(flavor = "multi_thread")]
+async fn force_arm_and_reset_settings_give_a_single_confirmation() {
+    use dc_core::{Simplified, VehicleChange};
+    let log = tmp("audit-simple");
+    let _ = std::fs::remove_file(&log);
+    let (core, v, stop) = setup(CoreConfig {
+        audit_log: Some(log.clone()),
+        ..Default::default()
+    })
+    .await;
+    core.set_vehicle_name(1, "WHOOP-3");
+    assert_eq!(core.vehicle_changes().simplified(), Simplified::default());
+    let card = |r: Request| match r {
+        Request::Confirm(c) => c,
+        r => panic!("{r:?}"),
+    };
+    // Off: force-arm needs the typed name.
+    let c = card(core.request_command(1, Command::ForceArm).await.unwrap());
+    assert_eq!(c.challenge.as_deref(), Some("WHOOP-3"));
+
+    core.set_vehicle_change(VehicleChange::SimpleForceArm, true);
+    core.set_vehicle_change(VehicleChange::SimpleParamReset, true);
+    let c = card(core.request_command(1, Command::ForceArm).await.unwrap());
+    assert!(c.challenge.is_none() && c.reason_required && c.single_step);
+    assert_eq!(
+        core.submit_command(1, Command::ForceArm, Approval::Confirmed(c.token))
+            .await
+            .unwrap_err(),
+        Refusal::ReasonRequired
+    );
+    let c = card(core.request_command(1, Command::ForceArm).await.unwrap());
+    core.submit_command(
+        1,
+        Command::ForceArm,
+        Approval::Reasoned {
+            token: c.token,
+            reason: "bench test, no props".into(),
+        },
+    )
+    .await
+    .unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(v.lock().unwrap().armed);
+    // Armed: reset is still refused, setting or not (SR-08).
+    assert!(matches!(
+        core.request_command(1, Command::ParamReset).await,
+        Err(Refusal::Precondition(_))
+    ));
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let text = std::fs::read_to_string(&log).unwrap();
+    audit::verify(text.as_bytes()).expect("valid chain");
+    for want in [
+        "setting simple-force-arm turned ON",
+        "setting simple-param-reset turned ON",
+        "confirmation issued for FORCE ARM (class D)",
+        "refused FORCE ARM: a reason is required",
+        "accepted FORCE ARM (class C, setting simple-force-arm), reason: bench test, no props",
+        "refused request RESET PARAMETERS: not allowed now",
+    ] {
+        assert!(text.contains(want), "audit log lacks {want:?}:\n{text}");
+    }
+    let _ = stop.send(true);
+}

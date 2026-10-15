@@ -9,6 +9,11 @@
 //! * [`VehicleChange::FenceRallyUpload`]: geofence and rally point upload, on the ground and
 //!   in flight.
 //! * [`VehicleChange::LogErase`]: erasing every dataflash log (`LOG_ERASE`).
+//! * [`VehicleChange::SimpleForceArm`] and [`VehicleChange::SimpleParamReset`] (ADR-0013
+//!   item 6): a single confirmation for force-arm (class C instead of typed text; a reason is
+//!   still required) and for parameter reset (the card without the slide stage). Off, both
+//!   keep their stricter confirmation; they never lift a lockout (reset is refused while
+//!   armed). Applied by the command policy ([`protocols::command::Simplified`]).
 //!
 //! With a setting on, an action on an armed vehicle still needs the operator's
 //! acknowledgement of an in-flight warning ([`ArmedWrite::Acknowledged`]), every upload is
@@ -33,14 +38,20 @@ pub enum VehicleChange {
     FenceRallyUpload,
     /// Erase every dataflash log on the vehicle.
     LogErase,
+    /// Force-arm with one confirmation and a reason, instead of typed text and a reason.
+    SimpleForceArm,
+    /// Parameter reset to defaults with one confirmation, without the slide stage.
+    SimpleParamReset,
 }
 
 impl VehicleChange {
     /// Every setting, in display order.
-    pub const ALL: [VehicleChange; 3] = [
+    pub const ALL: [VehicleChange; 5] = [
         VehicleChange::ArmedMissionUpload,
         VehicleChange::FenceRallyUpload,
         VehicleChange::LogErase,
+        VehicleChange::SimpleForceArm,
+        VehicleChange::SimpleParamReset,
     ];
 
     /// Name in settings files and on the command line.
@@ -49,6 +60,8 @@ impl VehicleChange {
             VehicleChange::ArmedMissionUpload => "armed-mission-upload",
             VehicleChange::FenceRallyUpload => "fence-rally-upload",
             VehicleChange::LogErase => "log-erase",
+            VehicleChange::SimpleForceArm => "simple-force-arm",
+            VehicleChange::SimpleParamReset => "simple-param-reset",
         }
     }
 
@@ -63,6 +76,8 @@ impl VehicleChange {
             VehicleChange::ArmedMissionUpload => "Mission upload while armed or flying",
             VehicleChange::FenceRallyUpload => "Geofence and rally point upload",
             VehicleChange::LogErase => "Erase logs on the vehicle",
+            VehicleChange::SimpleForceArm => "Force-arm with a single confirmation",
+            VehicleChange::SimpleParamReset => "Parameter reset with a single confirmation",
         }
     }
 
@@ -84,6 +99,17 @@ impl VehicleChange {
                 "Lets you erase every dataflash log on the vehicle. Erased logs cannot be \
                  recovered: anything needed to investigate an incident is lost."
             }
+            VehicleChange::SimpleForceArm => {
+                "Lets you force-arm with one confirmation and a reason, without typing the \
+                 vehicle name. Force-arm skips the autopilot's pre-arm checks: a vehicle with a \
+                 bad compass, GPS, battery or calibration can arm and fly out of control. The \
+                 reason is still recorded."
+            }
+            VehicleChange::SimpleParamReset => {
+                "Lets you reset every parameter to its default with one confirmation. A reset \
+                 erases the tuning, calibration, failsafes and geofence settings; the vehicle \
+                 is not safe to fly until it is set up again. It stays refused while armed."
+            }
         }
     }
 }
@@ -104,6 +130,10 @@ pub struct VehicleChangeSettings {
     pub fence_rally_upload: bool,
     /// [`VehicleChange::LogErase`].
     pub log_erase: bool,
+    /// [`VehicleChange::SimpleForceArm`].
+    pub simple_force_arm: bool,
+    /// [`VehicleChange::SimpleParamReset`].
+    pub simple_param_reset: bool,
 }
 
 impl VehicleChangeSettings {
@@ -113,6 +143,8 @@ impl VehicleChangeSettings {
             VehicleChange::ArmedMissionUpload => self.armed_mission_upload,
             VehicleChange::FenceRallyUpload => self.fence_rally_upload,
             VehicleChange::LogErase => self.log_erase,
+            VehicleChange::SimpleForceArm => self.simple_force_arm,
+            VehicleChange::SimpleParamReset => self.simple_param_reset,
         }
     }
 
@@ -122,6 +154,17 @@ impl VehicleChangeSettings {
             VehicleChange::ArmedMissionUpload => self.armed_mission_upload = on,
             VehicleChange::FenceRallyUpload => self.fence_rally_upload = on,
             VehicleChange::LogErase => self.log_erase = on,
+            VehicleChange::SimpleForceArm => self.simple_force_arm = on,
+            VehicleChange::SimpleParamReset => self.simple_param_reset = on,
+        }
+    }
+
+    /// The command-policy part ([`VehicleChange::SimpleForceArm`],
+    /// [`VehicleChange::SimpleParamReset`]).
+    pub fn simplified(&self) -> protocols::command::Simplified {
+        protocols::command::Simplified {
+            force_arm: self.simple_force_arm,
+            param_reset: self.simple_param_reset,
         }
     }
 
@@ -152,8 +195,9 @@ impl VehicleChangeSettings {
 
     /// The settings file text, each setting with its warning as a comment.
     pub fn to_text(&self) -> String {
-        let mut out =
-            String::from("# DrorControl vehicle-change settings: all off by default (ADR-0012).\n");
+        let mut out = String::from(
+            "# DrorControl vehicle-change settings: all off by default (ADR-0012, ADR-0013).\n",
+        );
         for c in VehicleChange::ALL {
             out.push_str(&format!(
                 "\n# {}: {}\n{} = {}\n",
@@ -501,6 +545,18 @@ mod tests {
         assert!(VehicleChangeSettings::parse("log-erase").is_err());
         let on = VehicleChangeSettings::parse("  log-erase=true # erase\n").unwrap();
         assert!(on.log_erase && !on.fence_rally_upload);
+        let simple = VehicleChangeSettings::parse("simple-force-arm = true").unwrap();
+        assert_eq!(
+            simple.simplified(),
+            protocols::command::Simplified {
+                force_arm: true,
+                param_reset: false
+            }
+        );
+        assert_eq!(
+            VehicleChangeSettings::default().simplified(),
+            Default::default()
+        );
     }
 
     #[test]

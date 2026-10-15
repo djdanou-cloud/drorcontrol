@@ -57,11 +57,12 @@ bench findings and everything under "Also new: 2026-10-14".
 
 ## Also new: changing the vehicle behind settings (2026-10-13)
 
-Three settings, all **off** until you turn them on; each shows its danger when you do:
+Five settings, all **off** until you turn them on; each shows its danger when you do:
 
 ```
 dc-cli settings                                  # show them and where the file is
-dc-cli settings enable fence-rally-upload        # armed-mission-upload, log-erase
+dc-cli settings enable fence-rally-upload        # armed-mission-upload, log-erase,
+                                                 # simple-force-arm, simple-param-reset
 dc-cli settings disable fence-rally-upload
 ```
 

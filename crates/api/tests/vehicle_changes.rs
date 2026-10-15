@@ -111,7 +111,7 @@ async fn settings_off_refuse_and_send_nothing() {
         .await
         .unwrap()
         .into_inner();
-    assert_eq!(s.settings.len(), 3);
+    assert_eq!(s.settings.len(), 5);
     assert!(s.settings.iter().all(|s| !s.on && s.warning.len() > 40));
     for kind in [pb::ItemKind::Fence, pb::ItemKind::Rally] {
         let e = c.upload_items(upload(kind, true)).await.unwrap_err();
@@ -155,6 +155,8 @@ async fn armed_vehicle_gets_the_warning_first() {
         armed_mission_upload: true,
         fence_rally_upload: true,
         log_erase: true,
+        simple_force_arm: true,
+        simple_param_reset: true,
     };
     let (mut c, armed, changes) = client(all_on).await;
     armed.store(true, Ordering::Relaxed);

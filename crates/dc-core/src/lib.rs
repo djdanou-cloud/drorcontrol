@@ -41,7 +41,7 @@ use protocols::audit::{self, AuditLog};
 /// Command types for [`Core::request_command`] and [`Core::submit_command`].
 pub use protocols::command::{
     Alert, AlertLevel, Approval, Command, CommandId, CommandState, CommandStatus, PolicyConfig,
-    Refusal, Request, VehicleFacts,
+    Refusal, Request, Simplified, VehicleFacts,
 };
 use protocols::command::{AuditEvent, CommandPolicy, LinkInfo, LinkState, Target};
 pub use protocols::log_transfer::LogEntry;
@@ -1109,9 +1109,12 @@ impl Core {
     pub async fn request_command(&self, sysid: u8, command: Command) -> Result<Request, Refusal> {
         let now = Instant::now();
         let (facts, link) = (self.facts(sysid), self.link_info(sysid, now));
-        let r = self
-            .policy()
-            .request(Self::target(sysid), command, &facts, link, now);
+        let simplified = self.vehicle_changes().simplified();
+        let r = {
+            let mut p = self.policy();
+            p.set_simplified(simplified);
+            p.request(Self::target(sysid), command, &facts, link, now)
+        };
         self.deliver(Vec::new(), Vec::new()).await;
         r
     }
@@ -1125,9 +1128,12 @@ impl Core {
     ) -> Result<CommandId, Refusal> {
         let now = Instant::now();
         let (facts, link) = (self.facts(sysid), self.link_info(sysid, now));
-        let r = self
-            .policy()
-            .submit(Self::target(sysid), command, approval, &facts, link, now);
+        let simplified = self.vehicle_changes().simplified();
+        let r = {
+            let mut p = self.policy();
+            p.set_simplified(simplified);
+            p.submit(Self::target(sysid), command, approval, &facts, link, now)
+        };
         match r {
             Ok((id, out, changed)) => {
                 self.deliver(out, changed).await;

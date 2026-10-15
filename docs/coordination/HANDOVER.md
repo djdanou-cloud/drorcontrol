@@ -81,9 +81,11 @@ and the code are newer. Where either disagrees with an owner instruction, the ow
       reductions in future-upgrades §3); video spike accepted on condition of a no-hold
       decode path in Phase 1; packaging exit criterion restated for ad-hoc signing;
       parameter metadata downloaded at run time (nothing GPL-derived shipped); force-arm
-      and parameter reset behind opt-in settings, off by default.
+      and parameter reset behind opt-in settings, off by default (built 2026-10-15:
+      `simple-force-arm`, `simple-param-reset`).
     * Unchanged (not decided): ADR-0011 D2–D5 (two-stage in-flight disarm, reboot,
-      termination; reboot blocked while armed; props-off for motor test), force-arm typed.
+      termination; reboot blocked while armed; props-off for motor test); force-arm typed
+      unless `simple-force-arm` is on.
     * Closed source, clean-room; MAVLink XML/generated code and pymavlink approved;
       permissive licences (BSD/MIT/Apache-2.0) approved; prefer mature crates.
     * Trademark deferred; font Inter (OFL); Hebrew/RTL P3; no Mac App Store build.
@@ -250,7 +252,6 @@ and the code are newer. Where either disagrees with an owner instruction, the ow
 |------|-------|-------------|
 | Mac session, remaining: T0-05 hardware matrix, T0-10 "Open Anyway" step, T0-09 re-run once a no-hold decode path exists (M1 results of 2026-10-11 are in the spike RESULTS.md files) | Mac runbook | Owner (hardware) |
 | Windows bench test with a 4.6.3 flight controller | `docs/dev/windows-bench-test.md` | Owner (hardware) |
-| Force-arm and parameter reset: decided 2026-10-15 (ADR-0013 item 6: opt-in settings, off by default); implementation pending | ADR-0013 | — (agent) |
 
 ## 7. Next tasks, in priority order
 
@@ -318,6 +319,14 @@ upload and erase (the API has none yet).
     GetVehicleChangeSettings behind the daemon's settings. SITL now 21 scenarios. Next:
     Phase 1 bridges (annunciator, preflight, settings screen, warning pop-ups); MAVLink 2
     signing on links needs an owner decision (SETUP_SIGNING writes the vehicle's key).
+13. **Force-arm and reset settings (2026-10-15, local commit, not yet pushed):** ADR-0013
+    item 6. Two more opt-in settings, off by default: `simple-force-arm` (class C plus a
+    required reason instead of typed name and reason) and `simple-param-reset` (card only,
+    `Confirmation::single_step`); `protocols::command::Simplified`, applied by
+    `Core::request_command`/`submit_command` from the vehicle-change settings; a token
+    keeps the stricter of its issue-time and current class; reset still refused while
+    armed. New `Approval::Reasoned`, `Confirmation::{reason_required, single_step}`.
+    `dc-cli` has no force-arm or reset command yet: the Phase 1 UI uses these fields.
 
 ## 8. Where things are (code map)
 

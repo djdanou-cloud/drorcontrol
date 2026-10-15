@@ -55,7 +55,7 @@ We will classify commands by their consequence in flight, not by how dramatic th
 |-------|----------|------------------------------------------------------------------------|
 | **B — single action** | **All mode changes** (`SetMode`, any mode), **RTL**, **Land**, **Arm**, **Takeoff**, **Reposition / guided go-to**, **Motor test** (bench) | One action fires the command. No hold timer, no card, no animation gate: it is sent when the input event arrives. The vehicle state lockouts still apply in the core. Motor test still needs the props-off attestation and a known disarmed state. |
 | **C — two-stage** | **In-flight motor disarm** (`Disarm`), **emergency motor termination** (`ForceDisarm`), **autopilot reboot**; parameter reset, mission upload while armed and firmware flash (interpretation 3) | Stage 1 is a slide (or press-and-hold). Stage 2 is the identity card with an explicit confirm. There is no typed text. The single-use token is bound to the vehicle and the exact command and lasts 5 s. |
-| **D — typed** | Force-arm (bypasses pre-arm checks), disabling arming checks or failsafes | Class C plus a typed vehicle name and a logged reason. |
+| **D — typed** | Force-arm (bypasses pre-arm checks), disabling arming checks or failsafes | Class C plus a typed vehicle name and a logged reason. With the opt-in setting `simple-force-arm` (off by default, [ADR-0013](0013-phase-0-gate-decisions.md) item 6) force-arm is class C plus a logged reason; with `simple-param-reset` parameter reset is confirmed on the card alone. |
 
 **Command lifetimes** (ADR-0009 delivery, now per class of command):
 

@@ -7,6 +7,9 @@
 //!   [`PolicyConfig::token_ttl`], bound to the vehicle and the exact command. Class D also
 //!   needs the typed challenge phrase and a reason (logged). Scripts and API clients cannot
 //!   skip the request/confirm step because the check lives here, not in the UI.
+//! * **Opt-in single confirmation** ([`Simplified`], ADR-0013 item 6, off by default): with
+//!   it on, force-arm is class C and still needs a reason, and parameter reset is confirmed
+//!   on the card alone ([`Confirmation::single_step`]). Lockouts are unchanged.
 //! * **Arguments are validated** (finite, in range) and **vehicle-state lockouts** apply
 //!   (motor test only when known disarmed and props-off attested; parameter reset and reboot
 //!   not while armed). They use the last-known state.
@@ -151,7 +154,8 @@ impl Command {
     /// action (class B) because confirmation latency is itself a flight hazard; two-stage
     /// confirmation is reserved for irreversible terminal actions (in-flight disarm,
     /// autopilot reboot, emergency motor termination). Force-arm and parameter reset are
-    /// ground-only actions and keep their confirmation pending owner review.
+    /// ground-only actions and keep their stricter confirmation unless the owner's opt-in
+    /// [`Simplified`] settings lower it (ADR-0013 item 6; [`CommandPolicy::class_of`]).
     pub fn class(&self) -> Class {
         match self {
             Command::ForceArm => Class::D,
@@ -564,6 +568,12 @@ pub struct Confirmation {
     pub summary: String,
     /// Class D: the exact phrase the operator must type.
     pub challenge: Option<String>,
+    /// A reason must come with the approval ([`Approval::Reasoned`] or
+    /// [`Approval::Typed`]); it is logged.
+    pub reason_required: bool,
+    /// A [`Simplified`] setting is on for this command: the client shows the confirmation
+    /// card alone, without the slide or press-and-hold stage.
+    pub single_step: bool,
     /// When the token stops being valid.
     pub expires: Instant,
 }
@@ -587,6 +597,14 @@ pub enum Approval {
     None,
     /// Class C.
     Confirmed(Token),
+    /// Class C that needs a reason ([`Confirmation::reason_required`]): force-arm with
+    /// [`Simplified::force_arm`] on.
+    Reasoned {
+        /// Token from the request.
+        token: Token,
+        /// Why (logged).
+        reason: String,
+    },
     /// Class D.
     Typed {
         /// Token from the request.
@@ -686,6 +704,12 @@ pub struct Alert {
 }
 
 impl Command {
+    /// A reason is logged with every approval, whatever the class: force-arm disables the
+    /// autopilot's safety checks (ADR-0011, ADR-0013 item 6).
+    pub fn needs_reason(&self) -> bool {
+        matches!(self, Command::ForceArm)
+    }
+
     /// Flight commands change what the aircraft does; an unconfirmed one means the operator
     /// may not have control (rated Critical, hazard log H9/H13, SR-05).
     fn is_flight_command(&self) -> bool {
@@ -812,8 +836,39 @@ pub struct AuditEvent {
 struct Issued {
     target: Target,
     command: Command,
+    class: Class,
     expires: Instant,
     challenge: Option<String>,
+}
+
+/// Owner opt-in settings that lower the confirmation of two ground actions (ADR-0013 item 6);
+/// both off by default. They never change a lockout: parameter reset stays refused while
+/// armed (SR-08).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Simplified {
+    /// Force-arm is class C (one confirmation) instead of D; a reason is still required.
+    pub force_arm: bool,
+    /// Parameter reset is confirmed on the card alone, without the slide stage.
+    pub param_reset: bool,
+}
+
+impl Simplified {
+    /// Name of the setting that applies to `command`, if it is on.
+    pub fn setting_for(&self, command: &Command) -> Option<&'static str> {
+        match command {
+            Command::ForceArm if self.force_arm => Some("simple-force-arm"),
+            Command::ParamReset if self.param_reset => Some("simple-param-reset"),
+            _ => None,
+        }
+    }
+
+    /// The class `command` needs with these settings.
+    pub fn class(&self, command: &Command) -> Class {
+        match command {
+            Command::ForceArm if self.force_arm => Class::C,
+            c => c.class(),
+        }
+    }
 }
 
 struct InFlight {
@@ -850,6 +905,7 @@ pub struct CommandPolicy {
     next_token: u64,
     next_id: u64,
     audit: Vec<AuditEvent>,
+    simplified: Simplified,
 }
 
 impl CommandPolicy {
@@ -864,7 +920,31 @@ impl CommandPolicy {
             next_token: 1,
             next_id: 1,
             audit: Vec::new(),
+            simplified: Simplified::default(),
         }
+    }
+
+    /// The opt-in confirmation settings in force.
+    pub fn simplified(&self) -> Simplified {
+        self.simplified
+    }
+
+    /// Change the opt-in confirmation settings. A token already issued keeps the class it was
+    /// issued with, unless the class is now stricter: the stricter one applies.
+    pub fn set_simplified(&mut self, s: Simplified) {
+        self.simplified = s;
+    }
+
+    /// The class `command` needs now ([`Command::class`] unless a [`Simplified`] setting
+    /// lowers it).
+    pub fn class_of(&self, command: &Command) -> Class {
+        self.simplified.class(command)
+    }
+
+    fn setting_note(&self, command: &Command) -> String {
+        self.simplified
+            .setting_for(command)
+            .map_or(String::new(), |k| format!(", setting {k}"))
     }
 
     /// Configuration.
@@ -929,7 +1009,8 @@ impl CommandPolicy {
             return Err(r);
         }
         self.tokens.retain(|_, t| t.expires > now);
-        let class = command.class();
+        let class = self.class_of(&command);
+        let note = self.setting_note(&command);
         if class <= Class::B {
             self.log(
                 now,
@@ -961,11 +1042,14 @@ impl CommandPolicy {
             target.sysid
         );
         let expires = now + self.cfg.token_ttl;
+        let single_step = self.simplified.setting_for(&command).is_some();
+        let reason_required = command.needs_reason();
         self.tokens.insert(
             token,
             Issued {
                 target,
                 command,
+                class,
                 expires,
                 challenge: challenge.clone(),
             },
@@ -974,13 +1058,15 @@ impl CommandPolicy {
             now,
             target.sysid,
             None,
-            format!("confirmation issued for {label} (class {class:?})"),
+            format!("confirmation issued for {label} (class {class:?}{note})"),
         );
         Ok(Request::Confirm(Confirmation {
             token,
             class,
             summary,
             challenge,
+            reason_required,
+            single_step,
             expires,
         }))
     }
@@ -998,21 +1084,27 @@ impl CommandPolicy {
     ) -> Result<(CommandId, Vec<Outgoing>, Vec<CommandStatus>), Refusal> {
         let label = self.label(target.sysid, &command);
         let checked = self.check_approval(target, &command, &approval, facts, now);
-        if let Err(r) = checked {
-            self.log(now, target.sysid, None, format!("refused {label}: {r}"));
-            return Err(r);
-        }
+        let class = match checked {
+            Ok(c) => c,
+            Err(r) => {
+                self.log(now, target.sysid, None, format!("refused {label}: {r}"));
+                return Err(r);
+            }
+        };
         let id = CommandId(self.next_id);
         self.next_id += 1;
         let reason = match &approval {
-            Approval::Typed { reason, .. } => format!(", reason: {reason}"),
+            Approval::Typed { reason, .. } | Approval::Reasoned { reason, .. } => {
+                format!(", reason: {}", reason.trim())
+            }
             _ => String::new(),
         };
+        let note = self.setting_note(&command);
         self.log(
             now,
             target.sysid,
             Some(id),
-            format!("accepted {label} (class {:?}){reason}", command.class()),
+            format!("accepted {label} (class {class:?}{note}){reason}"),
         );
 
         // Supersede older live commands in the same group on the same vehicle.
@@ -1053,6 +1145,7 @@ impl CommandPolicy {
         Ok((id, out, changed))
     }
 
+    /// The approval is valid for `command`: returns the class it was checked at.
     fn check_approval(
         &mut self,
         target: Target,
@@ -1060,17 +1153,18 @@ impl CommandPolicy {
         approval: &Approval,
         facts: &VehicleFacts,
         now: Instant,
-    ) -> Result<(), Refusal> {
+    ) -> Result<Class, Refusal> {
         command.validate()?;
         command.preconditions(facts)?;
-        let class = command.class();
-        let token = match (class, approval) {
-            (Class::A | Class::B, _) => return Ok(()),
-            (_, Approval::None) => return Err(Refusal::ConfirmationRequired),
-            (Class::C, Approval::Confirmed(t)) => *t,
-            (Class::C, Approval::Typed { token, .. }) => *token,
-            (Class::D, Approval::Confirmed(_)) => return Err(Refusal::TypedMismatch),
-            (Class::D, Approval::Typed { token, .. }) => *token,
+        let class = self.class_of(command);
+        if class <= Class::B {
+            return Ok(class);
+        }
+        let token = match approval {
+            Approval::None => return Err(Refusal::ConfirmationRequired),
+            Approval::Confirmed(token)
+            | Approval::Reasoned { token, .. }
+            | Approval::Typed { token, .. } => *token,
         };
         // Single use: the token is consumed by any attempt to use it.
         let issued = self
@@ -1086,15 +1180,26 @@ impl CommandPolicy {
         if &issued.command != command {
             return Err(Refusal::BadToken("issued for a different command".into()));
         }
-        if let (Class::D, Approval::Typed { text, reason, .. }) = (class, approval) {
-            if Some(text.trim()) != issued.challenge.as_deref() {
-                return Err(Refusal::TypedMismatch);
+        // A setting turned off after the request makes the class stricter again; turning
+        // one on never lowers a token already issued.
+        let class = class.max(issued.class);
+        let reason = match approval {
+            Approval::Typed { reason, .. } | Approval::Reasoned { reason, .. } => reason.trim(),
+            _ => "",
+        };
+        match (class, approval) {
+            (Class::D, Approval::Typed { text, .. }) => {
+                if issued.challenge.is_none() || Some(text.trim()) != issued.challenge.as_deref() {
+                    return Err(Refusal::TypedMismatch);
+                }
             }
-            if reason.trim().is_empty() {
-                return Err(Refusal::ReasonRequired);
-            }
+            (Class::D, _) => return Err(Refusal::TypedMismatch),
+            _ => {}
         }
-        Ok(())
+        if (class == Class::D || command.needs_reason()) && reason.is_empty() {
+            return Err(Refusal::ReasonRequired);
+        }
+        Ok(class)
     }
 
     fn interval_for(&self, link: LinkState, previous: Option<Duration>) -> Duration {

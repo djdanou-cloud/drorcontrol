@@ -434,7 +434,8 @@ enum SettingsCmd {
     Show,
     /// Turn a setting on, after showing its danger and asking once.
     Enable {
-        /// armed-mission-upload, fence-rally-upload or log-erase.
+        /// armed-mission-upload, fence-rally-upload, log-erase, simple-force-arm or
+        /// simple-param-reset.
         name: String,
         /// Turn it on without asking (scripts).
         #[arg(long)]
@@ -445,7 +446,8 @@ enum SettingsCmd {
     },
     /// Turn a setting off.
     Disable {
-        /// armed-mission-upload, fence-rally-upload or log-erase.
+        /// armed-mission-upload, fence-rally-upload, log-erase, simple-force-arm or
+        /// simple-param-reset.
         name: String,
         /// Hash-chained audit log to record the change in.
         #[arg(long, default_value = "dc-audit.log")]

@@ -3108,7 +3108,7 @@ Usage: dc-cli settings enable [OPTIONS] <NAME>
 
 Arguments:
   <NAME>
-          armed-mission-upload, fence-rally-upload or log-erase
+          armed-mission-upload, fence-rally-upload, log-erase, simple-force-arm or simple-param-reset
 
 Options:
       --sysid <SYSID>
@@ -3155,7 +3155,7 @@ Usage: dc-cli settings disable [OPTIONS] <NAME>
 
 Arguments:
   <NAME>
-          armed-mission-upload, fence-rally-upload or log-erase
+          armed-mission-upload, fence-rally-upload, log-erase, simple-force-arm or simple-param-reset
 
 Options:
       --audit <AUDIT>

@@ -285,6 +285,120 @@ fn class_d_needs_the_typed_phrase_and_a_reason() {
 }
 
 #[test]
+fn opt_in_settings_give_force_arm_and_reset_a_single_confirmation() {
+    // ADR-0013 item 6: off by default.
+    let now = Instant::now();
+    let mut p = CommandPolicy::new(PolicyConfig::default());
+    p.set_vehicle_name(1, "WHOOP-3");
+    assert_eq!(p.simplified(), Simplified::default());
+    assert_eq!(p.class_of(&Command::ForceArm), Class::D);
+    let f = disarmed();
+    let card =
+        |p: &mut CommandPolicy, c: Command| match p.request(T, c, &f, connected(), now).unwrap() {
+            Request::Confirm(c) => c,
+            r => panic!("{r:?}"),
+        };
+    let reset = card(&mut p, Command::ParamReset);
+    assert_eq!((reset.class, reset.single_step), (Class::C, false));
+    let fa = card(&mut p, Command::ForceArm);
+    assert!(fa.reason_required && !fa.single_step);
+
+    // On: force-arm is class C without typed text, but a reason is still required.
+    p.set_simplified(Simplified {
+        force_arm: true,
+        param_reset: true,
+    });
+    let submit =
+        |p: &mut CommandPolicy, c: Command, a: Approval| p.submit(T, c, a, &f, connected(), now);
+    let c = card(&mut p, Command::ForceArm);
+    assert_eq!(
+        (
+            c.class,
+            c.challenge.clone(),
+            c.reason_required,
+            c.single_step
+        ),
+        (Class::C, None, true, true)
+    );
+    assert_eq!(
+        submit(&mut p, Command::ForceArm, Approval::Confirmed(c.token)).unwrap_err(),
+        Refusal::ReasonRequired
+    );
+    let c = card(&mut p, Command::ForceArm);
+    let blank = Approval::Reasoned {
+        token: c.token,
+        reason: " ".into(),
+    };
+    assert_eq!(
+        submit(&mut p, Command::ForceArm, blank).unwrap_err(),
+        Refusal::ReasonRequired
+    );
+    let c = card(&mut p, Command::ForceArm);
+    let ok = Approval::Reasoned {
+        token: c.token,
+        reason: "compass check fails indoors on the bench".into(),
+    };
+    assert!(submit(&mut p, Command::ForceArm, ok).is_ok());
+    // A single confirmation for reset.
+    let c = card(&mut p, Command::ParamReset);
+    assert_eq!((c.class, c.single_step), (Class::C, true));
+    assert!(submit(&mut p, Command::ParamReset, Approval::Confirmed(c.token)).is_ok());
+    // Still no confirmation-free path, and reset is still refused while armed (SR-08).
+    assert_eq!(
+        submit(&mut p, Command::ParamReset, Approval::None).unwrap_err(),
+        Refusal::ConfirmationRequired
+    );
+    assert!(matches!(
+        p.request(T, Command::ParamReset, &armed(), connected(), now),
+        Err(Refusal::Precondition(_))
+    ));
+
+    // Turned off between the card and the confirmation: the stricter class applies.
+    let c = card(&mut p, Command::ForceArm);
+    p.set_simplified(Simplified::default());
+    let late = Approval::Reasoned {
+        token: c.token,
+        reason: "bench".into(),
+    };
+    assert_eq!(
+        submit(&mut p, Command::ForceArm, late).unwrap_err(),
+        Refusal::TypedMismatch
+    );
+    // Turned on after a class D card: that card still needs the typed name.
+    let c = card(&mut p, Command::ForceArm);
+    p.set_simplified(Simplified {
+        force_arm: true,
+        param_reset: false,
+    });
+    let early = Approval::Reasoned {
+        token: c.token,
+        reason: "bench".into(),
+    };
+    assert_eq!(
+        submit(&mut p, Command::ForceArm, early).unwrap_err(),
+        Refusal::TypedMismatch
+    );
+
+    // Every use is audited with the setting and the reason.
+    let audit: Vec<String> = p.drain_audit().into_iter().map(|e| e.text).collect();
+    assert!(
+        audit.contains(
+            &"accepted FORCE ARM (class C, setting simple-force-arm), reason: compass check \
+              fails indoors on the bench"
+                .to_string()
+        ),
+        "{audit:#?}"
+    );
+    for line in [
+        "confirmation issued for RESET PARAMETERS (class C, setting simple-param-reset)",
+        "accepted RESET PARAMETERS (class C, setting simple-param-reset)",
+        "confirmation issued for FORCE ARM (class D)",
+    ] {
+        assert!(audit.iter().any(|t| t == line), "{line}: {audit:#?}");
+    }
+}
+
+#[test]
 fn class_b_needs_no_token() {
     let now = Instant::now();
     let mut p = CommandPolicy::new(PolicyConfig::default());
