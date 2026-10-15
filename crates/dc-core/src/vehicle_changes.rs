@@ -14,6 +14,9 @@
 //!   still required) and for parameter reset (the card without the slide stage). Off, both
 //!   keep their stricter confirmation; they never lift a lockout (reset is refused while
 //!   armed). Applied by the command policy ([`protocols::command::Simplified`]).
+//! * [`VehicleChange::SuggestLinkProfile`] (plan 09 §8 decision 3): DrorControl suggests the
+//!   Constrained-ELRS link profile when a link looks too slow for its profile. It changes
+//!   nothing on the vehicle and never switches without the operator.
 //!
 //! With a setting on, an action on an armed vehicle still needs the operator's
 //! acknowledgement of an in-flight warning ([`ArmedWrite::Acknowledged`]), every upload is
@@ -42,16 +45,19 @@ pub enum VehicleChange {
     SimpleForceArm,
     /// Parameter reset to defaults with one confirmation, without the slide stage.
     SimpleParamReset,
+    /// Suggest a leaner link profile when a link looks too slow (never switches by itself).
+    SuggestLinkProfile,
 }
 
 impl VehicleChange {
     /// Every setting, in display order.
-    pub const ALL: [VehicleChange; 5] = [
+    pub const ALL: [VehicleChange; 6] = [
         VehicleChange::ArmedMissionUpload,
         VehicleChange::FenceRallyUpload,
         VehicleChange::LogErase,
         VehicleChange::SimpleForceArm,
         VehicleChange::SimpleParamReset,
+        VehicleChange::SuggestLinkProfile,
     ];
 
     /// Name in settings files and on the command line.
@@ -62,6 +68,7 @@ impl VehicleChange {
             VehicleChange::LogErase => "log-erase",
             VehicleChange::SimpleForceArm => "simple-force-arm",
             VehicleChange::SimpleParamReset => "simple-param-reset",
+            VehicleChange::SuggestLinkProfile => "suggest-link-profile",
         }
     }
 
@@ -78,6 +85,7 @@ impl VehicleChange {
             VehicleChange::LogErase => "Erase logs on the vehicle",
             VehicleChange::SimpleForceArm => "Force-arm with a single confirmation",
             VehicleChange::SimpleParamReset => "Parameter reset with a single confirmation",
+            VehicleChange::SuggestLinkProfile => "Suggest a link profile for slow links",
         }
     }
 
@@ -110,6 +118,12 @@ impl VehicleChange {
                  erases the tuning, calibration, failsafes and geofence settings; the vehicle \
                  is not safe to fly until it is set up again. It stays refused while armed."
             }
+            VehicleChange::SuggestLinkProfile => {
+                "Suggests the Constrained-ELRS profile when a link looks too slow (an ELRS or \
+                 Crossfire receiver reported by the vehicle, or a degraded link). A leaner \
+                 profile sends less telemetry: instruments update less often. It never \
+                 switches by itself; you accept or dismiss each suggestion."
+            }
         }
     }
 }
@@ -134,6 +148,8 @@ pub struct VehicleChangeSettings {
     pub simple_force_arm: bool,
     /// [`VehicleChange::SimpleParamReset`].
     pub simple_param_reset: bool,
+    /// [`VehicleChange::SuggestLinkProfile`].
+    pub suggest_link_profile: bool,
 }
 
 impl VehicleChangeSettings {
@@ -145,6 +161,7 @@ impl VehicleChangeSettings {
             VehicleChange::LogErase => self.log_erase,
             VehicleChange::SimpleForceArm => self.simple_force_arm,
             VehicleChange::SimpleParamReset => self.simple_param_reset,
+            VehicleChange::SuggestLinkProfile => self.suggest_link_profile,
         }
     }
 
@@ -156,6 +173,7 @@ impl VehicleChangeSettings {
             VehicleChange::LogErase => self.log_erase = on,
             VehicleChange::SimpleForceArm => self.simple_force_arm = on,
             VehicleChange::SimpleParamReset => self.simple_param_reset = on,
+            VehicleChange::SuggestLinkProfile => self.suggest_link_profile = on,
         }
     }
 

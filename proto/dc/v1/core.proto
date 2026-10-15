@@ -57,6 +57,20 @@ service Core {
   rpc EraseLogs(EraseLogsRequest) returns (EraseLogsReply);
   // The daemon's vehicle-change settings, with each one's warning (read-only).
   rpc GetVehicleChangeSettings(GetVehicleChangeSettingsRequest) returns (VehicleChangeSettingList);
+  // Accept or dismiss a link-profile suggestion (LinkProfileSuggestedEvent).
+  rpc AnswerLinkProfileSuggestion(AnswerLinkProfileSuggestionRequest) returns (AnswerLinkProfileSuggestionReply);
+}
+
+message AnswerLinkProfileSuggestionRequest {
+  uint32 link_id = 1;
+  bool accept = 2;
+}
+
+message AnswerLinkProfileSuggestionReply {
+  // False if there was no suggestion for the link.
+  bool answered = 1;
+  // The link's profile after the answer: full, high or constrained-elrs.
+  string profile = 2;
 }
 
 message UploadItemsRequest {
@@ -603,7 +617,18 @@ message Event {
     AlertEvent alert = 7;
     MissionEvent mission = 8;
     LinkStreamsEvent link_streams = 9;
+    LinkProfileSuggestedEvent link_profile_suggested = 10;
   }
+}
+
+// A leaner link profile is suggested (setting suggest-link-profile); answer with
+// AnswerLinkProfileSuggestion. Nothing changes until the operator accepts.
+message LinkProfileSuggestedEvent {
+  uint32 sysid = 1;
+  uint32 link_id = 2;
+  string current = 3;
+  string suggested = 4;
+  string reason = 5;
 }
 
 // A link's stream-rate request finished (link profiles, plan 09 Step 1).

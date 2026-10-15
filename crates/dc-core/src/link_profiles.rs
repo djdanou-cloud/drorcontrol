@@ -99,6 +99,22 @@ impl fmt::Display for LinkTarget {
     }
 }
 
+/// A leaner profile suggested for a link, waiting for the operator (setting
+/// `suggest-link-profile`, plan 09 §8 decision 3).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProfileSuggestion {
+    /// Vehicle whose link looks too slow.
+    pub sysid: u8,
+    /// The link.
+    pub link: LinkId,
+    /// Its profile now.
+    pub current: LinkProfile,
+    /// The suggested profile.
+    pub suggested: LinkProfile,
+    /// Why, for the operator.
+    pub reason: String,
+}
+
 /// The outcome of one link's stream-rate request.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StreamReport {
@@ -132,10 +148,18 @@ impl Core {
 
     /// Change `link`'s profile and request it again from every vehicle heard on the link.
     pub async fn set_link_profile(&self, link: LinkId, profile: LinkProfile) {
-        self.link_profiles
+        let before = self
+            .link_profiles
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .insert(link, profile);
+            .insert(link, profile)
+            .unwrap_or_default();
+        if before != profile {
+            self.audit_note(
+                0,
+                format!("link {link} profile {} -> {}", before.key(), profile.key()),
+            );
+        }
         let vehicles: Vec<u8> = self
             .link_heard
             .lock()
@@ -147,6 +171,121 @@ impl Core {
         for sysid in vehicles {
             self.request_link_streams(sysid, vehicle::AUTOPILOT_COMPID, link);
         }
+    }
+
+    /// Suggestions waiting for the operator.
+    pub fn link_profile_suggestions(&self) -> Vec<ProfileSuggestion> {
+        self.profile_suggestions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    /// Accept the suggestion for `link`: switch to its profile (and request it). Returns the
+    /// new profile, or `None` if there was no suggestion.
+    pub async fn accept_link_profile_suggestion(&self, link: LinkId) -> Option<LinkProfile> {
+        let s = self
+            .profile_suggestions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&link)?;
+        self.audit_note(
+            s.sysid,
+            format!(
+                "link {link} profile suggestion accepted: {}",
+                s.suggested.key()
+            ),
+        );
+        self.set_link_profile(link, s.suggested).await;
+        Some(s.suggested)
+    }
+
+    /// Dismiss the suggestion for `link`; the same profile is not suggested again for it.
+    pub fn dismiss_link_profile_suggestion(&self, link: LinkId) -> bool {
+        let Some(s) = self
+            .profile_suggestions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&link)
+        else {
+            return false;
+        };
+        self.dismissed_suggestions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert((link, s.suggested));
+        self.audit_note(
+            s.sysid,
+            format!(
+                "link {link} profile suggestion dismissed: {}",
+                s.suggested.key()
+            ),
+        );
+        true
+    }
+
+    /// `sysid`'s link is degraded by packet loss: with `suggest-link-profile` on, suggest the
+    /// next leaner profile for its link. Only when the vehicle is heard on exactly one link
+    /// (otherwise the loss cannot be pinned on one), once per link and profile until
+    /// answered, and never again after a dismissal.
+    pub(crate) fn maybe_suggest_profile(&self, sysid: u8, reason: &str) {
+        if !self.vehicle_changes().suggest_link_profile {
+            return;
+        }
+        let now = Instant::now();
+        let links: Vec<LinkId> = self
+            .link_heard
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .filter(|((s, _), t)| {
+                *s == sysid && now.saturating_duration_since(**t) < self.cfg.link_lost
+            })
+            .map(|((_, l), _)| *l)
+            .collect();
+        let [link] = links[..] else {
+            return;
+        };
+        let current = self.link_profile(link);
+        let Some(suggested) = current.leaner() else {
+            return;
+        };
+        if self
+            .dismissed_suggestions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(&(link, suggested))
+        {
+            return;
+        }
+        let s = ProfileSuggestion {
+            sysid,
+            link,
+            current,
+            suggested,
+            reason: reason.to_string(),
+        };
+        {
+            let mut pending = self
+                .profile_suggestions
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            if pending.get(&link).is_some_and(|p| p.suggested == suggested) {
+                return;
+            }
+            pending.insert(link, s.clone());
+        }
+        self.audit_note(
+            sysid,
+            format!(
+                "link {link} profile suggestion (setting suggest-link-profile): {} -> {}, {reason}",
+                current.key(),
+                suggested.key()
+            ),
+        );
+        let _ = self.events.send(CoreEvent::LinkProfileSuggested(s));
     }
 
     /// The last stream-rate request on each link to `sysid`.

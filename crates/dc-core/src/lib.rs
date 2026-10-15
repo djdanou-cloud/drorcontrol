@@ -30,7 +30,8 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 
 use arc_swap::ArcSwap;
-use link_core::{LinkId, LinkIds};
+pub use link_core::LinkId;
+use link_core::LinkIds;
 use link_net::{UdpMode, spawn_tcp_client, spawn_tcp_server, spawn_udp};
 use mav_router::{HubHandle, HubOutput, LinkPolicy, RouterConfig, spawn_hub};
 pub use mav_router::{HubSnapshot, RouterStats};
@@ -70,7 +71,9 @@ mod link_quality;
 mod parameters;
 mod replay;
 mod vehicle_changes;
-pub use link_profiles::{LinkProfile, LinkTarget, RateOutcome, RateResult, StreamReport};
+pub use link_profiles::{
+    LinkProfile, LinkTarget, ProfileSuggestion, RateOutcome, RateResult, StreamReport,
+};
 pub use link_quality::{LinkQuality, LinkQualityState, LinkQualityThresholds};
 pub use parameters::{
     ARMED_WRITE_WARNING, ArmedWrite, PARAM_HEARTBEAT_MAX_AGE, ParamOperationError, ParamReport,
@@ -590,6 +593,9 @@ pub enum CoreEvent {
         /// One line per message not set as requested.
         problems: Vec<String>,
     },
+    /// A leaner link profile is suggested (setting `suggest-link-profile`); the operator
+    /// accepts ([`Core::accept_link_profile_suggestion`]) or dismisses it.
+    LinkProfileSuggested(ProfileSuggestion),
     /// A link went up/down.
     Link {
         /// Link id.
@@ -760,6 +766,10 @@ pub struct Core {
     link_heard: link_profiles::LinkHeard,
     /// Terrain answers being sent: (link, lat, lon, spacing, mask).
     terrain_in_flight: Arc<std::sync::Mutex<std::collections::HashSet<TerrainAnswer>>>,
+    /// Link-profile suggestions waiting for the operator, by link.
+    profile_suggestions: Arc<std::sync::Mutex<HashMap<LinkId, ProfileSuggestion>>>,
+    /// Suggestions the operator dismissed: (link, suggested profile).
+    dismissed_suggestions: Arc<std::sync::Mutex<std::collections::HashSet<(LinkId, LinkProfile)>>>,
     /// Last link-quality state per vehicle, to alert on changes.
     link_quality_seen: link_quality::LinkQualitySeen,
     /// Last stream-rate request outcome per (vehicle, link).
@@ -815,6 +825,8 @@ impl Core {
             stream_reports: Arc::default(),
             terrain_in_flight: Arc::default(),
             link_quality_seen: Arc::default(),
+            profile_suggestions: Arc::default(),
+            dismissed_suggestions: Arc::default(),
         };
 
         // Recorder: lossless, on a blocking thread so disk latency never touches routing.

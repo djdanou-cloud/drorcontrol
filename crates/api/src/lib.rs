@@ -684,6 +684,26 @@ impl CoreApi for CoreService {
         }))
     }
 
+    async fn answer_link_profile_suggestion(
+        &self,
+        req: Request<pb::AnswerLinkProfileSuggestionRequest>,
+    ) -> Result<Response<pb::AnswerLinkProfileSuggestionReply>, Status> {
+        let r = req.into_inner();
+        let link = dc_core::LinkId(r.link_id);
+        let answered = if r.accept {
+            self.core
+                .accept_link_profile_suggestion(link)
+                .await
+                .is_some()
+        } else {
+            self.core.dismiss_link_profile_suggestion(link)
+        };
+        Ok(Response::new(pb::AnswerLinkProfileSuggestionReply {
+            answered,
+            profile: self.core.link_profile(link).key().into(),
+        }))
+    }
+
     async fn get_link_stats(
         &self,
         _req: Request<pb::GetLinkStatsRequest>,
@@ -976,6 +996,15 @@ impl CoreApi for CoreService {
                     // Annunciator sounds are for a local display; clients sound alerts from
                     // AlertEvent levels.
                     Ok(CoreEvent::Sound { .. }) => continue,
+                    Ok(CoreEvent::LinkProfileSuggested(s)) => {
+                        Kind::LinkProfileSuggested(pb::LinkProfileSuggestedEvent {
+                            sysid: u32::from(s.sysid),
+                            link_id: s.link.0,
+                            current: s.current.key().into(),
+                            suggested: s.suggested.key().into(),
+                            reason: s.reason,
+                        })
+                    }
                     Ok(CoreEvent::LinkStreams {
                         sysid,
                         link,

@@ -204,8 +204,15 @@ the bench kit in [§6.3](#63-hardware-in-the-loop-checklist).
 > downlink measured **302 B/s** (both versions). A mode change was verified over the link.
 > The Full profile on the same link saturates it (**501–502 B/s**).
 >
-> **Not built yet:** the adaptive step-down, the profile suggestion (`suggest-link-profile`),
-> the transfer-time estimates and the identity warning.
+> **Also built 2026-10-15:**
+> * `RC_CHANNELS.rssi` labelled RSSI or LQ (`Core::rc_signal`), with the receiver's link and
+>   telemetry rates;
+> * the DEGRADED link-quality state (`Core::link_quality`, Caution "LINK DEGRADED"; SITL
+>   chaos scenario). It informs only: command delivery is unchanged;
+> * the profile suggestion behind `suggest-link-profile` (see below).
+>
+> **Not built yet:** the adaptive step-down, the transfer-time estimates and the identity
+> warning.
 
 * **Profiles.** Budgets are worst-case sizes from the dialect XML, MAVLink 2, unsigned,
   heartbeat included. Each one is checked against the measured byte rate in SITL.
@@ -226,9 +233,20 @@ the bench kit in [§6.3](#63-hardware-in-the-loop-checklist).
     `MAVn_OPTIONS` bit 2) is shown, not hidden.
   * The request is repeated after a vehicle reboot (first heartbeat after loss).
 * **Profile suggestion** (owner decision 3): with the setting `suggest-link-profile` on (off by
-  default), DrorControl suggests Constrained-ELRS when it sees the ELRS/CRSF "Link rate"
-  STATUSTEXT or measures a link slower than the current profile needs. The operator accepts or
-  dismisses it; the suggestion and the answer are logged.
+  default), DrorControl suggests the next leaner profile (Full → High → Constrained-ELRS) when
+  the vehicle's link turns DEGRADED by packet loss. It only does this while the vehicle is
+  heard on exactly that one link. The operator accepts or dismisses it
+  (`Core::accept_link_profile_suggestion` / `dismiss_…`, gRPC `AnswerLinkProfileSuggestion`).
+  A dismissed profile is not suggested again for that link. The suggestion and the answer go
+  to the audit log.
+
+  *Correction, 2026-10-15:* the ELRS/CRSF "Link rate" STATUSTEXT is **not** used as a
+  trigger. ArduPilot's CRSF code sends it only when the receiver supplies RC (RCIN). In ELRS
+  MAVLink mode the receiver is on a MAVLink port and that text never appears. With ELRS for
+  RC and a separate telemetry radio, the text would suggest the wrong profile for that radio.
+  The GCS also cannot see ELRS MAVLink mode directly: its `RADIO_STATUS` goes only to the
+  flight controller ([§2.3](#23-flow-control-and-what-reaches-the-gcs)). So the trigger is
+  what the GCS measures.
 * **Adaptive step-down** (GCS side; ArduPilot's own `RADIO_STATUS` slow-down on the air side
   stays in charge of the uplink buffer):
   * Measure received bytes/s and sequence loss per link.
@@ -439,7 +457,7 @@ Draft requirements, for numbering at review:
 |---|----------|----------|-------------|
 | 1 | May DrorControl act as the RC transmitter (Step 4b)? | **Yes, as an option, at a much later stage** | 4b leaves Phase 4 and moves to *later* (after 1.0; parity row EXT-004). The draft hazards in [§7](#7-safety) stay drafts until then; the safety review and an ADR come before any code. Step 4a (receive only) stays in Phase 4. |
 | 2 | Crossfire hardware on the bench | **Later** | Crossfire stays "CRSF-compatible, not hardware-verified": the codec and profiles follow the CRSF format, and bench checks 8–12 run on ELRS only until a Crossfire module is available. |
-| 3 | Suggest Constrained-ELRS when an ELRS link is detected | **Yes, behind a setting** | A setting `suggest-link-profile` in the settings file (`dc-cli settings`), **off by default** like the other opt-in settings. On, DrorControl suggests the profile when it sees the ELRS/CRSF "Link rate" STATUSTEXT or a link slower than the current profile needs; it never switches without the operator. Built in Step 1. |
+| 3 | Suggest Constrained-ELRS when an ELRS link is detected | **Yes, behind a setting** | A setting `suggest-link-profile` in the settings file (`dc-cli settings`), **off by default** like the other opt-in settings. On, DrorControl suggests the next leaner profile when the link turns DEGRADED by packet loss (the "Link rate" STATUSTEXT turned out to mean ELRS for RC, not for telemetry, so it is not used; Step 1). It never switches without the operator. **Built 2026-10-15.** |
 
 ## 9. References
 

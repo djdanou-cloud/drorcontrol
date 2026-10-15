@@ -185,7 +185,16 @@ impl Core {
                 .insert(v.sysid, q.state);
             match (prev, q.state) {
                 (_, LinkQualityState::Degraded) => {
-                    self.alert(v.sysid, AlertLevel::Caution, degraded_text(&q))
+                    self.alert(v.sysid, AlertLevel::Caution, degraded_text(&q));
+                    if let Some(l) = q
+                        .loss_pct
+                        .filter(|_| q.reasons.iter().any(|r| r.starts_with("loss")))
+                    {
+                        self.maybe_suggest_profile(
+                            v.sysid,
+                            &format!("{l:.0}% packet loss over 10 s"),
+                        );
+                    }
                 }
                 (LinkQualityState::Degraded, LinkQualityState::Good) => {
                     self.alert(v.sysid, AlertLevel::Advisory, RECOVERED_TEXT.into())

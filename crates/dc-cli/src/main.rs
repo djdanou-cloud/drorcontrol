@@ -2740,6 +2740,12 @@ async fn run(cli: Cli) -> Result<(), String> {
                             eprintln!("tlog {}: {detail}", if stopped { "STOPPED" } else { "warning" })
                         }
                         Ok(CoreEvent::Mission { sysid, change }) => println!("[{sysid}] mission: {change:?}"),
+                        Ok(CoreEvent::LinkProfileSuggested(s)) => {
+                            eprintln!(
+                                "[{}] {}: suggest link profile {} (now {}): {}; reconnect with ?profile={} to use it",
+                                s.sysid, s.link, s.suggested.key(), s.current.key(), s.reason, s.suggested.key()
+                            );
+                        }
                         Ok(CoreEvent::LinkStreams { sysid, link, profile, problems }) => {
                             if problems.is_empty() {
                                 eprintln!("[{sysid}] {link}: stream rates set ({} profile, read back)", profile.key());

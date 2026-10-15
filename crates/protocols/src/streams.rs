@@ -23,7 +23,7 @@ use mavlink_codec::enums::{MavCmd, MavResult};
 use mavlink_codec::messages::{CommandLong, RequestDataStream};
 
 /// How much telemetry a link is asked to carry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum LinkProfile {
     /// USB, IP and SITL: the core's configured rates (`CoreConfig::stream_rates`).
     #[default]
