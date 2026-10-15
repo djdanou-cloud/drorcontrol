@@ -340,7 +340,14 @@ upload and erase (the API has none yet).
     SITL `SIM_ELRS` scenario green on 4.7.1 and 4.6.3: Constrained measures 302 B/s on a
     500 B/s link; Full saturates it.
     `crsf-codec` crate with exhaustive RC packing tests and a fuzz target.
-    The rest of the batch is listed in the log entries.
+    Also: `RC_CHANNELS.rssi` labelled RSSI or LQ (`Core::rc_signal`, from RSSI_TYPE /
+    RC_OPTIONS in passing parameter traffic or the CRSF STATUSTEXT); DEGRADED link quality
+    (`Core::link_quality`, Caution "LINK DEGRADED", SITL chaos scenario). DEGRADED
+    **informs only**: feeding it into command delivery is a command-pipeline change for the
+    owner. The `suggest-link-profile` setting (off by default) suggests a leaner profile on a
+    lossy link; the operator accepts or dismisses it.
+    Next for plan 09: the adaptive step-down, transfer-time estimates, the identity warning,
+    the `Framer` seam and CRSF telemetry into the vehicle state.
 
 ## 8. Where things are (code map)
 
