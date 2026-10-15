@@ -1,6 +1,6 @@
 # ADR-0004: GStreamer-based video with zero-copy GPU import and in-compositor telemetry overlay
 
-* Status: proposed
+* Status: accepted with a condition (owner 2026-10-15, [ADR-0013](0013-phase-0-gate-decisions.md)): Phase 1 builds a decode path that does not hold frames, and the camera guide asks for low-latency streams (live p99 113 ms measured; 36 ms with `max_dec_frame_buffering` 1)
 * Date: 2026-10-10
 * Validation: S0-5 (1080p30 H.264 RTSP, ≤ 8 ms decode, ≤ 5 % CPU on M1)
 

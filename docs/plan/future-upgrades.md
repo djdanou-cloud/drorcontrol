@@ -25,7 +25,26 @@ not expected to change ADR-0003's outcome; it would confirm frame rate at the la
 | 120 fps PFD and map when plugged in | plan README §4 "PFD + map frame rate" target | Measure the flight view at 120 Hz, plugged in and on battery | 120 fps plugged in; adaptive 30 fps on battery / Low Power Mode still holds |
 | ProMotion in the macOS test matrix | plan 03 §8 "Displays" | Add ProMotion back to the display row | As above |
 
-## 3. Bringing an item back
+## 3. Map GPU load (accepted at ≈ 42 % on the M1, ADR-0013)
+
+The map spike passed everything but GPU load (≈ 42 % mean, 56 % max, against ≤ 8 %) while
+flying a route continuously at 60 fps full screen. The owner accepted it for now (2026-10-15);
+these are the suggested ways to bring it down, each to be measured with
+`sudo powermetrics --samplers gpu_power -i 1000` ("GPU HW active residency") before and after:
+
+| Suggestion | Why it should help |
+|---|---|
+| Redraw only when something changed (camera, tiles, vehicle position, overlay) instead of every vsync | Most of the time a ground-station map is still; an idle map should cost almost nothing |
+| Cap the map's own redraw rate (e.g. 30 fps) while the vehicle is the only thing moving, 60 fps during gestures | Halves the work in the common case without making panning feel slow |
+| Draw the vehicle, track and mission as a light overlay layer, not by re-rendering the style | The base map then redraws only when the camera moves |
+| Fewer style layers, labels and symbol collisions at the zoom levels used in flight | Symbol placement is a large part of MapLibre's per-frame cost |
+| Turn off or lower multisampling (MSAA) on Retina | At 2× pixel density the edge smoothing adds little and costs fill rate |
+| Lower the render scale on battery or Low Power Mode | Fewer pixels; plan README already asks for an adaptive rate on battery |
+| Keep decoded tiles cached on the GPU and prefetch along the route | Avoids re-uploading textures as the view follows the vehicle |
+
+Pass: ≤ 8 % GPU on the M1 for the S0-3 route, or a new limit the owner sets.
+
+## 4. Bringing an item back
 
 1. Run the steps above on the new hardware and record the results where the item "Was in".
 2. Restore the target or criterion in the plan or ADR (an ADR change needs the architect).

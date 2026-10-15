@@ -1,6 +1,6 @@
 # ADR-0003: `MapSurface` abstraction; MapLibre Native primary, `wgpu` fallback; `wgpu` for 3-D
 
-* Status: proposed — **go/no-go at week 6 (spike S0-3)**
+* Status: accepted (go, owner 2026-10-15, [ADR-0013](0013-phase-0-gate-decisions.md)): MapLibre Native; GPU ≈ 42 % on the M1 accepted for now, reductions suggested in [future upgrades](../future-upgrades.md) §3
 * Date: 2026-10-10
 
 ## Context

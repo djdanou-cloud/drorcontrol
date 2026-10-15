@@ -77,6 +77,11 @@ and the code are newer. Where either disagrees with an owner instruction, the ow
       fence/rally upload and log erase each sit behind an **opt-in setting, off by default,
       with a short warning about its danger** (`armed-mission-upload`, `fence-rally-upload`,
       `log-erase`; ADR-0012 amendment). With a setting on the operator can make that change.
+    * **Phase 0 gate decisions, 2026-10-15 (ADR-0013):** map spike go (42 % GPU accepted,
+      reductions in future-upgrades §3); video spike accepted on condition of a no-hold
+      decode path in Phase 1; packaging exit criterion restated for ad-hoc signing;
+      parameter metadata downloaded at run time (nothing GPL-derived shipped); force-arm
+      and parameter reset behind opt-in settings, off by default.
     * Unchanged (not decided): ADR-0011 D2–D5 (two-stage in-flight disarm, reboot,
       termination; reboot blocked while armed; props-off for motor test), force-arm typed.
     * Closed source, clean-room; MAVLink XML/generated code and pymavlink approved;
@@ -111,20 +116,20 @@ and the code are newer. Where either disagrees with an owner instruction, the ow
 | Task | State | Evidence / what is left |
 |------|-------|-------------------------|
 | T0-01 repo, CI on 4 targets | done | `ci.yml`; `cargo xtask ci` |
-| T0-02 MAVLink codec | done | `crates/mavlink-codec`; licence question open (§6) |
+| T0-02 MAVLink codec | done | `crates/mavlink-codec`; XML and generated code approved (ADR-0012 item 9) |
 | T0-03 router, links, tlog | done | `mav-router`, `link-*`, `recorder` |
 | T0-04 core daemon, gRPC, FFI, CLI | done | `dc-core`, `api`, `core-ffi`, `dc-cli` |
 | T0-05 macOS serial | **code done; hardware matrix pending** | Mac runbook T0-05; `crates/platform-macos/HARDWARE_MATRIX.md` |
 | T0-06 spike S0-1 bridge | **M1 run done; strict p99 bound missed** | M1: 0 dropped frames, p99 19.5 ms at 200 k (17.8 ms idle). Criterion needs restating in ADR-0001; Intel not run (120 Hz deferred: `docs/plan/future-upgrades.md`) |
-| T0-07 spike S0-3 map | **M1 run done at 2880×1800: Metal, fps, vsync, feel pass; GPU ≈ 42 % fails** | `ui/spikes/s0-3-map/RESULTS.md`; ADR-0003 go/no-go pending (decided on the built-in Retina run; 5K deferred to `docs/plan/future-upgrades.md`, owner 2026-10-12) |
+| T0-07 spike S0-3 map | **Go (owner 2026-10-15, ADR-0013)**: Metal, fps, vsync, feel pass; GPU ≈ 42 % accepted for now | `ui/spikes/s0-3-map/RESULTS.md`; reductions suggested in `docs/plan/future-upgrades.md` §3 |
 | T0-08 spike S0-4 logs | done | `crates/logs` |
-| T0-09 spike S0-5 video | **M1 runs done incl. live RTSP: hardware + zero-copy pass; live p99 113 ms and CPU 6.4 % fail. Latency = frames held per `max_dec_frame_buffering` (36 ms with 1)** | `ui/spikes/s0-5-video/RESULTS.md`; separate `spike-video` workflow gives indicative numbers when the spike or its workflow changes, or on manual dispatch |
-| T0-10 macOS package | done on CI; local M1 package + first-launch steps 1–3 pass | "Open Anyway" not verified on the M1 (approved in another account than the app's owner); see log |
+| T0-09 spike S0-5 video | **Accepted with a condition (owner 2026-10-15, ADR-0013)**: hardware decode and zero-copy pass; live p99 113 ms is frames the decoder holds (36 ms with `max_dec_frame_buffering` 1): Phase 1 builds a no-hold decode path | `ui/spikes/s0-5-video/RESULTS.md` |
+| T0-10 macOS package | done on CI; local M1 package + first-launch steps 1–3 pass | Exit criterion restated for ad-hoc signing (ADR-0013); "Open Anyway" not yet verified on the M1 (approved in another account than the app's owner); see log |
 | T0-11 parity freeze | done | `parity.yaml`, `docs/parity/` |
 | T0-12 design tokens | done | `ui/tokens/` (owner decisions applied) |
 | T0-13 docs site | done | `mkdocs build --strict` in CI |
 | T0-14 SITL harness | done | `crates/sitl-harness`, `docs/dev/sitl-harness.md` |
-| T0-15 hazard log | **v0 baselined; human review pending** | `docs/safety/hazards.md` §6–7 |
+| T0-15 hazard log | done: review approved by the owner 2026-10-12 | `docs/safety/hazards.md` §6 |
 | T0-16 CommandPolicy | done | `crates/protocols/src/command.rs` |
 
 ## 5. Done beyond the backlog (all pushed, CI green on 130cae8)
@@ -245,7 +250,7 @@ and the code are newer. Where either disagrees with an owner instruction, the ow
 |------|-------|-------------|
 | Mac session, remaining: T0-05 hardware matrix, T0-10 "Open Anyway" step, T0-09 re-run once a no-hold decode path exists (M1 results of 2026-10-11 are in the spike RESULTS.md files) | Mac runbook | Owner (hardware) |
 | Windows bench test with a 4.6.3 flight controller | `docs/dev/windows-bench-test.md` | Owner (hardware) |
-| Force-arm (typed) and parameter reset confirmations: not covered by ADR-0012 | ADR-0011 | Owner |
+| Force-arm and parameter reset: decided 2026-10-15 (ADR-0013 item 6: opt-in settings, off by default); implementation pending | ADR-0013 | — (agent) |
 
 ## 7. Next tasks, in priority order
 

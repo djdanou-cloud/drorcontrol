@@ -49,7 +49,7 @@ Deliverables
 * D0-8 Design system v0 (tokens, type, 4 themes), UX research plan, brand font licence resolved.
 * D0-9 Docs skeleton live: MkDocs site, ADR template, generated MAVLink reference, onboarding guide v0.
 
-Exit criteria: all spikes pass or have an approved alternative; 30-min soak on 3 serial chips with 0 CRC errors; signed + notarized artefact verified on a clean VM; plan re-baselined.
+Exit criteria: all spikes pass or have an approved alternative; 30-min soak on 3 serial chips with 0 CRC errors; ad-hoc signed universal build with checksums installs and launches on a fresh macOS machine, first launch (Open Anyway) checked once by hand (restated by ADR-0013: no Apple credentials, ADR-0010); plan re-baselined.
 
 ## Phase 1 — Basic Telemetry, HUD, Moving Map & PFD (S6–S11) → **M1 private alpha**
 * Vehicle state store; Copter/Plane/Rover/Sub/Tracker profiles; stream-rate negotiation; link health HUD.

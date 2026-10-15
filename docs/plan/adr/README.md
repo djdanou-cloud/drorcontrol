@@ -5,14 +5,14 @@
 Process and template: see [`../06-documentation-system.md`](../06-documentation-system.md) §4.2 and
 [`0000-template.md`](0000-template.md). Accepted ADRs are immutable; supersede instead of editing.
 
-12 ADRs: 6 proposed, 5 accepted, 1 superseded.
+13 ADRs: 4 proposed, 8 accepted, 1 superseded.
 
 | ADR | Title | Status | Date |
 |-----|-------|--------|------|
 | [0001](0001-core-and-ui-stack.md) | Rust core with Qt 6 / QML presentation shell | proposed (to be accepted at Phase 0 gate M0, pending spikes S0-1, S0-2, S0-3) | 2026-10-10 |
 | [0002](0002-ipc-planes.md) | Four IPC planes (control, state, events, bulk) | proposed | 2026-10-10 |
-| [0003](0003-map-engine.md) | MapSurface abstraction; MapLibre Native primary, wgpu fallback; wgpu for 3-D | proposed — go/no-go at week 6 (spike S0-3) | 2026-10-10 |
-| [0004](0004-video-pipeline.md) | GStreamer-based video with zero-copy GPU import and in-compositor telemetry overlay | proposed | 2026-10-10 |
+| [0003](0003-map-engine.md) | MapSurface abstraction; MapLibre Native primary, wgpu fallback; wgpu for 3-D | accepted (go, owner 2026-10-15, [ADR-0013](0013-phase-0-gate-decisions.md)): MapLibre Native; GPU ≈ 42 % on the M1 accepted for now, reductions suggested in [future upgrades](../future-upgrades.md) §3 | 2026-10-10 |
+| [0004](0004-video-pipeline.md) | GStreamer-based video with zero-copy GPU import and in-compositor telemetry overlay | accepted with a condition (owner 2026-10-15, [ADR-0013](0013-phase-0-gate-decisions.md)): Phase 1 builds a decode path that does not hold frames, and the camera guide asks for low-latency streams (live p99 113 ms measured; 36 ms with max_dec_frame_buffering 1) | 2026-10-10 |
 | [0005](0005-macos-distribution.md) | macOS distribution — Developer ID, Hardened Runtime, notarized, not sandboxed (v1) | superseded by ADR-0010 (no Apple credentials; internal distribution) | 2026-10-10 |
 | [0006](0006-plugins-scripting.md) | Out-of-process plugins and scripts over the public gRPC API | proposed | 2026-10-10 |
 | [0007](0007-docs-as-code.md) | Documentation as code with enforced CI gates | proposed | 2026-10-10 |
@@ -21,3 +21,4 @@ Process and template: see [`../06-documentation-system.md`](../06-documentation-
 | [0010](0010-internal-distribution-without-apple-credentials.md) | Internal distribution without Apple developer credentials | accepted | 2026-10-11 |
 | [0011](0011-operational-profile-and-command-classes.md) | Operational profile and command classes (single-action flight controls) | accepted | 2026-10-11 |
 | [0012](0012-field-operations-posture.md) | Field-operations posture (owner decisions of 2026-10-12) | accepted | 2026-10-12 |
+| [0013](0013-phase-0-gate-decisions.md) | Phase 0 gate decisions (owner, 2026-10-15) | accepted | 2026-10-15 |
