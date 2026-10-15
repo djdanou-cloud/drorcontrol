@@ -2295,3 +2295,125 @@ async fn terrain_requests_are_answered_from_the_gcs_terrain() {
     assert!((r.terrain_msl_m - 600.0).abs() < 1.0, "{r:?}");
     assert!(sent > 0 && missing == 0);
 }
+
+/// Plan 09 Step 1: a Constrained-ELRS link through ArduPilot's ELRS simulator (MAVLink mode,
+/// 500 B/s each way). Every rate of the profile is set and read back on that link, the
+/// downlink stays under 80 % of the link, and a command is verified over it. Switched to the
+/// Full profile, the same link saturates.
+#[tokio::test(flavor = "multi_thread")]
+async fn constrained_elrs_profile_fits_the_simulated_elrs_link() {
+    use dc_core::{Approval, Command, CommandState, Firmware, LinkProfile, LinkTarget};
+    use mavlink_codec::{Header, Version, encode};
+
+    let Some(mut cfg) = SitlConfig::copter_or_skip() else {
+        return;
+    };
+    let elrs = cfg.with_elrs(2).unwrap();
+    let sitl = Sitl::start(&cfg).unwrap();
+    // SITL waits for a client on SERIAL0 before it runs: hold one, idle, and drain it.
+    let serial0 = std::net::TcpStream::connect(sitl.addr()).unwrap();
+    std::thread::spawn(move || {
+        use std::io::Read;
+        let mut s = serial0;
+        let mut buf = [0u8; 4096];
+        while s.read(&mut buf).is_ok_and(|n| n > 0) {}
+    });
+
+    let core = Core::start(CoreConfig::default()).await.unwrap();
+    let mut events = core.events();
+    let target = LinkTarget {
+        spec: LinkSpec::Tcp(elrs.addr),
+        profile: LinkProfile::Constrained,
+    };
+    let link = core.connect(&target).await.unwrap();
+    assert_eq!(core.link_profile(link), LinkProfile::Constrained);
+    assert_eq!(
+        core.wait_for_vehicle(Duration::from_secs(90)).await,
+        Some(1)
+    );
+    let problems = tokio::time::timeout(Duration::from_secs(120), async {
+        loop {
+            if let Ok(CoreEvent::LinkStreams {
+                link: l, problems, ..
+            }) = events.recv().await
+                && l == link
+            {
+                return problems;
+            }
+        }
+    })
+    .await
+    .expect("stream request finished within 120 s");
+    assert!(problems.is_empty(), "{problems:#?}");
+    let report = &core.stream_reports(1)[0];
+    assert_eq!(report.profile, LinkProfile::Constrained);
+    assert!(report.all_set());
+
+    // Measure what arrives on the link: bytes as MAVLink 2 frames.
+    let measure = |secs: u64| {
+        let mut rx = core.subscribe();
+        async move {
+            let header = Header {
+                seq: 0,
+                sysid: 1,
+                compid: 1,
+            };
+            let (mut bytes, t0) = (0usize, Instant::now());
+            while t0.elapsed() < Duration::from_secs(secs) {
+                if let Ok(Ok(inc)) =
+                    tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+                    && inc.link == link
+                {
+                    bytes += encode(Version::V2, header, &inc.msg)
+                        .map(|f| f.as_bytes().len())
+                        .unwrap_or(0);
+                }
+            }
+            bytes as f64 / secs as f64
+        }
+    };
+    let constrained = measure(20).await;
+    eprintln!("constrained-elrs downlink: {constrained:.0} B/s");
+    assert!(
+        constrained < 0.8 * 500.0,
+        "{constrained:.0} B/s on a 500 B/s link"
+    );
+    assert_eq!(core.vehicle_link(1), Some(VehicleLink::Connected));
+
+    // A command over the ELRS link, verified by the vehicle's heartbeat.
+    let loiter = Firmware::Copter.mode_number("LOITER").unwrap();
+    let id = core
+        .submit_command(
+            1,
+            Command::SetMode {
+                custom_mode: loiter,
+            },
+            Approval::None,
+        )
+        .await
+        .unwrap();
+    let state = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let s = core.command_status(id).unwrap();
+            if s.state.is_final() {
+                return s.state;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(state, CommandState::Verified);
+
+    // Full on the same link asks for ≈ 1.9 kB/s: the link saturates.
+    core.set_link_profile(link, LinkProfile::Full).await;
+    tokio::time::sleep(Duration::from_secs(30)).await;
+    let full = measure(20).await;
+    eprintln!("full profile on the ELRS link: {full:.0} B/s");
+    assert!(
+        full > constrained * 1.2 && full > 350.0,
+        "full {full:.0} B/s vs constrained {constrained:.0} B/s"
+    );
+    drop(sitl);
+    drop(elrs);
+}

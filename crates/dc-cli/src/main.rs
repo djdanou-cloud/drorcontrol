@@ -36,7 +36,7 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use clap::{Parser, Subcommand};
-use dc_core::{Core, CoreConfig, CoreEvent, LinkSpec};
+use dc_core::{Core, CoreConfig, CoreEvent, LinkSpec, LinkTarget};
 use protocols::params::{diff_params, parse_param_file, to_param_file};
 
 #[derive(Parser)]
@@ -98,9 +98,9 @@ impl Units {
 enum Cmd {
     /// Download all parameters and print them (or write a .param file).
     Params {
-        /// Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay).
+        /// Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay). Append ?profile=high (SiK radio) or ?profile=constrained-elrs (ExpressLRS) for a slow link.
         #[arg(long)]
-        connect: LinkSpec,
+        connect: LinkTarget,
         /// Target system id (default: first vehicle heard).
         #[arg(long)]
         target: Option<u8>,
@@ -122,7 +122,7 @@ enum Cmd {
     ParamGet {
         /// Link, e.g. tcp:127.0.0.1:5760.
         #[arg(long)]
-        connect: LinkSpec,
+        connect: LinkTarget,
         /// Target system id (default: first vehicle heard).
         #[arg(long)]
         target: Option<u8>,
@@ -137,9 +137,9 @@ enum Cmd {
     /// if the vehicle is armed, its in-flight warning must be acknowledged too. A baseline of
     /// all parameters is saved first, each value is read back, and every step is audited.
     ParamSet {
-        /// Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200.
+        /// Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200. Append ?profile=high (SiK radio) or ?profile=constrained-elrs (ExpressLRS) for a slow link.
         #[arg(long)]
-        connect: LinkSpec,
+        connect: LinkTarget,
         /// Target system id (default: first vehicle heard).
         #[arg(long)]
         target: Option<u8>,
@@ -174,7 +174,7 @@ enum Cmd {
     ParamRollback {
         /// Link, e.g. tcp:127.0.0.1:5760.
         #[arg(long)]
-        connect: LinkSpec,
+        connect: LinkTarget,
         /// Baseline file written by `param-set` (or the daemon's --param-dir).
         #[arg(long)]
         baseline: std::path::PathBuf,
@@ -200,7 +200,7 @@ enum Cmd {
     Daemon {
         /// Links to open at start (repeatable).
         #[arg(long)]
-        connect: Vec<LinkSpec>,
+        connect: Vec<LinkTarget>,
         /// gRPC listen address, e.g. 0.0.0.0:50051 for a field network. Beyond loopback an
         /// API key is required (--token-file or DC_API_TOKEN).
         #[arg(long, default_value = "127.0.0.1:50051")]
@@ -277,7 +277,7 @@ enum Cmd {
         file: Option<std::path::PathBuf>,
         /// Review the parameters on a vehicle instead (downloads them; read-only).
         #[arg(long, conflicts_with = "file")]
-        connect: Option<LinkSpec>,
+        connect: Option<LinkTarget>,
         /// Seconds to wait for a vehicle heartbeat (with --connect).
         #[arg(long, default_value_t = 15)]
         wait: u64,
@@ -299,7 +299,7 @@ enum Cmd {
     Inspect {
         /// Link to open (tlog:FILE@N replays a recording).
         #[arg(long)]
-        connect: LinkSpec,
+        connect: LinkTarget,
         /// Seconds to listen.
         #[arg(long, default_value_t = 10)]
         seconds: u64,
@@ -353,7 +353,7 @@ enum Cmd {
     Cot {
         /// Link to open.
         #[arg(long)]
-        connect: LinkSpec,
+        connect: LinkTarget,
         /// Send each event as one UDP datagram to this address instead of printing it.
         #[arg(long)]
         udp: Option<std::net::SocketAddr>,
@@ -368,7 +368,7 @@ enum Cmd {
     Telemetry {
         /// Link to open.
         #[arg(long)]
-        connect: LinkSpec,
+        connect: LinkTarget,
         /// Stop after this many seconds.
         #[arg(long, default_value_t = 10)]
         seconds: u64,
@@ -389,9 +389,9 @@ enum Cmd {
 /// Which vehicle to talk to.
 #[derive(clap::Args)]
 struct VehicleArgs {
-    /// Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay).
+    /// Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay). Append ?profile=high (SiK radio) or ?profile=constrained-elrs (ExpressLRS) for a slow link.
     #[arg(long)]
-    connect: LinkSpec,
+    connect: LinkTarget,
     /// Target system id (default: first vehicle heard).
     #[arg(long)]
     target: Option<u8>,
@@ -1424,7 +1424,7 @@ async fn shutdown_signal() {
     }
 }
 
-async fn start(cli: &Cli, link: &LinkSpec) -> Result<Core, String> {
+async fn start(cli: &Cli, link: &LinkTarget) -> Result<Core, String> {
     let cfg = CoreConfig {
         sysid: cli.sysid,
         compid: cli.compid,
@@ -1941,7 +1941,7 @@ async fn log_erase(
 #[allow(clippy::too_many_arguments)]
 async fn param_set(
     cli: &Cli,
-    connect: &LinkSpec,
+    connect: &LinkTarget,
     target: Option<u8>,
     changes: &[String],
     file: Option<&std::path::Path>,
@@ -2110,7 +2110,7 @@ async fn param_set(
 #[allow(clippy::too_many_arguments)]
 async fn param_rollback(
     cli: &Cli,
-    connect: &LinkSpec,
+    connect: &LinkTarget,
     baseline: &std::path::Path,
     names: &[String],
     changed: bool,
@@ -2740,6 +2740,16 @@ async fn run(cli: Cli) -> Result<(), String> {
                             eprintln!("tlog {}: {detail}", if stopped { "STOPPED" } else { "warning" })
                         }
                         Ok(CoreEvent::Mission { sysid, change }) => println!("[{sysid}] mission: {change:?}"),
+                        Ok(CoreEvent::LinkStreams { sysid, link, profile, problems }) => {
+                            if problems.is_empty() {
+                                eprintln!("[{sysid}] {link}: stream rates set ({} profile, read back)", profile.key());
+                            } else {
+                                eprintln!("[{sysid}] {link}: stream rates ({} profile), {} not as requested:", profile.key(), problems.len());
+                                for p in problems {
+                                    eprintln!("    {p}");
+                                }
+                            }
+                        }
                         Err(_) => {}
                     },
                 }

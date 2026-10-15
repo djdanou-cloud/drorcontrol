@@ -293,4 +293,13 @@ async fn send_all_floods_every_link_despite_a_known_route() {
         cmd,
         "flooded: link B too"
     );
+    // send_on: link B only, although the route says A (per-link stream rates).
+    assert!(hub.send_on(LinkId(2), cmd.clone()).await);
+    assert_eq!(timeout(T, b_rx.recv()).await.unwrap().unwrap(), cmd);
+    assert!(
+        timeout(Duration::from_millis(200), a_rx.recv())
+            .await
+            .is_err(),
+        "send_on: not on link A"
+    );
 }

@@ -96,7 +96,7 @@ Usage: dc-cli params [OPTIONS] --connect <CONNECT>
 
 Options:
       --connect <CONNECT>
-          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
+          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay). Append ?profile=high (SiK radio) or ?profile=constrained-elrs (ExpressLRS) for a slow link
 
       --sysid <SYSID>
           Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
@@ -207,7 +207,7 @@ Arguments:
 
 Options:
       --connect <CONNECT>
-          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200
+          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200. Append ?profile=high (SiK radio) or ?profile=constrained-elrs (ExpressLRS) for a slow link
 
       --sysid <SYSID>
           Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
@@ -1328,7 +1328,7 @@ Usage: dc-cli log list [OPTIONS] --connect <CONNECT>
 
 Options:
       --connect <CONNECT>
-          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
+          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay). Append ?profile=high (SiK radio) or ?profile=constrained-elrs (ExpressLRS) for a slow link
 
       --sysid <SYSID>
           Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
@@ -1379,7 +1379,7 @@ Usage: dc-cli log download [OPTIONS] --connect <CONNECT> --out <OUT>
 
 Options:
       --connect <CONNECT>
-          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
+          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay). Append ?profile=high (SiK radio) or ?profile=constrained-elrs (ExpressLRS) for a slow link
 
       --sysid <SYSID>
           Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
@@ -1436,7 +1436,7 @@ Usage: dc-cli log erase [OPTIONS] --connect <CONNECT>
 
 Options:
       --connect <CONNECT>
-          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
+          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay). Append ?profile=high (SiK radio) or ?profile=constrained-elrs (ExpressLRS) for a slow link
 
       --sysid <SYSID>
           Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
@@ -2976,7 +2976,7 @@ Usage: dc-cli preflight [OPTIONS] --connect <CONNECT>
 
 Options:
       --connect <CONNECT>
-          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
+          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay). Append ?profile=high (SiK radio) or ?profile=constrained-elrs (ExpressLRS) for a slow link
 
       --sysid <SYSID>
           Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
@@ -3260,7 +3260,7 @@ Arguments:
 
 Options:
       --connect <CONNECT>
-          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
+          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay). Append ?profile=high (SiK radio) or ?profile=constrained-elrs (ExpressLRS) for a slow link
 
       --sysid <SYSID>
           Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
@@ -3328,7 +3328,7 @@ Usage: dc-cli mission download [OPTIONS] --connect <CONNECT>
 
 Options:
       --connect <CONNECT>
-          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
+          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay). Append ?profile=high (SiK radio) or ?profile=constrained-elrs (ExpressLRS) for a slow link
 
       --sysid <SYSID>
           Our MAVLink system id (the vehicle's SYSID_MYGCS should match)
@@ -4204,7 +4204,7 @@ Arguments:
 
 Options:
       --connect <CONNECT>
-          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay)
+          Link, e.g. tcp:127.0.0.1:5760, udp:0.0.0.0:14550, serial:/dev/ttyACM0:115200, tlog:flight.tlog@4 (replay). Append ?profile=high (SiK radio) or ?profile=constrained-elrs (ExpressLRS) for a slow link
 
       --sysid <SYSID>
           Our MAVLink system id (the vehicle's SYSID_MYGCS should match)

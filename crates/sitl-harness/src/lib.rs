@@ -104,6 +104,37 @@ impl SitlConfig {
         }
     }
 
+    /// Put ArduPilot's ExpressLRS simulator (`SIM_ELRS`, a port of the ELRS receiver's
+    /// MAVLink mode: 500 B/s each way, `RADIO_STATUS` flow control) on `SERIAL<serial>`, as
+    /// MAVLink2 at 460 800 baud. It listens on TCP 5761 + `serial` for **every** instance
+    /// (`SIM_ELRS.cpp` ignores `-I`), so the returned lock makes this machine-wide: hold it
+    /// until the SITL is dropped. Waits up to 10 min for another holder.
+    pub fn with_elrs(&mut self, serial: u8) -> io::Result<ElrsPort> {
+        let port = 5761 + u16::from(serial);
+        let deadline = Instant::now() + Duration::from_secs(600);
+        let lock = loop {
+            if let Some(l) = InstanceLock::take_named(&format!("elrs-{port}")) {
+                break l;
+            }
+            if Instant::now() > deadline {
+                return Err(io::Error::other(format!("ELRS port {port} stays locked")));
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        };
+        if std::net::TcpListener::bind(("127.0.0.1", port)).is_err() {
+            return Err(io::Error::other(format!(
+                "TCP {port} is in use (a SITL with -I0?): SIM_ELRS cannot listen there"
+            )));
+        }
+        self.args.push(format!("--serial{serial}=sim:ELRS"));
+        self.params.push((format!("SERIAL{serial}_PROTOCOL"), 2.0));
+        self.params.push((format!("SERIAL{serial}_BAUD"), 460.0));
+        Ok(ElrsPort {
+            addr: ([127, 0, 0, 1], port).into(),
+            _lock: lock,
+        })
+    }
+
     /// [`SitlConfig::copter`], or why the caller should skip. Panics when
     /// `DC_SITL_REQUIRED=1` and no binary is found, so CI cannot silently skip.
     pub fn copter_or_skip() -> Option<SitlConfig> {
@@ -117,6 +148,13 @@ impl SitlConfig {
         }
         cfg
     }
+}
+
+/// The TCP side of ArduPilot's ELRS simulator ([`SitlConfig::with_elrs`]).
+pub struct ElrsPort {
+    /// Connect the GCS here.
+    pub addr: SocketAddr,
+    _lock: InstanceLock,
 }
 
 /// A running SITL instance. Killed on drop.
@@ -149,7 +187,11 @@ struct InstanceLock(PathBuf);
 
 impl InstanceLock {
     fn try_take(instance: u16) -> Option<InstanceLock> {
-        let path = std::env::temp_dir().join(format!("dc-sitl-instance-{instance}.lock"));
+        Self::take_named(&format!("instance-{instance}"))
+    }
+
+    fn take_named(name: &str) -> Option<InstanceLock> {
+        let path = std::env::temp_dir().join(format!("dc-sitl-{name}.lock"));
         let stale = std::fs::metadata(&path)
             .and_then(|m| m.modified())
             .ok()

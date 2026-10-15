@@ -65,9 +65,11 @@ pub use vehicle::{FenceBreach, FenceStatus, Threat, preflight};
 pub use vehicle::{NavHealth, NavThresholds, PositionTrust, TESTED_FIRMWARE};
 
 pub mod annunciator;
+mod link_profiles;
 mod parameters;
 mod replay;
 mod vehicle_changes;
+pub use link_profiles::{LinkProfile, LinkTarget, RateOutcome, RateResult, StreamReport};
 pub use parameters::{
     ARMED_WRITE_WARNING, ArmedWrite, PARAM_HEARTBEAT_MAX_AGE, ParamOperationError, ParamReport,
     ParamRisk, ParamWriteResult, parameter_risk,
@@ -573,6 +575,18 @@ pub enum CoreEvent {
         /// Level to sound.
         level: annunciator::AlertLevel,
     },
+    /// A link's stream-rate request finished (plan 09 Step 1). `problems` lists every
+    /// message whose rate was not set and read back; empty means all set.
+    LinkStreams {
+        /// System id.
+        sysid: u8,
+        /// Link.
+        link: LinkId,
+        /// Profile requested.
+        profile: LinkProfile,
+        /// One line per message not set as requested.
+        problems: Vec<String>,
+    },
     /// A link went up/down.
     Link {
         /// Link id.
@@ -583,6 +597,9 @@ pub enum CoreEvent {
         detail: String,
     },
 }
+
+/// A terrain answer being sent: (link, lat, lon, grid spacing, mask).
+type TerrainAnswer = (LinkId, i32, i32, u16, u64);
 
 /// Per aircraft (ICAO): the last threat level and its name, to alert on changes.
 type TrafficSeen = HashMap<u32, (vehicle::Threat, String)>;
@@ -614,6 +631,8 @@ pub struct Incoming {
     pub sysid: u8,
     /// Sender component.
     pub compid: u8,
+    /// Arrival link.
+    pub link: LinkId,
     /// Decoded message.
     pub msg: Message,
 }
@@ -730,6 +749,16 @@ pub struct Core {
     link_mode: Arc<tokio::sync::Mutex<LinkMode>>,
     /// Opt-in vehicle-change settings in force.
     vehicle_changes: Arc<std::sync::Mutex<VehicleChangeSettings>>,
+    /// Profile per link (plan 09 Step 1); links not listed are Full.
+    link_profiles: Arc<std::sync::Mutex<HashMap<LinkId, LinkProfile>>>,
+    /// Replay links: no stream-rate requests.
+    replay_links: Arc<std::sync::Mutex<std::collections::HashSet<LinkId>>>,
+    /// Last autopilot heartbeat per (vehicle, link), to request each link's rates.
+    link_heard: link_profiles::LinkHeard,
+    /// Terrain answers being sent: (link, lat, lon, spacing, mask).
+    terrain_in_flight: Arc<std::sync::Mutex<std::collections::HashSet<TerrainAnswer>>>,
+    /// Last stream-rate request outcome per (vehicle, link).
+    stream_reports: Arc<std::sync::Mutex<HashMap<(u8, LinkId), StreamReport>>>,
 }
 
 impl Core {
@@ -775,6 +804,11 @@ impl Core {
             parameters: Arc::default(),
             link_mode: Arc::default(),
             vehicle_changes,
+            link_profiles: Arc::default(),
+            replay_links: Arc::default(),
+            link_heard: Arc::default(),
+            stream_reports: Arc::default(),
+            terrain_in_flight: Arc::default(),
         };
 
         // Recorder: lossless, on a blocking thread so disk latency never touches routing.
@@ -835,7 +869,7 @@ impl Core {
                     else => break,
                 };
                 match out {
-                    HubOutput::Frame { frame, .. } => c.dispatch(&frame).await,
+                    HubOutput::Frame { link, frame, .. } => c.dispatch(link, &frame).await,
                     HubOutput::LinkStatus { link, up, detail } => {
                         let _ = c.events.send(CoreEvent::Link { link, up, detail });
                     }
@@ -927,7 +961,7 @@ impl Core {
         Ok(core)
     }
 
-    async fn dispatch(&self, frame: &Frame) {
+    async fn dispatch(&self, link: LinkId, frame: &Frame) {
         let (sysid, compid) = (frame.sysid(), frame.compid());
         let now = Instant::now();
         self.sequences
@@ -974,7 +1008,7 @@ impl Core {
         if let Message::TerrainRequest(r) = &msg
             && compid == vehicle::AUTOPILOT_COMPID
         {
-            self.answer_terrain(r);
+            self.answer_terrain(link, r);
         }
         if matches!(msg, Message::AdsbVehicle(_)) {
             self.check_traffic(sysid);
@@ -987,9 +1021,18 @@ impl Core {
         {
             self.check_nav(sysid, now);
         }
+        if compid == vehicle::AUTOPILOT_COMPID
+            && matches!(msg, Message::Heartbeat(ref h) if h.r#type != MavType::GCS.0)
+            && !self
+                .replay_links
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains(&link)
+        {
+            self.on_link_heartbeat(sysid, compid, link, now);
+        }
         if first_heartbeat && compid == vehicle::AUTOPILOT_COMPID {
             let _ = self.events.send(CoreEvent::VehicleSeen { sysid });
-            self.request_streams(sysid, compid).await;
             self.request_banner(sysid, compid);
             self.request_version(sysid, compid);
         }
@@ -1044,9 +1087,12 @@ impl Core {
             }
             let _ = self.events.send(CoreEvent::StatusText { sysid, text });
         }
-        let _ = self
-            .incoming
-            .send(Arc::new(Incoming { sysid, compid, msg }));
+        let _ = self.incoming.send(Arc::new(Incoming {
+            sysid,
+            compid,
+            link,
+            msg,
+        }));
     }
 
     /// Configuration in use.
@@ -1212,7 +1258,9 @@ impl Core {
     ///
     /// A `.tlog` replay must be the only link: it is refused once any other link was opened,
     /// and every other link is refused while a replay is open.
-    pub async fn connect(&self, spec: &LinkSpec) -> io::Result<LinkId> {
+    pub async fn connect(&self, target: impl Into<LinkTarget>) -> io::Result<LinkId> {
+        let LinkTarget { spec, profile } = target.into();
+        let spec = &spec;
         let want = if matches!(spec, LinkSpec::Tlog { .. }) {
             LinkMode::Replay
         } else {
@@ -1230,6 +1278,17 @@ impl Core {
             }
         }
         let id = self.open_link(spec).await?;
+        if matches!(spec, LinkSpec::Tlog { .. }) {
+            self.replay_links
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(id);
+        } else if profile != LinkProfile::Full {
+            self.link_profiles
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(id, profile);
+        }
         // Recorded only once the link is open: a replay file that does not exist must not
         // lock the core out of live links.
         *mode = want;
@@ -1428,7 +1487,10 @@ impl Core {
         )
     }
 
-    fn answer_terrain(&self, r: &mavlink_codec::messages::TerrainRequest) {
+    /// Answer a `TERRAIN_REQUEST` on the link it came from, paced for that link's profile
+    /// ([`LinkProfile::terrain_frames_per_s`]). ArduPilot repeats a request every 2 s while it
+    /// still lacks the data; a repeat that arrives while its answer is being sent is ignored.
+    fn answer_terrain(&self, link: LinkId, r: &mavlink_codec::messages::TerrainRequest) {
         let Some(t) = self
             .terrain
             .lock()
@@ -1438,23 +1500,44 @@ impl Core {
             return;
         };
         let (lat, lon, spacing, mask) = (r.lat, r.lon, r.grid_spacing, r.mask);
+        let key = (link, lat, lon, spacing, mask);
+        if !self
+            .terrain_in_flight
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key)
+        {
+            return;
+        }
+        let gap = self
+            .link_profile(link)
+            .terrain_frames_per_s()
+            .map(|hz| Duration::from_secs_f32(1.0 / hz));
         let core = self.clone();
         tokio::spawn(async move {
+            let mut first = true;
             for gridbit in 0..56u8 {
                 if mask & (1u64 << gridbit) == 0 {
                     continue;
                 }
                 match protocols::terrain::terrain_subgrid(&t, lat, lon, spacing, gridbit) {
                     Some(data) => {
-                        core.send(&Message::TerrainData(
-                            mavlink_codec::messages::TerrainData {
+                        if let Some(gap) = gap
+                            && !first
+                        {
+                            tokio::time::sleep(gap).await;
+                        }
+                        first = false;
+                        core.send_on(
+                            link,
+                            &Message::TerrainData(mavlink_codec::messages::TerrainData {
                                 lat,
                                 lon,
                                 grid_spacing: spacing,
                                 data,
                                 gridbit,
-                            },
-                        ))
+                            }),
+                        )
                         .await;
                         core.terrain_counts.0.fetch_add(1, Ordering::Relaxed);
                     }
@@ -1463,6 +1546,10 @@ impl Core {
                     }
                 }
             }
+            core.terrain_in_flight
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&key);
         });
     }
 
@@ -1736,7 +1823,9 @@ impl Core {
         });
     }
 
-    /// Ask the vehicle for the configured telemetry rates (`MAV_CMD_SET_MESSAGE_INTERVAL`).
+    /// Ask the vehicle for the configured telemetry rates (`MAV_CMD_SET_MESSAGE_INTERVAL`),
+    /// routed, without checking answers. The core itself requests each link's profile with
+    /// [`Core::request_link_streams`] when a vehicle appears on a link.
     pub async fn request_streams(&self, sysid: u8, compid: u8) {
         for &(msgid, hz) in &self.cfg.stream_rates {
             let cmd = Message::CommandLong(CommandLong {

@@ -333,6 +333,14 @@ upload and erase (the API has none yet).
     (plan §8): gamepad-to-CRSF (4b) wanted but after 1.0; Crossfire bench later; profile
     suggestion behind the setting `suggest-link-profile`, off by default.
     Facts pinned to ArduPilot 4.6.3/4.7.1 and ExpressLRS 3.6.4/4.1.0; Crossfire unverified.
+15. **Batch 10 (2026-10-15, local commits): ELRS/CRSF core work from plan 09.**
+    Link profiles (`?profile=full|high|constrained-elrs`), a per-link stream-rate request
+    with ACK, retry and read-back (`HubHandle::send_on`, `CoreEvent::LinkStreams`), and
+    terrain answers paced per link.
+    SITL `SIM_ELRS` scenario green on 4.7.1 and 4.6.3: Constrained measures 302 B/s on a
+    500 B/s link; Full saturates it.
+    `crsf-codec` crate with exhaustive RC packing tests and a fuzz target.
+    The rest of the batch is listed in the log entries.
 
 ## 8. Where things are (code map)
 

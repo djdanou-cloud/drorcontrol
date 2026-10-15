@@ -89,21 +89,27 @@ enum Control {
 pub struct HubHandle {
     /// Give this to every link.
     pub events: mpsc::Sender<LinkEvent>,
-    local: mpsc::Sender<(Frame, bool)>,
+    local: mpsc::Sender<(Frame, Dest)>,
     control: mpsc::Sender<Control>,
 }
 
 impl HubHandle {
     /// Send a frame we originate (routed by target like any other frame).
     pub async fn send(&self, frame: Frame) -> bool {
-        self.local.send((frame, false)).await.is_ok()
+        self.local.send((frame, Dest::Route)).await.is_ok()
+    }
+
+    /// Send a frame we originate on one link only, ignoring routes: settings that the
+    /// vehicle keeps per link (ArduPilot's stream rates) must go out on the link they are for.
+    pub async fn send_on(&self, link: LinkId, frame: Frame) -> bool {
+        self.local.send((frame, Dest::Link(link))).await.is_ok()
     }
 
     /// Send a frame we originate on every link, ignoring learned routes: used for commands
     /// while a vehicle's link is not CONNECTED, so any path that still works carries it
     /// (ADR-0009).
     pub async fn send_all(&self, frame: Frame) -> bool {
-        self.local.send((frame, true)).await.is_ok()
+        self.local.send((frame, Dest::All)).await.is_ok()
     }
 
     /// Change a link's policy (links start with the hub's default policy).
@@ -117,6 +123,14 @@ impl HubHandle {
         self.control.send(Control::Snapshot(tx)).await.ok()?;
         rx.await.ok()
     }
+}
+
+/// Where a frame we originate goes.
+#[derive(Debug, Clone, Copy)]
+enum Dest {
+    Route,
+    All,
+    Link(LinkId),
 }
 
 /// Receivers the application keeps.
@@ -133,7 +147,7 @@ pub struct HubOutputs {
 /// Start the hub on the current tokio runtime. `default_policy` applies to new links.
 pub fn spawn_hub(cfg: RouterConfig, default_policy: LinkPolicy) -> (HubHandle, HubOutputs) {
     let (ev_tx, mut ev_rx) = mpsc::channel::<LinkEvent>(1024);
-    let (local_tx, mut local_rx) = mpsc::channel::<(Frame, bool)>(1024);
+    let (local_tx, mut local_rx) = mpsc::channel::<(Frame, Dest)>(1024);
     let (ctl_tx, mut ctl_rx) = mpsc::channel::<Control>(16);
     let (app_tx, app_rx) = mpsc::channel(APP_QUEUE);
     let (links_tx, links_rx) = mpsc::channel(LINK_QUEUE);
@@ -185,14 +199,16 @@ pub fn spawn_hub(cfg: RouterConfig, default_policy: LinkPolicy) -> (HubHandle, H
                     }
                 }
                 f = local_rx.recv() => {
-                    let Some((frame, all)) = f else { break };
+                    let Some((frame, dest)) = f else { break };
                     let _ = tap_tx.send(Tapped { time: SystemTime::now(), frame: frame.clone() });
                     let d = router.decide(None, &frame, Instant::now());
-                    if all {
-                        let every: Vec<LinkId> = links.keys().copied().collect();
-                        forward(&links, &every, &frame);
-                    } else {
-                        forward(&links, &d.forward, &frame);
+                    match dest {
+                        Dest::Route => forward(&links, &d.forward, &frame),
+                        Dest::All => {
+                            let every: Vec<LinkId> = links.keys().copied().collect();
+                            forward(&links, &every, &frame);
+                        }
+                        Dest::Link(l) => forward(&links, &[l], &frame),
                     }
                 }
                 c = ctl_rx.recv() => match c {

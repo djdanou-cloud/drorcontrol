@@ -98,7 +98,9 @@ async fn replays_with_its_timing_and_only_as_the_sole_link() {
     assert_eq!(core.wait_for_vehicle(Duration::from_secs(5)).await, Some(7));
 
     // Live links are refused while a replay is open, and so is a second replay.
-    let live = core.connect(&"udp:127.0.0.1:0".parse().unwrap()).await;
+    let live = core
+        .connect(&"udp:127.0.0.1:0".parse::<dc_core::LinkSpec>().unwrap())
+        .await;
     assert_eq!(live.unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
     assert!(
         core.connect(&LinkSpec::Tlog { path, speed: 1 })
@@ -149,7 +151,7 @@ async fn a_live_core_refuses_a_replay_and_a_missing_file_changes_nothing() {
         })
         .await;
     assert_eq!(missing.unwrap_err().kind(), std::io::ErrorKind::NotFound);
-    core.connect(&"udp:127.0.0.1:0".parse().unwrap())
+    core.connect(&"udp:127.0.0.1:0".parse::<dc_core::LinkSpec>().unwrap())
         .await
         .expect("a failed replay does not lock out live links");
     let replay = core.connect(&LinkSpec::Tlog { path, speed: 1 }).await;

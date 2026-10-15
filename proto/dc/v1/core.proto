@@ -111,7 +111,9 @@ message Info {
 }
 
 message OpenLinkRequest {
-  string spec = 1;           // e.g. "tcp:127.0.0.1:5760", "udp:0.0.0.0:14550", "serial:/dev/ttyACM0:115200"
+  // e.g. "tcp:127.0.0.1:5760", "udp:0.0.0.0:14550", "serial:/dev/ttyACM0:115200"; append
+  // "?profile=high" or "?profile=constrained-elrs" for a slow link (default full).
+  string spec = 1;
 }
 
 message OpenLinkReply {
@@ -571,7 +573,18 @@ message Event {
     CommandEvent command = 6;
     AlertEvent alert = 7;
     MissionEvent mission = 8;
+    LinkStreamsEvent link_streams = 9;
   }
+}
+
+// A link's stream-rate request finished (link profiles, plan 09 Step 1).
+message LinkStreamsEvent {
+  uint32 sysid = 1;
+  uint32 link_id = 2;
+  // full, high or constrained-elrs.
+  string profile = 3;
+  // One line per message whose rate was not set and read back; empty = all set.
+  repeated string problems = 4;
 }
 
 // Mission progress changed (MISSION_CURRENT / MISSION_ITEM_REACHED).

@@ -362,7 +362,7 @@ impl CoreApi for CoreService {
         &self,
         req: Request<pb::OpenLinkRequest>,
     ) -> Result<Response<pb::OpenLinkReply>, Status> {
-        let spec = req
+        let spec: dc_core::LinkTarget = req
             .into_inner()
             .spec
             .parse()
@@ -949,6 +949,17 @@ impl CoreApi for CoreService {
                     // Annunciator sounds are for a local display; clients sound alerts from
                     // AlertEvent levels.
                     Ok(CoreEvent::Sound { .. }) => continue,
+                    Ok(CoreEvent::LinkStreams {
+                        sysid,
+                        link,
+                        profile,
+                        problems,
+                    }) => Kind::LinkStreams(pb::LinkStreamsEvent {
+                        sysid: u32::from(sysid),
+                        link_id: link.0,
+                        profile: profile.key().into(),
+                        problems,
+                    }),
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 };

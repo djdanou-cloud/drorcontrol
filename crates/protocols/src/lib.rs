@@ -15,6 +15,7 @@ pub mod params;
 pub mod pattern;
 pub mod plan;
 pub mod rally;
+pub mod streams;
 pub mod survey;
 pub mod terrain;
 pub mod units;
