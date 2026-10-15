@@ -58,6 +58,7 @@ Exit criteria: all spikes pass or have an approved alternative; 30-min soak on 3
 * Safe command set v1: arm/disarm, mode change, RTL, land, takeoff, guided go-to (with interlocks, audit log).
 * `.tlog` record/replay v1; MAVLink inspector; docking workspaces; theme switcher.
 * Docs: operator handbook skeleton (connect/fly view), component gallery, perf dashboards.
+* Radio link track, Steps 1–2 ([below](#radio-link-track-expresslrs-and-crossfire)): link profiles (Full / High / Constrained-ELRS) with per-link adaptive stream rates; link-quality HUD (LQ/RSSI/SNR with source, DEGRADED state).
 Exit: 60 fps on reference Macs; 200 k msg/s burst without frame drops; 3 field sessions with test pilots on real vehicles; SUS ≥ 70.
 
 ## Phase 2 — Flight Planning, Terrain Following & Mission Upload/Download (S12–S18) → **M2**
@@ -74,6 +75,7 @@ Exit: round-trip fidelity (upload→download byte-equal semantics) across a gold
 * Accel/compass/radio calibration wizards with 3-D models; motor test + ESC cal; flight-mode & failsafe matrix; battery/sensor setup; SiK radio config; servo outputs; OSD editor; terminal.
 * Basic/extended tuning; MAVFTP; Lua script manager; vehicle config wizards (copter/plane/rover/sub/tracker).
 * Localisation framework + Hebrew/RTL pass 1; accessibility pass 1.
+* Radio link track, Step 3: `crsf-codec` (CRSF frames, CRC-8/DVB-S2, telemetry and RC packing) and the link `Framer` seam.
 Exit: new-vehicle-to-first-flight workflow completed unaided by 5 of 5 novices in usability tests; parameter table latency budgets met; firmware flashing success ≥ 99 % across the bench board list (≥ 12 boards), with no bricks.
 
 ## Phase 4 — Dataflash/Tlog Analytics, SITL Integration & Video Streaming (S28–S36) → **M4 feature-complete beta**
@@ -82,6 +84,7 @@ Exit: new-vehicle-to-first-flight workflow completed unaided by 5 of 5 novices i
 * Video: GStreamer pipeline, HW decode on all OS, overlay sync, recording, MAVLink camera/gimbal protocol; PiP and multi-stream.
 * NTRIP/RTK, ADS-B, antenna tracker routing, joystick/gamepad (`GameController`/XInput/SDL), Bluetooth, follow-me, plugin/scripting API, airspace layers.
 * Docs: complete protocol/hardware guide with verified-hardware tables; handbook all parts drafted.
+* Radio link track, Step 4: CRSF TX-module serial link (4a, receive only) and gamepad-to-CRSF RC output (4b, only after the owner's and safety lead's sign-off).
 Exit: **100 % parity rows implemented** (verified by `parity.yaml` dashboard); 4 GB log budgets met; 1080p video budget met; public beta channel open.
 
 ## Phase 5 — Hardening, Automated SITL Flight Testing, Field Beta & Production Release (S37–S46) → **M5 GA**
@@ -90,6 +93,25 @@ Exit: **100 % parity rows implemented** (verified by `parity.yaml` dashboard); 4
 * Performance and power tuning; accessibility & i18n completion; security review + external pentest; SBOM, licence audit; installers (DMG/MSI/MSIX/AppImage/Flatpak), auto-update (Sparkle/WinSparkle), crash reporting (opt-in).
 * Handbook finalised, translated (Hebrew), reviewed by test pilots; in-app help bundle validated; training material.
 Exit (GA gate): zero open Sev-1/Sev-2; parity 100 % implemented/tested/documented; no regressions vs. SITL golden flights; notarization/signing pipeline proven on 3 consecutive releases; V&V sign-off ([08](08-safety-vv.md)).
+
+## Radio link track: ExpressLRS and Crossfire
+
+Official support for ExpressLRS (ELRS) and TBS Crossfire (CRSF) links, planned in
+[09](09-elrs-crsf-support.md). It is added *inside* existing phases. It changes **no**
+milestone, exit criterion or parity row: its rows are in the parity matrix's "beyond Mission
+Planner" section ([02 §H](02-parity-matrix.md#h-beyond-mission-planner-par-ext)), which the M4
+parity gate does not count.
+
+| Step | Track | Phase / milestone | Needs |
+|------|-------|-------------------|-------|
+| 1 Link profiles (Full / High / Constrained-ELRS) and adaptive stream rates | 1 Constrained-bandwidth MAVLink | P1 → M1 | SITL `sim:ELRS` |
+| 2 Link-quality HUD and signal telemetry | 1 (and 2 once Step 3 lands) | P1 → M1 | SITL; UI shell |
+| 3 CRSF codec with unit, property and fuzz tests | 2 Native CRSF | P3 → M3 | none |
+| 4 TX-module serial driver (4a) and gamepad-to-CRSF channels (4b) | 2 | P4 → M4 | HIL bench with ELRS (and Crossfire) modules; 4b: owner and safety-lead sign-off |
+
+Estimate: about 4 person-weeks in P1 (core and HUD), 3 in P3, and 5 in P4 including the bench.
+That is inside each phase's contingency, so no re-baseline is needed. Owner: WS-MAVLINK, with
+WS-UI (HUD), WS-MACOS/WS-PLAT (input, serial) and WS-SAFETY (Step 4b).
 
 ## Team topology & resource allocation
 
@@ -139,3 +161,4 @@ Definition of Done: code + tests + docs (reference, handbook, in-app help) + par
 | R10 | Safety-relevant bug in command path | L | H | Single command pipeline, interlocks, mandatory SITL scenarios, independent review, field-beta restrictions |
 | R11 | Hardware/bench availability | M | M | Procure bench by S3; remote-accessible rigs |
 | R12 | Estimate error ±30 % | H | M | 10 % contingency + phase-gate re-baselining; MoSCoW within parity rows |
+| R13 | ELRS/Crossfire behaviour differs from source reading (closed Crossfire firmware; ELRS changes between 3.x and 4.x) | M | M | Facts pinned to versions in [09 §2](09-elrs-crsf-support.md#2-verified-facts); HIL checklist per firmware; SITL `sim:ELRS` scenario in CI |

@@ -2,7 +2,7 @@
 
 Next-generation, cross-platform ArduPilot ground control station — native macOS and Windows, glass-cockpit UX, headless Rust core.
 
-**Start here:** [`docs/plan/README.md`](docs/plan/README.md) — the master development plan (architecture, parity matrix, macOS layer, design system, analytics, documentation system, roadmap, V&V).
+**Start here:** [`docs/plan/README.md`](docs/plan/README.md) — the master development plan (architecture, parity matrix, macOS layer, design system, analytics, documentation system, roadmap, V&V, ExpressLRS/Crossfire link support).
 
 **Taking over the work (agents and people):** [`docs/coordination/HANDOVER.md`](docs/coordination/HANDOVER.md) — current state, open decisions, next tasks. Safety: [`docs/safety/hazards.md`](docs/safety/hazards.md). Mac-only tests: [`docs/dev/mac-test-runbook.md`](docs/dev/mac-test-runbook.md).
 

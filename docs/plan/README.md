@@ -26,6 +26,7 @@ A cross-platform ground control station (GCS) for ArduPilot vehicles that:
 | 06 | [Documentation architecture](06-documentation-system.md) | ADR/ADD, API refs, onboarding, protocol guide, operator handbook, in-app help |
 | 07 | [Roadmap, team, estimates](07-roadmap-team.md) | Phases 0–5, sprints, staffing, risks |
 | 08 | [Safety, V&V](08-safety-vv.md) | SITL-in-CI, HITL bench, command interlocks, degraded-link UX |
+| 09 | [ExpressLRS and Crossfire (CRSF)](09-elrs-crsf-support.md) | Constrained-bandwidth link profiles, link-quality HUD, CRSF codec, TX-module driver and gamepad-to-CRSF (P1–P4 track) |
 | — | [Future upgrades](future-upgrades.md) | Deferred until the hardware exists: 5K and ProMotion (120 Hz) display tests and targets |
 | — | [ADRs](adr/README.md) | Architecture Decision Records 0001–0007 + template |
 

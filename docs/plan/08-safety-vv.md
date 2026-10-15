@@ -134,7 +134,7 @@ stateDiagram-v2
 | **SIM** | SITL flag in vehicle/SYSID or user-set | `SIM` badge | Same code path, but clearly labelled |
 **Link state never blocks, delays or drops a confirmed command** ([ADR-0009](adr/0009-link-state-never-blocks-commands.md), product-owner decision 2026-10-11): heartbeat loss is not proof the uplink is down, and locking the operator out of recovery is the greater hazard. Link state informs (card, ribbon, failsafe preview) and adapts delivery (retransmit on every link until `COMMAND_ACK` or verified state); every command has a bounded lifetime (default 30 s RTL/Land, 2–3 s mode change, 10 s others; ADR-0011), is superseded by a newer conflicting command, and is reported `SENT — NOT CONFIRMED` until verified or `EXPIRED`. Only REPLAY has no command path (no vehicle).
 
-Thresholds are user-configurable within safe bounds and stored per link profile; transitions are logged and announced. A **watchdog** on the UI frame loop and on the core’s ingest loop raises `GCS SOFTWARE FAULT` banner if either stalls > 500 ms (UI) / > 2 s (ingest).
+Thresholds are user-configurable within safe bounds and stored per link profile (for ExpressLRS / Crossfire links, LQ and RSSI thresholds and the source of each value: [09](09-elrs-crsf-support.md) Step 2); transitions are logged and announced. A **watchdog** on the UI frame loop and on the core’s ingest loop raises `GCS SOFTWARE FAULT` banner if either stalls > 500 ms (UI) / > 2 s (ingest).
 
 ### 4.4 Other UI safety rules
 * No modal dialog may obscure the PFD’s critical annunciations; confirmation cards are anchored beside, not over, them.

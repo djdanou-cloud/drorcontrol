@@ -37,6 +37,7 @@ Goal: macOS is a **Tier-1** target — same feature set, same release cadence, s
 * Raw mode (`cfmakeraw`), `CLOCAL | CREAD`, hardware flow control (`CRTSCTS`) optional per profile (RFD900x), `VMIN=0/VTIME=0` with `kqueue`/`mio` readiness rather than blocking reads.
 * Low latency: set `IOSSDATALAT` where supported; disable FTDI latency timer coalescing via vendor settings where possible; measure with S0-2.
 * **Auto-baud probe:** a port can be opened only once, so rates are tried one after another — [115200, 57600, 921600, 460800, 230400, 500000, 1500000, 2000000, 38400] — accepting the first CRC-checked HEARTBEAT within ~1.5 s each (USB-CDC ignores the rate, so the first try succeeds); cache the result per `device_key`. Implemented in `link-serial::discovery::probe_baud` / `dc-cli ports --probe`.
+* **CRSF TX modules** (ExpressLRS / Crossfire, [09](09-elrs-crsf-support.md)) use non-standard rates (400 000; ELRS also 921 600, 1 870 000, 2 250 000, 3 750 000, 5 250 000) on a single-wire half-duplex pin through a USB–UART adapter: set with `IOSSIOSPEED`; the adapter's real maximum is measured on the bench. The MAVLink auto-baud probe does not apply to them.
 
 ### 2.4 Hotplug (no polling)
 ```rust
@@ -67,6 +68,7 @@ trait SerialBackend { fn list() -> Vec<PortInfo>; fn open(&PortInfo, &Config) ->
 * **Foreground rule:** by default controllers deliver input only to the frontmost app. A GCS must keep control when other windows are in front (e.g. video on a second display): set `GCController.shouldMonitorBackgroundEvents = true` (macOS 11.3+), and expose a visible "controller active" indicator + deadman requirement.
 * Mapping layer is cross-platform (`input` crate): axes → `MANUAL_CONTROL` (69) x/y/z/r, buttons → actions (arm, mode, RTL …) **never** mapped by default to hazardous actions; calibration, deadzone, expo, inversion, per-vehicle profiles stored as JSON.
 * Send rate 20–50 Hz, immediate zero-stick frame on disconnect, link loss, window-close; vehicle failsafe (`FS_GCS_ENABLE`) documented in handbook.
+* Second output (safety-gated): 16 RC channels in µs to a CRSF TX module, so DrorControl acts as the transmitter ([09](09-elrs-crsf-support.md) Step 4b); same deadman and neutral-on-start rules; RC failsafe on the vehicle instead of the GCS failsafe.
 * Windows uses XInput/RawInput/SDL; Linux evdev/SDL. A thin SDL3 backend unifies all if framework gaps appear.
 
 ## 4. Permissions, entitlements & sandboxing

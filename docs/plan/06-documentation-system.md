@@ -122,7 +122,7 @@ flowchart TD
 4. **Hardware connection manuals**
    * **Autopilot ports:** `SERIALn_PROTOCOL/BAUD` tables, pinouts for common FCs (Cube/Pixhawk 6X/Matek/Kakute), JST-GH wiring, power budgets, voltage levels.
    * **Telemetry radios:** RFD900x/RFD900ux (SiK AT config, `NETID`, air-rate, TX power legal limits per region), Holybro/3DR SiK 433/915 MHz, wiring to FC TELEM ports, ground-side USB, range/antenna guidance.
-   * **ExpressLRS / Crossfire:** MAVLink telemetry over CRSF/ELRS backpack and ground-side bridging, required `SERIALn` configs, bandwidth caveats and recommended stream rates, tested firmware versions.
+   * **ExpressLRS / Crossfire:** MAVLink telemetry over CRSF/ELRS backpack and ground-side bridging, required `SERIALn` configs, bandwidth caveats and recommended stream rates (the link profiles of [09](09-elrs-crsf-support.md)), `RSSI_TYPE`/`RC_OPTIONS` settings that decide whether the GCS sees RSSI or LQ, connecting DrorControl to a TX module's CRSF pin, tested firmware versions.
    * **IP links:** Ethernet/Wi-Fi/cellular/radio-modem UDP/TCP topologies, default ports (UDP 14550 GCS, TCP 5760 SITL), NAT/VPN, multicast, MTU/latency tuning, MAVLink signing for IP links.
    * **Peripherals:** RTK base/rover + NTRIP, ADS-B receivers (uAvionix/PingRX), antenna tracker, cameras/gimbals, companion computers (MAVProxy, mavlink-router).
    * Each manual has a **verified-hardware table** (model, firmware, date, tester) updated from the HITL bench ([08](08-safety-vv.md)).
